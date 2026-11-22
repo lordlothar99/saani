@@ -1,17 +1,19 @@
 """Saani's worktrees and landing (docs/SAANI.md): one worktree per task, landing on the integration branch one at a time. Standard library
 only; pure functions first (tests/test_core.py). The settings come from the project's saani.toml (saani/config.py).
 
-  saani start <issue> [--slug words] [--no-assign]   a worktree <wt>/<n>-<slug> on a branch <type>/<n>-<slug> from origin/<integration>
+  saani start <issue> [--slug words] [--no-assign] a worktree <wt>/<n>-<slug> on a branch <type>/<n>-<slug> from origin/<integration>
                                                     (type from the issue's GitHub Type; an issue with no Type is refused); build/ made,
                                                     the last timing report copied in, the issue assigned to the owner (the "in progress"
                                                     sign)
-  saani start <issue> --hotfix                        an urgent fix: the branch <type>/<n>-hotfix-<slug> from the prod tag (what is live),
+  saani start <issue> --hotfix                     an urgent fix: the branch <type>/<n>-hotfix-<slug> from the prod tag (what is live),
                                                     any Type (none: the hotfix default); it warns when production holds merged work that is
                                                     not live yet, it never refuses for that
   saani land [--keep] [--wait MIN] [--dry-run]      from inside a worker's worktree: take the landing lock, merge origin/<integration>,
          [--worktree PATH]                          rebuild the generated files, tier 1, fast-forward into the integration branch, release
                                                     the lock, remove the worktree; a hotfix never lands on the integration branch: tier 1
                                                     against production, the branch pushed and its pull request into production opened
+  saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
+                                                    branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
   saani test [--kind tier1|land|full] -- <cmd...>   run a test command through the test queue (saani/queue.py)

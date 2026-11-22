@@ -94,7 +94,7 @@ claude plugin update saani@saani          # then /reload-plugins in an open Clau
 **5. Work an issue.** In Claude Code: `/saani:start 42`, ask Claude to code it, then `/saani:land`. Or the same in a terminal:
 ```bash
 cd ~/projects/webshop
-saani start 42          # worktree ../webshop-wt/42-<slug> on feat/42-<slug>, from origin/dev
+saani start 42        # worktree ../webshop-wt/42-<slug> on feat/42-<slug>, from origin/dev
 cd ../webshop-wt/42-*
 # ... Claude (or you) codes and commits, with "refs #42", Why: and Undo:
 saani land            # lock → merge dev → rebuild → tier-1 tests → push → clean up
