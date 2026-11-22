@@ -54,9 +54,9 @@ def test_the_command_starts_and_says_its_version():
 
 
 def test_the_license_is_the_same_everywhere():
-    spdx = "PolyForm-Shield-1.0.0"
-    assert (ROOT / "LICENSE").read_text(encoding="utf-8").startswith("# PolyForm Shield License 1.0.0")
-    assert "Required Notice: Copyright" in (ROOT / "LICENSE").read_text(encoding="utf-8")
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert license_text.lstrip().startswith("GNU AFFERO GENERAL PUBLIC LICENSE")
+    assert "Version 3, 19 November 2007" in license_text
     plugin = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    assert plugin["license"] == spdx
-    assert "PolyForm Shield 1.0.0" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert plugin["license"] == "AGPL-3.0-only"
+    assert "AGPL-3.0-only" in (ROOT / "README.md").read_text(encoding="utf-8")
