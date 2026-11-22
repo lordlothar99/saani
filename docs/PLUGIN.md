@@ -23,7 +23,7 @@ harness, is a one-line change after the cost per landing is measured (#8). A wor
 | Scribe | Haiku | issue comments, labels, commit trailers |
 | Researcher | Sonnet | reads docs, releases and code, brings back the answer |
 | Sentinel (planned) | Sonnet | server diagnostics with a read-only key |
-| Deployer | Sonnet | runs `saani deploy` (dry run first, risks reported, the log read); deploys only when the owner asked, after their tap, with a deploy-only key it never touches |
+| Deployer | Sonnet | runs `saani deploy --dry-run`, reports the risks (the issues and commits in the range), reads a deploy log and says what a failure means; never deploys, never touches keys: the main session, which sees the owner, runs `saani deploy` or `saani merge --deploy` after the owner asks and taps their SSH agent |
 
 ## The pipeline from an issue to dev
 The Architect (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.

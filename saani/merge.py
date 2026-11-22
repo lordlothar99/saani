@@ -61,6 +61,12 @@ def refusal(pr, status, checks):
         return f"CI still running on {sha} ({c.ci_status_context} is pending): wait for it, then run saani merge again"
     if state != "success":
         return f"CI is red on {sha} ({c.ci_status_context}: {state}): fix it, land, then run saani ci pr"
+    return check_runs_problem(checks, sha)
+
+
+def check_runs_problem(checks, sha):
+    """Why the check runs of a commit (`gh api .../check-runs`) forbid going on: one failed, or one has not finished. None when all passed.
+    Shared by saani merge and saani deploy."""
     runs = (checks or {}).get("check_runs", [])
     bad = [r.get("name") for r in runs if r.get("status") == "completed" and r.get("conclusion") not in PASSED_CHECKS]
     if bad:
@@ -105,7 +111,7 @@ def merge_it(args):
         print(f"dry-run: gh pr merge {n} --merge")
         print(f"dry-run: then saani ci merged {n} (relabel, remove the finished auto runs)")
         if args.deploy:
-            print("dry-run: then the deploy" + ("" if deployer() else " (not available yet: the deployer is issue #5)"))
+            print("dry-run: then the deploy" + ("" if deployer() else " (not available yet: saani/deploy.py is missing)"))
         return 0
     gh.write("gh", "pr", "merge", str(n), "--repo", c.repo, "--merge", "--match-head-commit", sha)
     after = gh.json("gh", "pr", "view", str(n), "--repo", c.repo, "--json", "state") or {}
@@ -119,7 +125,7 @@ def merge_it(args):
         return code
     deploy = deployer()
     if deploy is None:
-        print("deploy is not available yet (the deployer is issue #5): the merge is done, nothing was deployed")
+        print("deploy is not available yet (saani/deploy.py is missing): the merge is done, nothing was deployed")
         return 2
     return deploy(args) or code
 

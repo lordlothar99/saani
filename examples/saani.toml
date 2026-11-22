@@ -36,9 +36,12 @@ lock_stale_hours = 2
 push_attempts = 3
 
 [deploy]
-command = []                     # e.g. ["ssh", "-i", "{key}", "deploy@shop.example", "deploy-prod"]; empty: saani deploy refuses
-dry_run = []                     # the same with a dry-run flag; empty: skipped
-checks = []                      # command lists run first, each must exit 0, e.g. [["ssh", "-i", "{key}", "deploy@shop.example", "check-disk"]]
+# {key} = the deploy key's path, {sha} = the commit checked (the server deploys exactly it). On the server, force a gate script that allows
+# only these exact commands (docs/SAANI.md, "Deploy"); never a bare command="deploy-prod": it would make every check deploy for real.
+command = []                     # e.g. ["ssh", "-i", "{key}", "deploy@shop.example", "deploy-prod", "{sha}"]; empty: saani deploy refuses
+dry_run = []                     # e.g. ["ssh", "-i", "~/.ssh/webshop_check", "deploy@shop.example", "deploy-prod", "--dry-run", "{sha}"]; empty: skipped
+checks = []                      # command lists run first, each must exit 0, e.g. [["ssh", "-i", "~/.ssh/webshop_check", "deploy@shop.example", "check-disk"]]
+                                 # (a second key, allowed only the checks and the dry run, so a mistake there cannot deploy)
 log_ok = ""                      # a regex the deploy's output must match to count as a success
 key = ""                         # the PATH of the deploy key, never its content, e.g. "~/.ssh/webshop_deploy"
 timeout_minutes = 30

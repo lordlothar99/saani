@@ -10,13 +10,14 @@ disable-model-invocation: true
 **Arguments:** `$ARGUMENTS`.
 
 Only the owner starts it; an auto run never does. The owner saying "deploy" in their own words in a session means `saani deploy`
-(`saani merge --deploy` does the merge first).
+(`saani merge --deploy` does the merge first). This session, which sees the owner, runs the real deploy; the `saani:deployer` agent only
+prepares and explains.
 
-1. Run `saani deploy --dry-run` first (or the `saani:deployer` agent, which does): the CI status on the production head, the issues in
-   production since the prod tag, the `[deploy]` checks and dry run. Say what would change and every refusal with its next step.
-2. Run `saani deploy $ARGUMENTS` only when the owner asked to deploy in this session. The owner then taps their SSH agent that holds the
-   key. The deploy's output goes to `build/saani-deploy-<UTC>.log`; on a success the prod tag moves (the one force push Saani does) and the
-   issues in the range labelled `in-main` get `✔ Deployed` and are closed.
+1. Run `saani deploy --dry-run` first (the `saani:deployer` agent can, and reports the risks): the CI status on the production head, the
+   issues in production since the prod tag, the `[deploy]` checks and dry run. Say what would change and every refusal with its next step.
+2. Run `saani deploy $ARGUMENTS` only when the owner asked to deploy in this session. Tell the owner to expect the tap of their SSH agent
+   (each command that uses the key may ask). The deploy's output is shown as it comes and kept in `build/saani-deploy-<UTC>.log`; on a success
+   the prod tag moves (the one force push Saani does) and the issues in the range labelled `in-main` get `✔ Deployed` and are closed.
 3. A failure: show the message, read the log, say what it means. Never touch the key, never work around a refusal.
 
 ## Running saani
