@@ -607,3 +607,27 @@ def test_landing_comments_the_issue_and_labels_it_and_says_so_when_gh_refuses(mo
         raise FileNotFoundError("gh")
     monkeypatch.setattr(core.subprocess, "run", missing)
     assert core.mark_on_dev("14", text) is False
+
+
+def test_a_card_carries_the_issue_type_github_holds(monkeypatch):
+    """`gh issue list --json` has no Type field, so every card showed "No type" although GitHub had one (#38): the Type is read from the REST
+    API, for the open issues (all pages) and the recently closed ones; an issue without a Type, or a refused call, has none."""
+    calls = []
+
+    def fake_run(*args, **kw):
+        calls.append(args)
+        if args[1] == "issue":
+            return json.dumps([{"number": 1, "title": "a", "labels": [], "state": "OPEN"}, {"number": 2, "title": "b", "labels": [], "state": "OPEN"}])
+        return "1\tBug\n3\tTask\n"                          # 2 has no Type; 3 is not in the list
+    monkeypatch.setattr(fp, "run", fake_run)
+    monkeypatch.setattr(fp, "cfg", lambda: type("Cfg", (), {"repo": "acme/webshop"})())
+    rows = fp.gh_issues("--state", "open", "--limit", "300")
+    assert [(r["number"], r["type"]) for r in rows] == [(1, "Bug"), (2, None)]
+    api = next(c for c in calls if c[1] == "api")
+    assert "--paginate" in api and "repos/acme/webshop/issues?state=open&per_page=100" in api
+    fp.gh_issues("--state", "closed", "--search", "closed:>=2026-11-15", "--limit", "40")
+    api = [c for c in calls if c[1] == "api"][-1]
+    url = next(a for a in api if a.startswith("repos/"))
+    assert "--paginate" not in api and "state=closed" in url and "since=2026-11-15T00:00:00Z" in url
+    monkeypatch.setattr(fp, "run", lambda *a, **k: json.dumps([{"number": 1, "title": "a", "labels": [], "state": "OPEN"}]) if a[1] == "issue" else "")
+    assert fp.gh_issues("--state", "open")[0]["type"] is None            # gh refused: no Type, the page falls back on the branch and the labels

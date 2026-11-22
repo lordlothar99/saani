@@ -659,9 +659,22 @@ def tests():
     return {"runs": runs, "tier1": sorted(tier1, key=lambda r: str(r.get("time")), reverse=True)[:6]}
 
 
+def issue_types(state, since=None):
+    """{issue number: its GitHub issue Type (Bug, Task, Feature...)} of the open or the closed issues. `gh issue list --json` has no Type field
+    (#38), so it is read from the REST API; an issue without a Type, or a refused call, is simply not in the dict."""
+    url = f"repos/{cfg().repo}/issues?state={state}&per_page=100" + (f"&since={since}T00:00:00Z" if since else "")
+    rows = run("gh", "api", *(["--paginate"] if state == "open" else []), url, "--jq",
+               r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")"', timeout=60)
+    pairs = (line.split("\t") for line in rows.splitlines() if "\t" in line)
+    return {int(n): t for n, t in pairs if t}
+
+
 def gh_issues(*filters):
     rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt,body", timeout=60)
-    return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"),
+    state = filters[filters.index("--state") + 1] if "--state" in filters else "open"
+    since = next(iter(re.findall(r"closed:>=(\d{4}-\d{2}-\d{2})", " ".join(filters))), None)
+    types = issue_types(state, since)
+    return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"), "type": types.get(r["number"]),
              "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title"),
              "glance": glance.parse(r.get("body"))}                  # the body itself stays here: the panel asks for it on demand
             for r in json.loads(rows or "[]")]
