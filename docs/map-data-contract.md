@@ -22,6 +22,7 @@ invented project, also served locally at `/mock-state.json`).
 | Field | Type | Meaning |
 |---|---|---|
 | `number`, `title`, `state`, `labels`, `milestone` | as GitHub | the issue |
+| `type` | `Bug`, `Task`, `Feature`... or `null` | the issue Type GitHub holds (read from the REST API: `gh issue list --json` has none); `null`: none set, the page falls back on the branch prefix and the labels |
 | `step` | string | `inbox`, `backlog`, `you`, `started`, `building`, `testing`, `landing`, `dev`, `pr`, `deploy`, `close`, `checks`, `done` |
 | `need` | `answer` \| `act` \| null | waits for the owner: the glowing ring |
 | `auto` | `{fit, why, source}` or absent | `fit` is `yes`, `partly` or `no`, `source` is `table`: read from the issue's At a glance table (`saani/glance.py`); absent: the page estimates it from the labels and says so |
