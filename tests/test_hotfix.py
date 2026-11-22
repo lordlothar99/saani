@@ -15,7 +15,7 @@ def test_any_type_can_be_a_hotfix_and_the_landing_knows_one_by_its_name(cfg):
         assert core.is_hotfix(name), name
         assert cfg.worker_branch.match(name), name                   # the hook and land still treat it as a worker's branch
         assert core.needs_trailers(name), name                       # Why: and Undo: as everywhere
-    for name in ("bug/12-login-loop", "task/7-not-a-hotfix-here", "dev", "main", "hotfix/12-x", "longrun/2026-11-22_0044"):
+    for name in ("bug/12-login-loop", "task/7-not-a-hotfix-here", "dev", "main", "hotfix/12-x", "auto/2026-11-22_0044"):
         assert not core.is_hotfix(name), name
 
 

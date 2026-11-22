@@ -6,7 +6,7 @@ rest, decided job by job. Standard library only; pure functions first (tests/tes
   saani ci pr [--head B]   the CI of the open integration -> production pull request: on GitHub (workflow_dispatch of `[ci] workflow`)
                            or on the PC (`[tests] check` then `[tests] full` in a temporary worktree at the pull request's head, the full
                            run through the test queue); either way the result is the commit status `[ci] status_context`
-  saani ci merged <PR>     after a merge into production: the relabel ran on GitHub, or `[ci] relabel`, or gh here; the finished long runs are removed
+  saani ci merged <PR>     after a merge into production: the relabel ran on GitHub, or `[ci] relabel`, or gh here; the finished auto runs are removed
   saani ci place <job>     print github or pc for one job, and why
   --dry-run                print every write (dispatch, status, enable/disable) instead of doing it
 
@@ -298,7 +298,7 @@ def cmd_pr(run, head=None, force_pc=False):
 
 def cmd_merged(run, number):
     """After a merge: the relabel (GitHub's workflow when it is on (sync); otherwise, or when it was refused, `[ci] relabel` or gh here) and the
-    removal of the long runs that are finished."""
+    removal of the auto runs that are finished."""
     c = cfg()
     pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "state,mergedAt,title,body,commits") or {}
     if pr.get("state") != "MERGED":
@@ -313,7 +313,7 @@ def cmd_merged(run, number):
         if ok:
             print(f"the relabel ran on GitHub (run {ok[0]['databaseId']}): nothing to do here")
             log({"job": "relabel", "pr": number, "place": "github", "result": "passed"})
-            core.remove_longruns(core.finished_longruns(before=merged_at(pr)), run.dry)
+            core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
             return 0
     if c.relabel:
         print("the relabel did not run on GitHub: running it here", flush=True)
@@ -327,12 +327,12 @@ def cmd_merged(run, number):
             log({"job": "relabel", "pr": number, "place": "pc", "result": "passed" if code == 0 else "failed"})
     else:
         code = relabel_issues(run, number, pr)
-    core.remove_longruns(core.finished_longruns(before=merged_at(pr)), run.dry)
+    core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
     return code
 
 
 def merged_at(pr):
-    """When the pull request merged, as a naive local time (a long run that began before it is over); None if unknown."""
+    """When the pull request merged, as a naive local time (an auto run that began before it is over); None if unknown."""
     try:
         return datetime.datetime.fromisoformat(pr["mergedAt"].replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
     except (KeyError, TypeError, ValueError):

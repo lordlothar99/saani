@@ -29,7 +29,7 @@ REF = re.compile(r"\brefs?\s+((?:#\d+[,\s]*(?:and\s+)?)+)", re.IGNORECASE)
 NUMBER = re.compile(r"#(\d+)")
 GENERATED_COMMIT = re.compile(r"^Generated files rebuilt", re.IGNORECASE)
 NOT_MEASURED = {"owner_waiting_time": "the map's 'Waiting for you' zone and the issue comments, by hand",
-                "owner_interventions": "the long-run reports and the chat, by hand"}
+                "owner_interventions": "the auto-run reports and the chat, by hand"}
 
 
 # ---------------------------------------------------------------- pure functions (tested)

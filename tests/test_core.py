@@ -43,7 +43,7 @@ def test_a_commit_on_a_worker_branch_or_dev_needs_why_and_undo():
     assert core.missing_trailers("Do it\n\nWhy: because\n") == ["Undo"]
     assert core.missing_trailers("Do it\n\nWhy:\nUndo: revert\n") == ["Why"]      # a trailer needs some text
     assert core.needs_trailers("dev") and core.needs_trailers("bug/12-fix-x")
-    assert not core.needs_trailers("main") and not core.needs_trailers("longrun/2026-11-21_2300")
+    assert not core.needs_trailers("main") and not core.needs_trailers("auto/2026-11-21_2300")
 
 
 def test_conflicts_in_generated_files_are_solved_by_the_landing_and_the_others_by_the_worker():
@@ -99,7 +99,7 @@ def test_the_settings_shape_the_branch_names_and_the_trailers(cfg):
 
 
 def test_land_with_worktree_takes_only_a_workers_worktree_of_this_repository(tmp_path):
-    """A long run cannot change folder, so it names the worktree; the main checkout and foreign folders are refused."""
+    """An auto run cannot change folder, so it names the worktree; the main checkout and foreign folders are refused."""
     main, wt, other = tmp_path / "webshop", tmp_path / "webshop-wt" / "41-x", tmp_path / "elsewhere"
     for p in (main, wt, other):
         p.mkdir(parents=True)
@@ -109,15 +109,15 @@ def test_land_with_worktree_takes_only_a_workers_worktree_of_this_repository(tmp
     assert core.known_worktree(str(other), known) is None
 
 
-def test_prune_deletes_merged_branches_but_never_dev_main_a_long_run_or_a_branch_in_a_worktree():
+def test_prune_deletes_merged_branches_but_never_dev_main_an_auto_run_or_a_branch_in_a_worktree():
     merged = ["dev", "main", "master", "* dev", "+ task/523-local-status-page", "feat/411-powers", "origin/feat/471-own-currency",
-              "origin/HEAD -> origin/main", "longrun/2026-11-22_0044", "bug/12-hotfix-login", "feat/411-powers", ""]
+              "origin/HEAD -> origin/main", "auto/2026-11-22_0044", "longrun/2026-11-21_2300", "bug/12-hotfix-login", "feat/411-powers", ""]
     held = {"task/523-local-status-page", "dev"}
     assert core.prunable(merged, held) == ["bug/12-hotfix-login", "feat/411-powers", "feat/471-own-currency"]
     assert core.prunable([], held) == []
 
 
-def test_saani_new_warns_about_an_issue_without_a_milestone_unless_it_is_an_idea():
+def test_saani_start_warns_about_an_issue_without_a_milestone_unless_it_is_an_idea():
     assert core.milestone_warning({"milestone": "v1.1.0", "labels": []}, 7) is None
     assert core.milestone_warning({"milestone": None, "labels": ["idea", "ui"]}, 7) is None
     text = core.milestone_warning({"milestone": None, "labels": ["ui"]}, 7)
@@ -125,8 +125,8 @@ def test_saani_new_warns_about_an_issue_without_a_milestone_unless_it_is_an_idea
     assert core.milestone_warning({}, 8).startswith("WARNING: issue #8")
 
 
-def test_saani_longrun_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path, monkeypatch, capsys):
-    """longrun-<id> beside the other worktrees, on the branch longrun/<id> from the integration branch (prune keeps it); an id twice is refused."""
+def test_saani_auto_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path, monkeypatch, capsys):
+    """auto-<id> beside the other worktrees, on the branch auto/<id> from the integration branch (prune keeps it); an id twice is refused."""
     import subprocess
     from saani import config
 
@@ -138,20 +138,20 @@ def test_saani_longrun_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path
     sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
     sh("git", "push", "-q", "origin", "HEAD:dev", cwd=main)
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
-    core.cmd_longrun(type("A", (), {"id": "2026-11-22_1500"})())
-    wt = tmp_path / "webshop-wt" / "longrun-2026-11-22_1500"
+    core.cmd_auto(type("A", (), {"id": "2026-11-22_1500"})())
+    wt = tmp_path / "webshop-wt" / "auto-2026-11-22_1500"
     assert wt.is_dir() and (wt / "build").is_dir()
     out = capsys.readouterr().out
-    assert "longrun/2026-11-22_1500" in out and str(wt) in out
-    assert core.git("branch", "--show-current", cwd=wt) == "longrun/2026-11-22_1500"
+    assert "auto/2026-11-22_1500" in out and str(wt) in out
+    assert core.git("branch", "--show-current", cwd=wt) == "auto/2026-11-22_1500"
     with pytest.raises(SystemExit, match="already exists"):
-        core.cmd_longrun(type("A", (), {"id": "2026-11-22_1500"})())
+        core.cmd_auto(type("A", (), {"id": "2026-11-22_1500"})())
     with pytest.raises(SystemExit, match="letters, digits"):
-        core.cmd_longrun(type("A", (), {"id": "a b"})())
+        core.cmd_auto(type("A", (), {"id": "a b"})())
 
 
-def test_finished_long_runs_are_removed_but_never_a_dirty_or_a_recent_one(tmp_path, monkeypatch):
-    """A long run's folder holds no commits, so a finished run is told by its age: older than `before` (or 12 hours), clean and merged (#28)."""
+def test_finished_auto_runs_and_old_longrun_ones_are_removed_but_never_a_dirty_or_a_recent_one(tmp_path, monkeypatch):
+    """An auto run's folder holds no commits, so a finished run is told by its age: older than `before` (or 12 hours), clean and merged (#28)."""
     import datetime
     import subprocess
     import time
@@ -167,20 +167,23 @@ def test_finished_long_runs_are_removed_but_never_a_dirty_or_a_recent_one(tmp_pa
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
     now = time.strftime("%Y-%m-%d_%H%M")
     for stamp in ("2026-11-01_1000", "2026-11-01_1100", now):
-        core.cmd_longrun(type("A", (), {"id": stamp})())
+        core.cmd_auto(type("A", (), {"id": stamp})())
     wt = tmp_path / "webshop-wt"
-    (wt / "longrun-2026-11-01_1100" / "notes.txt").write_text("not committed", encoding="utf-8")        # a dirty one
-    found = core.finished_longruns(cwd=main)
-    assert [b for _, b in found] == ["longrun/2026-11-01_1000"]                                       # not the dirty one, not today's
-    assert [b for _, b in core.finished_longruns(before=datetime.datetime(2099, 1, 1), cwd=main)] == ["longrun/2026-11-01_1000", f"longrun/{now}"]
-    assert core.remove_longruns(found, cwd=main) == 1
-    assert not (wt / "longrun-2026-11-01_1000").exists()
-    assert "longrun/2026-11-01_1000" not in core.git("branch", "--format=%(refname:short)", cwd=main).splitlines()
-    assert (wt / "longrun-2026-11-01_1100").is_dir()
+    sh("git", "worktree", "add", "--no-track", "-b", "longrun/2026-11-01_0900", str(wt / "longrun-2026-11-01_0900"), "origin/dev", cwd=main)   # made before the rename
+    (wt / "auto-2026-11-01_1100" / "notes.txt").write_text("not committed", encoding="utf-8")        # a dirty one
+    found = core.finished_auto_runs(cwd=main)
+    assert [b for _, b in found] == ["auto/2026-11-01_1000", "longrun/2026-11-01_0900"]                                       # not the dirty one, not today's
+    assert [b for _, b in core.finished_auto_runs(before=datetime.datetime(2099, 1, 1), cwd=main)] == ["auto/2026-11-01_1000", f"auto/{now}", "longrun/2026-11-01_0900"]
+    assert core.remove_auto_runs(found, cwd=main) == 2
+    assert not (wt / "auto-2026-11-01_1000").exists()
+    assert "auto/2026-11-01_1000" not in core.git("branch", "--format=%(refname:short)", cwd=main).splitlines()
+    assert not (wt / "longrun-2026-11-01_0900").exists()
+    assert (wt / "auto-2026-11-01_1100").is_dir()
 
 
-def test_a_long_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):
+def test_an_auto_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):
     import datetime
-    assert core.longrun_started("longrun/2026-11-22_1513") == datetime.datetime(2026, 11, 22, 15, 13)
-    assert core.longrun_started("longrun/nightly") is None
-    assert core.longrun_started("longrun/nightly", tmp_path) is not None
+    assert core.auto_started("auto/2026-11-22_1513") == datetime.datetime(2026, 11, 22, 15, 13)
+    assert core.auto_started("longrun/2026-11-22_1513") == datetime.datetime(2026, 11, 22, 15, 13)      # the old name
+    assert core.auto_started("auto/nightly") is None
+    assert core.auto_started("auto/nightly", tmp_path) is not None

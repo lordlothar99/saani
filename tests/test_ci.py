@@ -215,8 +215,8 @@ def test_the_issues_a_pull_request_names_come_from_its_title_body_and_commits():
 def test_after_a_merge_the_issues_in_dev_swap_to_in_main_by_gh_when_no_relabel_command_is_set(jobs, monkeypatch, capsys):
     from saani import core
     cleaned = []
-    monkeypatch.setattr(core, "finished_longruns", lambda before=None, cwd=None: [(None, "longrun/2026-11-01_1000")])
-    monkeypatch.setattr(core, "remove_longruns", lambda found, dry=False, cwd=None: cleaned.append(found))
+    monkeypatch.setattr(core, "finished_auto_runs", lambda before=None, cwd=None: [(None, "auto/2026-11-01_1000")])
+    monkeypatch.setattr(core, "remove_auto_runs", lambda found, dry=False, cwd=None: cleaned.append(found))
     monkeypatch.setattr(fci, "log", lambda entry: None)
     jobs.relabel = None
     gh = FakeMergeGh({("pr", "view"): MERGED, ("workflow", "list"): [],
@@ -227,7 +227,7 @@ def test_after_a_merge_the_issues_in_dev_swap_to_in_main_by_gh_when_no_relabel_c
     assert fci.cmd_merged(gh, 26) == 0
     edited = sorted(int(w[3]) for w in gh.written if w[:3] == ("gh", "issue", "edit"))
     assert edited == [2, 12] and all("--add-label" in w and "in-main" in w for w in gh.written)
-    assert cleaned == [[(None, "longrun/2026-11-01_1000")]]                                        # the finished long run goes too
+    assert cleaned == [[(None, "auto/2026-11-01_1000")]]                                        # the finished auto run goes too
 
 
 def test_a_pull_request_that_is_not_merged_relabels_nothing(jobs, capsys):
