@@ -266,7 +266,6 @@ def cmd_pr(run, head=None, force_pc=False):
     if not prs:
         raise SystemExit(f"no open {head} -> {c.production} pull request")
     number, sha = prs[0]["number"], prs[0]["headRefOid"]
-    comment_in_pr(run, number, prs[0].get("url"))
     if run.read("git", "rev-parse", f"origin/{head}", check=False) != sha:
         run.read("git", "fetch", "--quiet", "origin")
     b = current_budget(run)
@@ -294,6 +293,7 @@ def cmd_pr(run, head=None, force_pc=False):
     log({"job": job, "pr": number, "sha": sha, "place": where, "why": why, "result": result, "minutes": minutes,
          "minutes_left_before": b["left"]})
     print(f"{c.ci_status_context} on {sha[:7]}: {state}")
+    comment_in_pr(run, number, prs[0].get("url"))
     return 0 if state == "success" else 1
 
 
@@ -308,12 +308,11 @@ def cmd_merged(run, number):
     relabel = c.ci_jobs.get("relabel", {})
     states = {w["name"]: w["state"] for w in run.json("gh", "workflow", "list", "--repo", c.repo, "--all", "--json", "name,state") or []}
     if relabel.get("workflow") and states.get(relabel["workflow"]) == "active":
-        runs = run.json("gh", "run", "list", "--repo", c.repo, "--workflow", relabel["workflow"], "--limit", "5",
-                        "--json", "databaseId,conclusion,displayTitle") or []
-        ok = [r for r in runs if r.get("conclusion") == "success"]
+        ok = relabel_run_after_merge(run, relabel["workflow"], pr.get("mergedAt"))
         if ok:
             print(f"the relabel ran on GitHub (run {ok[0]['databaseId']}): nothing to do here")
             log({"job": "relabel", "pr": number, "place": "github", "result": "passed"})
+            comment_on_main(run, number, pr)
             core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
             return 0
     if c.relabel:
@@ -328,8 +327,24 @@ def cmd_merged(run, number):
             log({"job": "relabel", "pr": number, "place": "pc", "result": "passed" if code == 0 else "failed"})
     else:
         code = relabel_issues(run, number, pr)
+    if code == 0:
+        comment_on_main(run, number, pr)
     core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
     return code
+
+
+def relabel_run_after_merge(run, workflow, merged, tries=12, pause=5):
+    """The successful relabel run of `workflow` created at or after the merge (`merged`, ISO time), or []: an older run belongs to an earlier
+    merge. Right after a merge the run is not there yet, so it is polled for about a minute (`tries` x `pause` seconds); never in a dry run."""
+    for attempt in range(tries):
+        runs = run.json("gh", "run", "list", "--repo", cfg().repo, "--workflow", workflow, "--limit", "5",
+                        "--json", "databaseId,conclusion,displayTitle,createdAt") or []
+        ok = [r for r in runs if r.get("conclusion") == "success" and merged and r.get("createdAt", "") >= merged]
+        if ok or run.dry or not merged:
+            return ok
+        if attempt + 1 < tries:
+            time.sleep(pause)
+    return []
 
 
 def merged_at(pr):
@@ -349,13 +364,28 @@ def issues_named(pr):
 
 
 def comment_in_pr(run, number, url=None):
-    """`In PR` on each issue the pull request names, once per pull request and issue; a refusal only prints."""
+    """`In PR` on each named issue that carries the in-dev label, once per pull request and issue. A gh failure only warns."""
     c = cfg()
-    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "title,body,commits") or {}
+    try:
+        pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "title,body,commits") or {}
+    except (SystemExit, OSError, ValueError) as e:
+        print(f"could not read pull request #{number} to comment its issues: {e}")
+        return
     fields = {"PR": f"#{number}", **({"URL": url} if url else {})}
     for n in issues_named(pr):
         if n != number:
-            comments.try_post(n, "in-pr", fields, io=run, once=f"#{number}")
+            comments.try_post(n, "in-pr", fields, io=run, once=f"#{number}", needs={c.labels["in_dev"]})
+
+
+def comment_on_main(run, number, pr):
+    """`On main` on each named issue that carries in-main or in-dev, once per pull request: after the merge is confirmed, whoever did the
+    relabel (this is also the retry of a run that stopped halfway). A gh failure only warns."""
+    c = cfg()
+    oid = (pr.get("mergeCommit") or {}).get("oid")
+    fields = {"PR": f"#{number}", **({"Merge commit": oid[:7]} if oid else {})}
+    for n in issues_named(pr):
+        if n != number:
+            comments.try_post(n, "on-main", fields, io=run, labels=False, once=f"#{number}", needs={c.labels["in_main"], c.labels["in_dev"]})
 
 
 def relabel_issues(run, number, pr):
@@ -374,9 +404,6 @@ def relabel_issues(run, number, pr):
             print(e)
             failed += 1
             continue
-        oid = (pr.get("mergeCommit") or {}).get("oid")
-        comments.try_post(n, "on-main", {"PR": f"#{number}", **({"Merge commit": oid[:7]} if oid else {})}, io=run, labels=False,
-                          once=f"#{number}")
     if not run.dry:
         log({"job": "relabel", "pr": number, "place": "pc", "result": "failed" if failed else "passed"})
     return 1 if failed else 0

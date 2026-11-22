@@ -17,7 +17,7 @@ history. Tables and checkboxes over prose.
 | `### 🔗 Linked` | a related issue appears | a table: issue, relation |
 
 `saani comment <n> <kind> [--text ...] [--field KEY=VALUE ...]` posts any of them (kinds: started, review, blocked, question, progress,
-on-dev, in-pr, on-main, deployed, linked), as a one-row table of the fields, then the text, and sets the matching label.
+on-dev, in-pr, on-main, deployed, linked), as a one-row table of the fields, a blank line, then the text, and sets the matching label.
 
 ## Examples
 ```markdown
@@ -25,6 +25,7 @@ on-dev, in-pr, on-main, deployed, linked), as a one-row table of the fields, the
 | Commit | Tests | Next |
 |---|---|---|
 | abc1234 | tier 1: 312 passed (3 min) | goes to main with the next pull request |
+
 - [x] criterion 1
 - [ ] criterion 2 → follow-up #n
 ```
@@ -36,5 +37,6 @@ Context: the release gate reads checks only; a gate comment also counts as green
 |---|---|---|
 | Read the gate comment | one source of truth with the release | one more API call |
 | Ignore it | simpler | the map shows a green PR as pending |
+
 **Recommendation:** read the gate comment.
 ```

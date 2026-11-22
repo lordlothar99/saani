@@ -39,6 +39,7 @@ def render(kind, fields=None, text=""):
         lines += ["| " + " | ".join(cell(k) for k in fields) + " |", "|" + "---|" * len(fields),
                   "| " + " | ".join(cell(v) for v in fields.values()) + " |"]
     if text:
+        lines += [""] if fields else []
         lines.append(text)
     return "\n".join(lines)
 
@@ -73,7 +74,7 @@ class Direct:
         except OSError as e:
             raise SystemExit(f"cannot run {cmd[0]}: {e}")
         if r.returncode:
-            raise SystemExit(f"failed: {' '.join(cmd[:4])}\n{(getattr(r, "stderr", "") or "").strip()}")
+            raise SystemExit("failed: " + " ".join(cmd[:4]) + "\n" + (getattr(r, "stderr", "") or "").strip())
         return (getattr(r, "stdout", "") or "").strip()
 
     def json(self, *cmd):
@@ -87,32 +88,44 @@ class Direct:
         return self.read(*cmd)
 
 
-def posted(number, kind, needle, io=None):
-    """True when a comment of the issue already has the kind's heading and `needle` (a pull request as `#12`)."""
+def issue_state(number, io=None):
+    """({labels}, [comment bodies]) of the issue, in one read."""
     io = io or Direct()
-    data = io.json("gh", "issue", "view", str(number), "--repo", cfg().repo, "--json", "comments") or {}
-    heading = KINDS[kind][0]
+    data = io.json("gh", "issue", "view", str(number), "--repo", cfg().repo, "--json", "labels,comments") or {}
+    return ({x.get("name") for x in data.get("labels") or []}, [c.get("body") or "" for c in data.get("comments") or []])
+
+
+def has_comment(bodies, kind, needle):
+    """True when one of the comment bodies has the kind's heading and `needle` (a pull request as `#12`, not as a prefix of `#120`)."""
     pattern = re.compile(re.escape(needle) + r"(?!\d)")
-    return any(heading in (c.get("body") or "") and pattern.search(c.get("body") or "") for c in data.get("comments") or [])
+    return any(KINDS[kind][0] in b and pattern.search(b) for b in bodies)
 
 
-def post(number, kind, fields=None, text="", io=None, labels=True, once=None):
-    """Comment issue `number` with a comment of `kind`, then apply the kind's label change (`labels=False`: the caller did).
-    `once`: a needle; when a comment of the issue already has the heading and the needle nothing is posted (False returned).
-    Returns True when posted. A refusal by gh raises SystemExit."""
-    c = cfg()
-    io = io or Direct()
-    if once and posted(number, kind, once, io):
-        return False
-    io.write("gh", "issue", "comment", str(number), "--repo", c.repo, "--body", render(kind, fields, text))
+def apply_labels(number, kind, io=None):
+    """The kind's label change, one `gh issue edit` (nothing when the kind has none)."""
     add, remove = label_changes(kind)
-    if labels and (add or remove):
-        cmd = ["gh", "issue", "edit", str(number), "--repo", c.repo]
+    if add or remove:
+        cmd = ["gh", "issue", "edit", str(number), "--repo", cfg().repo]
         if remove:
             cmd += ["--remove-label", remove]
         if add:
             cmd += ["--add-label", add]
-        io.write(*cmd)
+        (io or Direct()).write(*cmd)
+
+
+def post(number, kind, fields=None, text="", io=None, labels=True, once=None, needs=None):
+    """Comment issue `number` with a comment of `kind`, then apply the kind's label change (`labels=False`: the caller did).
+    `once`: a needle; nothing is posted (False returned) when a comment of the issue already has the heading and the needle.
+    `needs`: label names; nothing is posted unless the issue carries one of them. Both share one read of the issue.
+    Returns True when posted. A refusal by gh raises SystemExit."""
+    io = io or Direct()
+    if once or needs:
+        have, bodies = issue_state(number, io)
+        if (needs and not have & set(needs)) or (once and has_comment(bodies, kind, once)):
+            return False
+    io.write("gh", "issue", "comment", str(number), "--repo", cfg().repo, "--body", render(kind, fields, text))
+    if labels:
+        apply_labels(number, kind, io)
     return True
 
 

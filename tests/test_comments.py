@@ -12,11 +12,14 @@ class FakeIo:
     """The io of comments.post: reads answered from `existing` (the issue's comments), writes recorded."""
     dry = False
 
-    def __init__(self, existing=()):
+    def __init__(self, existing=(), labels=("in-dev",)):
         self.existing, self.written = [{"body": b} for b in existing], []
+        self.labels = {n: [{"name": x} for x in ls] for n, ls in labels.items()} if isinstance(labels, dict) else None
+        self.default = [] if isinstance(labels, dict) else [{"name": x} for x in labels]
 
     def json(self, *cmd):
-        return {"comments": self.existing}
+        n = int(cmd[3]) if cmd[:3] == ("gh", "issue", "view") else 0
+        return {"comments": self.existing, "labels": (self.labels or {}).get(n, self.default)}
 
     def write(self, *cmd):
         self.written.append(cmd)
@@ -30,7 +33,7 @@ class Result:
 
 def test_a_comment_is_its_heading_then_the_fields_as_a_one_row_table_then_the_text():
     text = comments.render("started", {"Branch": "feat/5-x", "Worktree": "5-x"}, "Three bullets.")
-    assert text.splitlines() == ["### ▶ Started", "| Branch | Worktree |", "|---|---|", "| feat/5-x | 5-x |", "Three bullets."]
+    assert text.splitlines() == ["### ▶ Started", "| Branch | Worktree |", "|---|---|", "| feat/5-x | 5-x |", "", "Three bullets."]
     assert comments.render("blocked", None, "waits for #4") == "### ⛔ Blocked\nwaits for #4"
     assert "a\\|b" in comments.render("linked", {"Issue": "a|b"})
 
@@ -66,6 +69,12 @@ def test_a_pull_request_is_commented_once_per_issue():
     assert comments.post(5, "in-pr", {"PR": "#70"}, io=FakeIo(["### 📦 In PR\n| #7 |"]), once="#70") is True      # #7 is not #70
     assert comments.post(5, "in-pr", {"PR": "#8"}, io=io, once="#8") is True
     assert comments.post(5, "in-pr", {"PR": "#7"}, io=FakeIo(["### 🚀 On main\n| #7 |"]), once="#7") is True     # another kind
+
+
+def test_nothing_is_posted_on_an_issue_without_the_needed_label():
+    io = FakeIo(labels=["ui"])
+    assert comments.post(5, "in-pr", io=io, needs={"in-dev"}) is False and io.written == []
+    assert comments.post(5, "in-pr", io=FakeIo(labels=["in-dev"]), needs={"in-dev"}) is True
 
 
 def test_the_command_posts_with_gh_and_a_dry_run_prints_instead(monkeypatch, capsys):
@@ -125,8 +134,8 @@ def test_start_posts_started_with_the_folder_name_only_unless_no_comment(monkeyp
 
 class FakeCi(FakeIo):
     """ci.Run stand-in: `pr view` answers `pr`, issue views answer `existing` comments, writes recorded."""
-    def __init__(self, pr, existing=()):
-        super().__init__(existing)
+    def __init__(self, pr, existing=(), labels=("in-dev",)):
+        super().__init__(existing, labels)
         self.pr = pr
 
     def json(self, *cmd):
@@ -137,38 +146,129 @@ class FakeCi(FakeIo):
 
 def test_ci_pr_comments_in_pr_on_each_issue_the_pull_request_names_once():
     pr = {"title": "Release (refs #2)", "body": "#3", "commits": [{"messageHeadline": "x (refs #2)", "messageBody": ""}]}
-    run = FakeCi(pr)
+    run = FakeCi(pr, labels={2: ["in-dev"], 3: ["ui"]})                # #3 is not on dev: left alone
     fci.comment_in_pr(run, 7, "https://github.com/acme/webshop/pull/7")
     said = [w for w in run.written if w[2] == "comment"]
-    assert sorted(w[3] for w in said) == ["2", "3"]
+    assert sorted(w[3] for w in said) == ["2"]
     assert "| PR | URL |" in said[0][-1] and "| #7 | https://github.com/acme/webshop/pull/7 |" in said[0][-1]
-    again = FakeCi(pr, existing=["### 📦 In PR\n| #7 |"])
+    again = FakeCi(pr, existing=["### 📦 In PR\n| #7 |"], labels={2: ["in-dev"]})
     fci.comment_in_pr(again, 7)
     assert again.written == []
 
 
-def test_ci_merged_comments_on_main_on_each_relabelled_issue_once(cfg, monkeypatch):
+MERGED = {"state": "MERGED", "mergedAt": "2026-11-22T14:26:00Z", "title": "Release (refs #2, #4, #5)", "body": "", "commits": [],
+          "mergeCommit": {"oid": "abcdef0123456789"}}
+
+
+class MergeGh(FakeIo):
+    """ci.Run for `ci merged`: #2 in dev, #4 in main and already told, #5 neither; a relabel workflow that may have run."""
+    def __init__(self, workflow_ran=False):
+        super().__init__()
+        self.workflow_ran = workflow_ran
+
+    def json(self, *cmd):
+        if cmd[:3] == ("gh", "pr", "view"):
+            return MERGED
+        if cmd[:3] == ("gh", "workflow", "list"):
+            return [{"name": "Relabel merged issues", "state": "active"}] if self.workflow_ran else []
+        if cmd[:3] == ("gh", "run", "list"):
+            return [{"databaseId": 1, "conclusion": "success", "createdAt": "2026-11-22T14:27:00Z"}]
+        n = cmd[3]
+        if n == "2":
+            return {"labels": [{"name": "in-dev"}], "comments": []}
+        if n == "4":
+            return {"labels": [{"name": "in-main"}], "comments": [{"body": "### 🚀 On main\n| #9 | abcdef0 |"}]}
+        return {"labels": [{"name": "ui"}], "comments": []}
+
+
+@pytest.fixture
+def merged_env(cfg, monkeypatch):
     monkeypatch.setattr(core, "finished_auto_runs", lambda before=None, cwd=None: [])
     monkeypatch.setattr(core, "remove_auto_runs", lambda found, dry=False, cwd=None: None)
     monkeypatch.setattr(fci, "log", lambda entry: None)
     cfg.relabel = None
-    cfg.ci_jobs = {}
-    merged = {"state": "MERGED", "mergedAt": "2026-11-22T14:26:00Z", "title": "Release (refs #2, #4)", "body": "",
-              "commits": [], "mergeCommit": {"oid": "abcdef0123456789"}}
+    cfg.ci_jobs = {"relabel": {"minutes": 1, "heavy": False, "what": "x", "workflow": "Relabel merged issues"}}
+    return cfg
 
-    class Gh(FakeIo):
-        def json(self, *cmd):
-            if cmd[:3] == ("gh", "pr", "view"):
-                return merged
-            if cmd[:3] == ("gh", "workflow", "list"):
-                return []
-            if cmd[3] == "4":      # already told
-                return {"labels": [{"name": "in-dev"}], "comments": [{"body": "### 🚀 On main\n| #9 | abcdef0 |"}]}
-            return {"labels": [{"name": "in-dev"}], "comments": []}
-    gh = Gh()
-    assert fci.cmd_merged(gh, 9) == 0
+
+def on_main_said(gh):
     said = [w for w in gh.written if w[2] == "comment"]
-    assert [w[3] for w in said] == ["2"] and "| PR | Merge commit |" in said[0][-1] and "| #9 | abcdef0 |" in said[0][-1]
+    return [w[3] for w in said], said
+
+
+def test_ci_merged_comments_on_main_when_it_relabels_itself_once(merged_env):
+    gh = MergeGh()
+    assert fci.cmd_merged(gh, 9) == 0
+    who, said = on_main_said(gh)
+    assert who == ["2"] and "| PR | Merge commit |" in said[0][-1] and "| #9 | abcdef0 |" in said[0][-1]
     edits = [w for w in gh.written if w[2] == "edit"]
-    assert sorted(w[3] for w in edits) == ["2", "4"] and all("--remove-label" in w and "--add-label" in w for w in edits)
-    assert len(edits) == 2           # the comment adds no second label edit
+    assert [w[3] for w in edits] == ["2"] and "--remove-label" in edits[0]       # the comment adds no second label edit
+
+
+def test_ci_merged_comments_on_main_when_the_workflow_did_the_relabel(merged_env):
+    gh = MergeGh(workflow_ran=True)
+    assert fci.cmd_merged(gh, 9) == 0
+    assert on_main_said(gh)[0] == ["2"] and not [w for w in gh.written if w[2] == "edit"]
+
+
+def test_ci_merged_comments_on_main_when_the_relabel_command_did_it(merged_env, monkeypatch):
+    merged_env.relabel = ["{python}", "relabel.py"]
+    monkeypatch.setattr(fci.subprocess, "run", lambda cmd, **k: Result(0))
+    gh = MergeGh()
+    gh.read = lambda *cmd, **k: "token"
+    assert fci.cmd_merged(gh, 9) == 0
+    assert on_main_said(gh)[0] == ["2"]
+
+
+class FakeCiPr(FakeIo):
+    def __init__(self, fail_reads=False, fail_writes=False):
+        super().__init__()
+        self.fail_reads, self.fail_writes = fail_reads, fail_writes
+
+    def json(self, *cmd):
+        if cmd[:3] == ("gh", "pr", "list"):
+            return [{"number": 7, "headRefOid": "abc123", "url": "https://github.com/acme/webshop/pull/7"}]
+        if self.fail_reads:
+            raise SystemExit("failed: gh pr view")
+        if cmd[:3] == ("gh", "pr", "view"):
+            return {"title": "Release (refs #2)", "body": "", "commits": []}
+        return super().json(*cmd)
+
+    def write(self, *cmd):
+        if self.fail_writes:
+            raise SystemExit("failed: gh issue comment")
+        return super().write(*cmd)
+
+    def read(self, *cmd, check=True):
+        return "abc123"
+
+    def ok(self, *cmd):
+        return True
+
+
+def test_ci_pr_comments_after_the_status_and_survives_a_gh_failure_there(monkeypatch, capsys):
+    """cmd_pr calls comment_in_pr once the CI status is set; a gh failure in it (a read or a post) never fails the CI."""
+    order = []
+    monkeypatch.setattr(fci, "current_budget", lambda r: {"left": 1500, "share_used": .1, "share_passed": .5})
+    monkeypatch.setattr(fci, "refused_this_month", lambda r: False)
+    monkeypatch.setattr(fci, "on_pc", lambda sha: ("passed", 4))
+    monkeypatch.setattr(fci, "set_status", lambda r, sha, state, text, url=None: order.append(("status", state)))
+    monkeypatch.setattr(fci, "log", lambda entry: None)
+    real = fci.comment_in_pr
+    monkeypatch.setattr(fci, "comment_in_pr", lambda r, n, url=None: order.append(("comment", n, url)))
+    assert fci.cmd_pr(FakeCiPr(), force_pc=True) == 0
+    assert order[-1] == ("comment", 7, "https://github.com/acme/webshop/pull/7") and order[-2] == ("status", "success")
+    monkeypatch.setattr(fci, "comment_in_pr", real)
+    for run in (FakeCiPr(fail_reads=True), FakeCiPr(fail_writes=True)):
+        assert fci.cmd_pr(run, force_pc=True) == 0                       # a warning, the CI result stands
+    assert "could not" in capsys.readouterr().out
+
+
+def test_a_landing_whose_label_edit_fails_prints_only_the_label_step(monkeypatch, capsys):
+    row = {"head": "abc1234", "seconds": 18}
+    monkeypatch.setattr(comments.subprocess, "run", lambda cmd, **k: Result(1 if cmd[2] == "edit" else 0))
+    assert core.mark_on_dev("14", row) is True
+    out = capsys.readouterr().out
+    assert "label #14 in-dev" in out and "comment the commit" not in out
+    monkeypatch.setattr(comments.subprocess, "run", lambda cmd, **k: Result(1))
+    assert core.mark_on_dev("14", row) is False

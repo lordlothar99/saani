@@ -76,6 +76,7 @@ flowchart TB
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. |
 | `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
+| `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs the deployer (planned, issue #5); until it exists the command stops after the merge and exits 2. `--dry-run` checks and prints, merges nothing. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). `ci pr` also posts `In PR` on the issues the pull request names, `ci merged` posts `On main` on those it relabels. |
@@ -155,7 +156,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
 | Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
 
-The auto checklist is the plugin's skill (`skills/auto/SKILL.md`).
+The auto checklist is the plugin's skill (`skills/auto/SKILL.md`). An auto run ends with one green integration -> production pull request and a report; the owner then says **merge** or **merge and deploy** (`/saani:merge`, `/saani:merge --deploy`), the only way that pull request is merged by Saani: the run itself never merges.
 
 Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
 (Auto, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
@@ -166,15 +167,23 @@ asked, what blocks the issue); the map and the auto run read it through that one
 ### Status comments
 `saani comment <n> <kind>` writes a comment in the shape of `.github/COMMENT_KINDS.md` (heading, `--field KEY=VALUE` as a one-row table, `--text`
 as the body), posts it with `gh issue comment`, then applies the kind's label change with `gh issue edit` (labels from `[issues] labels`).
-Kinds: `started`, `review`, `blocked`, `question` (adds `answer`), `progress`, `on-dev` (adds `in_dev`), `in-pr`, `on-main` (adds `in_main`,
-removes `in_dev`), `deployed`, `linked`. The commands post theirs themselves: `start` (`Started`, unless `--no-comment`), `land` (`On dev`,
-unless `--no-comment`), `ci pr` (`In PR`) and `ci merged` (`On main`), the last two once per pull request and issue. A comment that gh
+Kinds: `started`, `review`, `blocked`, `question` (adds the `answer` label, `help wanted` by default), `progress`, `on-dev` (adds `in_dev`, `in-dev`), `in-pr`, `on-main` (adds
+`in_main`, `in-main`, and removes `in_dev`), `deployed`, `linked`. The commands post theirs themselves: `start` (`Started`, unless `--no-comment`), `land` (`On dev`,
+unless `--no-comment`), `ci pr` (`In PR`, after the CI status is set, on the named issues that carry `in_dev`) and `ci merged` (`On main`,
+on the named issues that carry `in_main` or `in_dev`, whoever did the relabel), the last two once per pull request and issue. A comment that gh
 refuses is a warning, never an undone step.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),
-landings and conflicts by file, test jobs per kind (median wait and run, failures). The owner's waiting time and interventions and the tokens
-per issue have no machine record: it says "not measured". `--baseline` adds the window of the same length just before (git history only).
+landings and conflicts by file, test jobs per kind (median wait and run, failures). The owner's waiting time and interventions
+have no machine record: it says "not measured". It also reads Claude Code's session transcripts (`~/.claude/projects/<folder>/`, or under
+`CLAUDE_CONFIG_DIR`; the folder of the main checkout and those of the worktrees, subagents included, never a sibling project's) and shows "Tokens and cost (estimate)":
+input, output, cache read and cache write tokens and an estimated cost per issue (top 10 by cost), per role (the Architect, or the
+subagent's type: coder, reviewer...) and per model, also in `--json` under `tokens`. Only ids, models, usage numbers, folders, branches,
+times and subagent descriptions are kept, never a message's text (the lines are parsed whole, only those fields are retained); a message id counts once. A message belongs to the issue named by its
+worker branch (the project's own branch pattern), else by its worktree folder, else by `#n` in its subagent's description, else to "unattributed" (the Architect's overhead).
+The prices are one table in `saani/cost.py` (USD per million tokens, by model id or family; a cache write costs 1.25x the input price for 5 minutes, 2x for 1 hour): estimates, to check against the provider's price
+page; a model without a price shows its tokens and a cost of "?". `--baseline` adds the window of the same length just before (git history only).
 
 ## Models and cost
 1. **No model where a script will do.** Running tests, landing, relabelling and the gate are scripts. A model only reads a failure and says

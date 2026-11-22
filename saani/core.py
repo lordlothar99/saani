@@ -598,12 +598,17 @@ def landing_comment(row):
 
 
 def mark_on_dev(number, row):
-    """Comment the landing on the issue and add its in-dev label (saani/comments.py). True when both worked; False (nothing said, the
-    caller prints the manual step) when gh is missing or refuses: a landing is never undone by its bookkeeping."""
+    """Comment the landing on the issue and add its in-dev label (saani/comments.py). True when the comment went out (a failed label
+    edit prints its own step); False (nothing said, the caller prints both steps) when gh is missing or refuses: a landing is never undone by its bookkeeping."""
     try:
-        return comments.post(number, "on-dev", landing_fields(row))
+        comments.post(number, "on-dev", landing_fields(row), labels=False)
     except (SystemExit, OSError):
         return False
+    try:
+        comments.apply_labels(number, "on-dev")
+    except (SystemExit, OSError):
+        print(f"next: label #{number} {cfg().labels.get('in_dev', 'in-dev')} (the comment is posted)")
+    return True
 
 
 # ---------------------------------------------------------------- saani prune
