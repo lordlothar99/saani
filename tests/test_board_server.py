@@ -153,6 +153,20 @@ def test_the_board_shows_each_issue_once_with_its_worktree_agents_and_runs():
     assert [c["number"] for c in board["live"]] == [9]
 
 
+def test_every_open_issue_is_on_the_board_assigned_to_the_owner_or_not(monkeypatch):
+    """The Backlog (the Ready column) counted only the issues assigned to the owner: the unassigned open ones never appeared (#27)."""
+    def listed(*filters):
+        if "--assignee" in filters:
+            return []                                      # nobody is assigned
+        if "closed" in filters:
+            return [{"number": 9, "title": "old", "labels": [], "state": "CLOSED"}]
+        return [{"number": n, "title": f"t{n}", "labels": ["idea"] if n == 4 else [], "state": "OPEN"} for n in (1, 2, 3, 4)]
+    monkeypatch.setattr(fp, "gh_issues", listed)
+    board = {c["id"]: [i["number"] for i in c["cards"]] for c in fp.build_board(fp.issues()["board"], [], set(), [], [])}
+    assert sorted(board["ready"]) == [1, 2, 3]            # none of them assigned; the idea stays off the board
+    assert board["live"] == [9]
+
+
 def test_the_column_of_closed_tasks_starts_folded():
     """the columns showing closed tasks are folded by default; a click on the header unfolds them."""
     closed = [key for key, _, _ in fp.COLUMNS if key == "live"]

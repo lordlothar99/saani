@@ -8,7 +8,7 @@ nothing); pure functions first (tests/test_board_server.py).
 
 The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
-   your answer; the `act` label: your action), Ready (assigned, nothing blocks it), Building (a worktree with work in it), Testing (tests
+   your answer; the `act` label: your action), Ready (open, nothing blocks it, nobody on it yet), Building (a worktree with work in it), Testing (tests
    running in its worktree, or the final check of `saani land`), Merged on the integration branch (`in_dev`), To deploy (`in_main`),
    Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to the Architect
    (prompt_for): the owner talks to one agent, the Architect, who starts the workers.
@@ -58,7 +58,7 @@ TAIL_BYTES = 256 * 1024
 LIVE_DAYS = 7
 COLUMNS = [
     ("you", "Waiting for you", "Your answer or your action. Copy the card's prompt and paste it to the Architect."),
-    ("ready", "Ready", "Assigned, nothing blocks it: ready to build. The Architect can start it. Command: /saani:new <issue>."),
+    ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. The Architect can start it. Command: /saani:new <issue>."),
     ("building", "Building", "An agent works on it in its own folder (a worktree). Command: /saani:land when it is committed."),
     ("testing", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a long run)."),
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
@@ -668,18 +668,13 @@ def gh_issues(*filters):
 
 
 def issues():
-    c = cfg()
     since = (datetime.date.today() - datetime.timedelta(days=LIVE_DAYS)).isoformat()
     queries = {"open": ("--state", "open", "--limit", "300"),
                "closed": ("--state", "closed", "--search", f"closed:>={since}", "--limit", "40")}
-    if c.owner:
-        queries["assigned"] = ("--assignee", c.owner, "--state", "open", "--limit", "100")
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
-    # The status page shows what is started (assigned), waits for the owner or is merged; the board (/) places every open issue.
-    lab = c.labels
-    flagged = [i for i in got["open"] if set(i["labels"]) & {lab["in_dev"], lab["in_main"], lab["answer"], lab["act"]}]
-    return {"board": got.get("assigned", []) + flagged + got["closed"], "open": got["open"], "closed": got["closed"]}
+    # Both pages place every open issue (an `idea` stays off, see column_for), assigned to the owner or not, and the recently closed ones.
+    return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"]}
 
 
 def milestones(rows, open_issues):
