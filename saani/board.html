@@ -365,15 +365,15 @@ function arch(x, y, span, h) {
 // Flow runs along x (screen: left and up to right and down); branches spread along y. The road graph (EDGES) shows every move an issue can make.
 const ZONES = [
   {id: "inbox",   stage: "Inbox",           name: "Wayfarers' Tents",  cx: 11,  cy: 15, hint: "New issues waiting for triage: Type, milestone, labels."},
-  {id: "backlog", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 24, hint: "Open and not started: in a milestone, nobody on it yet."},
+  {id: "backlog", cmd: "/saani:new <issue>", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 24, hint: "Open and not started: in a milestone, nobody on it yet."},
   {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 7,  hint: "Waits for your answer or your action. Work comes here from the backlog or from the workshops, and goes back."},
-  {id: "works",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 17, hint: "Started or being built in its own worktree."},
+  {id: "works", cmd: "/saani:land when it is committed",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 17, hint: "Started or being built in its own worktree."},
   {id: "camp",    stage: "Camp",            name: "The Hollow",        cx: 47,  cy: 36, hint: "Where workers rest when they are not on a task."},
-  {id: "proving", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
-  {id: "depot",   stage: "Integrated",          name: "Caravan Depot",     cx: 70,  cy: 17, hint: "Merged on {int}, waiting for the next release pull request into {prod}."},
-  {id: "tower",   stage: "Release PR",      name: "The Watchtower",    cx: 82,  cy: 25, hint: "Carried by the open release pull request ({int} → {prod}). The beacon is its CI; red goes back to {int}."},
-  {id: "pad",     stage: "To deploy",       name: "Launch Pad",        cx: 95,  cy: 14,  hint: "Released with something to deploy: goes live with the next deploy."},
-  {id: "archive", stage: "To close",        name: "The Archive",       cx: 100, cy: 34, hint: "Released with nothing to deploy (tooling, docs, tests): close it."},
+  {id: "proving", cmd: "/saani:test (/saani:progress for a long run)", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
+  {id: "depot", cmd: "/saani:ci pr",   stage: "Integrated",          name: "Caravan Depot",     cx: 70,  cy: 17, hint: "Merged on {int}, waiting for the next release pull request into {prod}."},
+  {id: "tower", cmd: "/saani:ci pr, then /saani:ci merged <pr> after the merge",   stage: "Release PR",      name: "The Watchtower",    cx: 82,  cy: 25, hint: "Carried by the open release pull request ({int} → {prod}). The beacon is its CI; red goes back to {int}."},
+  {id: "pad", cmd: "/saani:ci merged <pr>",     stage: "To deploy",       name: "Launch Pad",        cx: 95,  cy: 14,  hint: "Released with something to deploy: goes live with the next deploy."},
+  {id: "archive", cmd: "/saani:ci merged <pr>", stage: "To close",        name: "The Archive",       cx: 100, cy: 34, hint: "Released with nothing to deploy (tooling, docs, tests): close it."},
   {id: "outpost", stage: "Live checks",     name: "Far Outpost",       cx: 107, cy: 9,  hint: "Deployed: the checklist of the live system waits for you."},
   {id: "citadel", stage: "End · Done",      name: "The Citadel",       cx: 116, cy: 23, r: 7, hint: "Closed: deployed and verified, closed after merge, or not planned. Last 7 days."},
 ];
@@ -666,7 +666,8 @@ const PROD = () => (DATA && DATA.project && DATA.project.production) || "main";
 // a zone's hint names the project's real branches when the state gives them (project.integration, project.production), else generic words
 function hintOf(z) {
   const p = (DATA && DATA.project) || {};
-  return z.hint.replace(/\{int\}/g, p.integration || "the integration branch").replace(/\{prod\}/g, p.production || "production");
+  const hint = z.hint.replace(/\{int\}/g, p.integration || "the integration branch").replace(/\{prod\}/g, p.production || "production");
+  return z.cmd ? hint + " Command: " + z.cmd + "." : hint;
 }
 function promptFor(c) {
   const n = c.number, pr = DATA.pr;
@@ -914,7 +915,7 @@ const tip = $("#tip");
 function hideTip() { tip.hidden = true; }
 $("#map").addEventListener("pointerover", e => {
   const b = e.target.closest(".blk"), w = e.target.closest(".wkr"), z = e.target.closest(".plaque");
-  if (b) { const c = DATA.cards.find(x => x.number == b.dataset.n); tip.innerHTML = `<span class="n">#${c.number}</span><span class="t">${esc(c.title)}</span><span class="s">${esc(typeInfo(c).word)} · ${esc(STEP_LABEL[c.step] || c.step)} · ${esc(c.milestone || "no milestone")}${c.need ? " · needs you" : ""}</span>`; }
+  if (b) { const c = DATA.cards.find(x => x.number == b.dataset.n); tip.innerHTML = `<span class="n">#${c.number}</span><span class="t">${esc(c.title)}</span><span class="s">${esc(typeInfo(c).word)} · ${esc(STEP_LABEL[c.step] || c.step)} · ${esc(c.milestone || "no milestone")}${c.need ? " · needs you" : ""}</span>${(ZONE[STEP_ZONE[c.step]] || {}).cmd ? `<span class="s">Command: ${esc(ZONE[STEP_ZONE[c.step]].cmd)}</span>` : ""}`; }
   else if (w) { const k = WORKERS[w.dataset.w]; tip.innerHTML = `<span class="n">${esc(k.name)}${k.folder ? " · " + esc(k.folder) : ""}</span><span class="t">${esc(stateWord(k))}</span><span class="s">${esc(k.model || (k.kind === "planned" ? "not hired yet" : "model not recorded"))}</span>`; }
   else if (z) { const zz = ZONE[z.dataset.zone]; tip.innerHTML = `<span class="n">${esc(zz.name)}</span><span class="t">${esc(zz.stage)}</span><span class="s">${esc(hintOf(zz))}</span>`; }
   else return hideTip();

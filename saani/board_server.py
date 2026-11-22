@@ -58,12 +58,12 @@ TAIL_BYTES = 256 * 1024
 LIVE_DAYS = 7
 COLUMNS = [
     ("you", "Waiting for you", "Your answer or your action. Copy the card's prompt and paste it to the Architect."),
-    ("ready", "Ready", "Assigned, nothing blocks it: ready to build. The Architect can start it."),
-    ("building", "Building", "An agent works on it in its own folder (a worktree)."),
-    ("testing", "Testing", "Tests run in its folder, or the last check before it lands."),
-    ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request."),
-    ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy."),
-    ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it."),
+    ("ready", "Ready", "Assigned, nothing blocks it: ready to build. The Architect can start it. Command: /saani:new <issue>."),
+    ("building", "Building", "An agent works on it in its own folder (a worktree). Command: /saani:land when it is committed."),
+    ("testing", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a long run)."),
+    ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
+    ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy. Command: /saani:ci merged <pr>."),
+    ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it. Command: /saani:ci merged <pr>."),
     ("live", "Deployed", f"Last {LIVE_DAYS} days: deployed and closed. Folded by default."),
 ]
 WORKTREE_IN_TEXT = re.compile(r"[\\/]([^\\/\s\"']+-wt)[\\/]+(\d+)-")
