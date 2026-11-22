@@ -1,19 +1,23 @@
-"""The guard: a Claude Code PreToolUse hook shipped by the plugin (hooks/hooks.json runs `saani guard`). Standard library only.
+"""The guard: a Claude Code hook shipped by the plugin (hooks/hooks.json runs `saani guard` before every tool call, PreToolUse, and after
+every Bash call, PostToolUse). Standard library only.
 
   saani guard        reads the hook's JSON on stdin; prints Claude Code's PreToolUse decision, or nothing
 
 Two modes (docs/SAANI.md, The guard), told apart by the hook's `session_id` only, never by the folder or a file the model can write:
-- **present** (no entry for this session in `~/.saani/auto/`): it prints nothing, so Claude Code's normal permissions apply.
-- **auto** (`~/.saani/auto/<session_id>.json`, written when the guard sees the Bash call `saani auto on`, removed by `saani auto off`):
-  every tool call gets "allow" or "deny", never "ask", because an away run must not wait. The rules are an allowlist: what the guard
-  cannot read for sure is refused, with the reason and how to go on. Each refusal adds a line to `~/.saani/auto/refusals.jsonl` (time,
-  run, tool, short reason, the command's first word only).
+- **present** (no entry for this session in `~/.saani/auto/`): it prints nothing, so Claude Code's normal permissions apply, to
+  `saani auto on` too: the owner is asked unless their own rules allow it. A present session never switches itself into auto mode.
+- **auto** (`~/.saani/auto/<session_id>.json`): written by the PostToolUse hook once the whole Bash command `saani auto on ...` ran,
+  ended normally and printed its marker line (`saani auto: on <id> folder=<path>`); removed by the owner from a terminal (`saani auto off
+  --run <id>`, `turn_off_run`) or after 12 hours. Every tool call gets "allow" or "deny", never "ask", because an away run must not wait;
+  `saani auto on` and `off` are refused (a run never re-arms or ends itself). The rules are an allowlist: what the guard cannot read for
+  sure is refused, with the reason and how to go on. Each refusal adds a line to `~/.saani/auto/refusals.jsonl` (time, run, tool, short
+  reason, the command's first word only).
 
 Fail closed: when the registry cannot be read and an entry for this session might exist, the call is refused. If the hook cannot run at
 all (timeout, no Python), Claude Code's normal permissions apply: it asks.
 
-`state`, `turn_on`, `turn_off` and `refusals` are for the auto run's switch and stop rules. `decide(event, ctx)` is the whole decision,
-with no side effect, for the tests.
+`state`, `turn_on`, `turn_off`, `turn_off_run` and `refusals` are for the auto run's commands and stop rules. `decide(event, ctx)` is the
+whole decision, with no side effect, for the tests.
 """
 import json
 import os
@@ -66,6 +70,10 @@ def state(session_id, now=None):
     except (KeyError, TypeError, ValueError) as e:
         raise RegistryError("no start time") from e
     if (now or datetime.datetime.now()) - started > datetime.timedelta(hours=MAX_HOURS):
+        try:
+            os.remove(path)                                  # over: the entry goes, present mode again
+        except OSError:
+            pass
         return None
     return data
 
@@ -100,6 +108,28 @@ def turn_off(session_id):
     if path and os.path.exists(path):
         os.remove(path)
     return was
+
+
+def turn_off_run(run_id):
+    """Removes every entry of the run `run_id` (the owner's `saani auto off --run <id>`, from a terminal). Returns how many."""
+    done = 0
+    try:
+        names = os.listdir(registry())
+    except FileNotFoundError:
+        return 0
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(registry(), name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get("id") == str(run_id):
+            os.remove(path)
+            done += 1
+    return done
 
 
 def refusals(run=None):
@@ -280,16 +310,23 @@ def secret_name(raw, resolved=None, strict=True):
 
 
 PROTECTED_PARTS = {".git", ".githooks", ".claude"}
+PROTECTED_NAMES = {".mcp.json", "saani.toml", "claude.md", "claude.local.md", "codeowners"}
+WALK_CAP = 5000                     # entries a folder walk looks at; past it the guard cannot tell, so it refuses
 
 
 def protected(p, ctx):
-    """True for what an auto run never writes: any path through .git, .githooks or .claude, .mcp.json, CLAUDE.md (the agents'
-    instructions), ~/.saani, and the guard's own files (saani/guard.py, saani.toml, hooks/hooks.json, a checkout's top `hooks/` folder)."""
-    parts = [x for x in re.split(r"[\\/]+", p.lower()) if x]
+    """True for what an auto run never writes: any path through .git, .githooks or .claude, .mcp.json, CLAUDE.md and CLAUDE.local.md
+    (the agents' instructions), .github/workflows/, .github/actions/, CODEOWNERS, .github/dependabot.yml, ~/.saani, and the guard's own
+    files (saani/guard.py, saani.toml, hooks/hooks.json, a checkout's top `hooks/` folder). Trailing dots and spaces of a part are ignored
+    (Windows drops them: `.git.` is `.git`)."""
+    parts = [x.rstrip(". ") or x for x in re.split(r"[\\/]+", p.lower()) if x]
     if not parts:
         return True
-    if PROTECTED_PARTS & set(parts) or parts[-1] in (".mcp.json", "saani.toml", "claude.md"):
+    if PROTECTED_PARTS & set(parts) or parts[-1] in PROTECTED_NAMES:
         return True
+    for k, part in enumerate(parts[:-1]):
+        if part == ".github" and (parts[k + 1] in ("workflows", "actions") or parts[k + 1] in ("dependabot.yml", "dependabot.yaml")):
+            return True
     if parts[-2:] in (["saani", "guard.py"], ["hooks", "hooks.json"]) or inside(p, ctx.saani_home):
         return True
     rel = ctx.checkout_rel(p)
@@ -297,13 +334,13 @@ def protected(p, ctx):
 
 
 def holds_protected(p, ctx):
-    """True when removing `p` would remove something protected or one of the run's places."""
+    """True when removing `p` would remove something protected or one of the run's places: `p` itself, or anything in its tree (a
+    capped walk: a tree too big to look through is refused too)."""
     if protected(p, ctx):
         return True
     if any(base and inside(base, p) for base in (ctx.wt_dir, ctx.folder, ctx.main, ctx.saani_home, ctx.temp, ctx.home)):
         return True
-    probes = (".git", ".githooks", ".claude", ".mcp.json", "saani.toml", os.path.join("saani", "guard.py"), "hooks", "guard.py")
-    return os.path.isdir(p) and any(os.path.exists(os.path.join(p, x)) for x in probes)
+    return os.path.isdir(p) and tree_has(p, lambda path, name: protected(path, ctx))
 
 
 # ---------------------------------------------------------------- the decision
@@ -382,14 +419,39 @@ def grep_tool(inp, ctx):
     if root == ctx.home or not ctx.in_run(root):
         return deny("grep outside the worktrees", "Grep outside the worktrees folder and the run's folder",
                     how="search inside a worktree, or Read the file")
-    if os.path.isdir(root) and not (glob_ or kind):
-        try:
-            names = os.listdir(root)
-        except OSError:
-            names = []
-        if any(secret_name(n) for n in names):
-            return deny("secret", "Grep in a folder that holds a secret file", how="give Grep a glob or a type, or a deeper path")
+    narrow = [g for g in (glob_, f"*.{kind}" if kind else "") if g]
+    if os.path.isdir(root) and (not narrow or any(glob_may_hit_secret(g) for g in narrow)):
+        found = tree_has(root, lambda path, name: secret_name(name), skip=(".git",))
+        if found:
+            return deny("secret", "Grep in a folder tree that holds a secret file (or too big to look through)",
+                        how="give Grep a glob or a type that cannot match a secret name (*.py), or a deeper path")
     return allow("Grep inside the run's folders")
+
+
+SECRET_SAMPLES = (".env", ".env.local", ".envrc", "x.pem", "x.key", "x.p12", "x.pfx", "id_rsa", "id_rsa.pub", "id_ed25519", "id_ecdsa",
+                  "id_dsa", "credentials", "credentials.json", "x_credentials.txt", ".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass",
+                  ".git-credentials", "hosts.yml", "secret", "secret.txt", "x_secret.yml", "token", "token.txt", "x_token.json")
+
+
+def glob_may_hit_secret(pattern):
+    """True when a glob could match a secret's name (or uses braces, which the check does not read)."""
+    import fnmatch
+    if "{" in pattern or "}" in pattern or secret_name(pattern):
+        return True
+    base = re.split(r"[\\/]", pattern.lower())[-1] or "*"
+    return any(fnmatch.fnmatchcase(sample, base) for sample in SECRET_SAMPLES)
+
+
+def tree_has(root, test, skip=()):
+    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries."""
+    seen = 0
+    for top, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d.lower() not in skip]
+        for name in dirs + files:
+            seen += 1
+            if seen > WALK_CAP or test(os.path.join(top, name), name.lower()):
+                return True
+    return False
 
 
 # ---------------------------------------------------------------- reading a shell command (a strict grammar)
@@ -401,10 +463,11 @@ class Word(str):
 
 
 class Part:
-    """One simple command: its words, and `stdin` when it ends with a <<'EOF' here-document."""
+    """One simple command: its words, `stdin` when it ends with a <<'EOF' here-document, and `sep`, the operator after it (&&, ||, ;,
+    |, &, a newline; None for the last)."""
 
-    def __init__(self, words, stdin=False):
-        self.words, self.stdin = words, stdin
+    def __init__(self, words, stdin=False, sep=None):
+        self.words, self.stdin, self.sep = words, stdin, sep
 
 
 DQ_HEREDOC = re.compile(r"\"\$\(cat <<'([A-Za-z_][A-Za-z0-9_]*)'\n(.*?)\n\1\n\)\"", re.S)
@@ -432,11 +495,11 @@ def split_bash(text):
             words.append(w)
         buf, started, quoted, globbed, heredoc = [], False, False, False, False
 
-    def end_part():
+    def end_part(sep=None):
         nonlocal words, stdin
         flush()
         if words:
-            parts.append(Part(words, stdin))
+            parts.append(Part(words, stdin, sep))
         elif stdin:
             raise Unsure("a here-document without a command")
         words, stdin = [], False
@@ -449,13 +512,14 @@ def split_bash(text):
         elif c in "\n;":
             if text.startswith(";;", i):
                 raise Unsure(";;")
-            end_part()
+            end_part(c)
             i += 1
         elif c in "&|":
             if text.startswith("|&", i) or text.startswith("&>", i):
                 raise Unsure(text[i:i + 2])
-            end_part()
-            i += 2 if text[i:i + 2] in ("&&", "||") else 1
+            op = text[i:i + 2] if text[i:i + 2] in ("&&", "||") else c
+            end_part(op)
+            i += len(op)
         elif c in "<>":
             fd = "".join(buf) if started and not quoted and "".join(buf) in ("1", "2") else None
             if started and fd is None:
@@ -549,14 +613,15 @@ GIT_SHORT_FORCE = {"add", "checkout", "switch", "branch", "fetch", "worktree", "
 TEST_FLAGS = {"-q", "-qq", "-v", "-vv", "-x", "-s", "-l", "--lf", "--ff", "--sw", "--no-header", "--exitfirst", "--last-failed",
               "--failed-first", "-ra", "-rA", "--color=no", "--color=yes"}
 TEST_VALUED = {"-k", "-m", "--tb", "--maxfail", "--durations"}
-SAANI_OK = {"start", "land", "status", "comment", "kpis", "progress", "ui", "map", "board"}
-AUTO_WORDS = {"on", "off", "status", "pick", "no-action"}
 LOCALHOST = {"localhost", "127.0.0.1", "::1"}
 
 
 def is_python(word):
-    name = re.split(r"[\\/]", word.lower())[-1].removesuffix(".exe")
-    return bool(re.fullmatch(r"python(3(\.\d+)?)?|py", name)) or (bool(sys.executable) and word == sys.executable)
+    """A real Python: `python`, `python3`, `python3.N` or `py` found on the PATH (a bare name, never a path to some file), or the very
+    interpreter running saani."""
+    if re.fullmatch(r"python(3(\.\d+)?)?|py", word):
+        return True
+    return bool(sys.executable) and ("/" in word or "\\" in word) and norm(word) == norm(sys.executable)
 
 
 def saani_start(words, cwd, temp=None):
@@ -589,6 +654,8 @@ def test_command(words, ctx, cwd, who):
     k = 0
     while k < len(extras):
         w = extras[k]
+        if w.startswith("@"):
+            return deny("test option", "a test argument read from a file (@file)", who)
         if w in TEST_VALUED:
             k += 2
             continue
@@ -664,29 +731,79 @@ def command(part, ctx, cwd):
     return deny("not on the list", f"the command {safe_word(cmd) or '?'!r} is not on the guard's list", cmd), cwd
 
 
+# The saani subcommands an auto run may use, each with its options (True: takes a value) and its positionals (patterns, in order). An
+# option off the list, an abbreviation included, is refused; no allowed option runs a command or writes a chosen path.
+SAANI_SPEC = {
+    ("start",): ({"--slug": True, "--no-assign": False, "--no-comment": False}, [r"\d+"]),
+    ("land",): ({"--keep": False, "--wait": True, "--dry-run": False, "--worktree": True, "--no-comment": False}, []),
+    ("status",): ({}, []),
+    ("comment",): ({"--text": True, "--field": True, "--dry-run": False}, [r"\d+", r"[a-z-]+"]),
+    ("kpis",): ({"--since": True, "--until": True, "--baseline": False, "--ref": True, "--json": False}, []),
+    ("ui",): ({"--port": True, "--open": False, "--json": False}, []),
+    ("progress", "show"): ({}, [r".+"]),
+    ("progress", "watch"): ({"--every": True}, [r".+"]),
+    ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+"}, []),
+    ("ci", "status"): ({}, []),
+    ("ci", "pr"): ({"--dry-run": False, "--pc": False}, []),
+}
+SAANI_TEXT = {"--slug", "--text", "--field"}
+
+
 def saani_command(args, ctx, cwd):
     sub = args[0] if args else ""
+    sub = "ui" if sub in ("map", "board") else sub
     if sub == "test":
         rest = list(args[1:])
         if "--" in rest:
-            rest = rest[rest.index("--") + 1:]
+            kind, rest = rest[:rest.index("--")], rest[rest.index("--") + 1:]
         else:
+            kind = []
             while rest and rest[0].startswith("--kind"):
-                rest = rest[1:] if "=" in rest[0] else rest[2:]
+                kind, rest = (kind + rest[:1], rest[1:]) if "=" in rest[0] else (kind + rest[:2], rest[2:])
+        if any(not (w == "--kind" or re.fullmatch(r"(--kind=)?(tier1|land|full)", w)) for w in kind):
+            return deny("saani command", "saani test with an option other than --kind", "saani")
         return test_command(rest, ctx, cwd, "saani")
-    if sub == "auto":
-        if args[1:2] and args[1] in ("on", "off"):
-            return deny("unsure", f"saani auto {args[1]} with other commands", "saani", how=f"run saani auto {args[1]} alone")
-        if args[1:2] and not args[1].startswith("-") and args[1] not in AUTO_WORDS:
-            return deny("saani command", f"saani auto {safe_word(args[1])}", "saani")
-        return None
-    if sub == "ci":
-        return None if args[1:2] in (["status"], ["pr"]) else deny("saani command", "saani ci other than status and pr", "saani",
-                                                                 how="the owner runs it")
-    if sub in SAANI_OK:
-        return None
-    return deny("saani command", f"saani {safe_word(sub) or ''} in an auto run (merge, prune, deploy, projects... are the owner's)".replace(
-        "  ", " "), "saani", how="the owner runs it")
+    if sub == "auto" and args[1:2] in (["on"], ["off"]):
+        return deny("saani auto switch", f"saani auto {args[1]} inside an auto run (a run never re-arms or ends itself)", "saani",
+                    how="report and stop; the owner ends the run from a terminal: saani auto off --run <id>")
+    key = (sub, args[1]) if (sub, args[1] if len(args) > 1 else "") in SAANI_SPEC else (sub,)
+    if key not in SAANI_SPEC:
+        return deny("saani command", f"saani {' '.join(safe_word(a) for a in args[:2])}".strip() + " in an auto run (merge, prune, deploy, "
+                    "projects, progress run, the other ci commands... are the owner's)", "saani", how="the owner runs it")
+    options, patterns = SAANI_SPEC[key]
+    rest, positional, paths, k = list(args[len(key):]), [], [], 0
+    while k < len(rest):
+        w = rest[k]
+        name, eq, value = w.partition("=")
+        if w.startswith("-"):
+            if name not in options:
+                return deny("saani command", f"the option {safe_word(name) or '?'} of saani {' '.join(key)}", "saani")
+            takes = options[name]
+            if takes == "+":
+                k += 1
+                while k < len(rest) and re.fullmatch(r"\d+", rest[k]):
+                    k += 1
+                continue
+            if takes and not eq:
+                if k + 1 >= len(rest):
+                    return deny("saani command", f"saani {' '.join(key)} {name} without a value", "saani")
+                k += 1
+                value = rest[k]
+            elif not takes and eq:
+                return deny("saani command", f"saani {' '.join(key)} {name}= takes no value", "saani")
+            if takes and name not in SAANI_TEXT:
+                paths.append(Word(value))
+            if name == "--worktree" and not ctx.cd_ok(ctx.path(value, cwd)):
+                return deny("cd outside the worktrees", "saani land --worktree outside a worktree", "saani")
+        else:
+            positional.append(w)
+            paths.append(w)
+        k += 1
+    if len(positional) != len(patterns) or not all(re.fullmatch(pat, w) for pat, w in zip(patterns, positional)):
+        return deny("saani command", f"saani {' '.join(key)} with other arguments", "saani")
+    if scan(ctx, paths, cwd):
+        return deny("secret", f"saani {' '.join(key)} naming a secret file", "saani", how=SECRETS_HOW)
+    return None
 
 
 def read_only(cmd, args, ctx, cwd):
@@ -709,19 +826,80 @@ def read_only(cmd, args, ctx, cwd):
                 continue
             return deny("sort option", f"the sort option {a[:30]}", cmd)
     elif cmd in ("grep", "diff"):
-        if any(a in ("--recursive", "--dereference-recursive", "-d", "--directories=recurse") or re.fullmatch(r"-[a-zA-Z]*[rR][a-zA-Z]*", a)
-               for a in args):
-            return deny("recursive read", f"{cmd} -r reads every file of a folder, secrets included", cmd,
-                        how="use the Grep tool, or name the files")
-        if cmd == "grep":
-            skip = {k + 1 for k, a in enumerate(args) if a in ("-e", "--regexp")} | {k for k, a in enumerate(args) if a.startswith("--regexp=")}
-            files = any(a in ("-f", "--file") or a.startswith("--file=") or re.fullmatch(r"-[a-zA-Z]*f.*", a) for a in args)
-            if not skip and not files:
-                positional = [k for k, a in enumerate(args) if not a.startswith("-")]
-                skip = set(positional[:1])
+        verdict, skip = grep_diff_options(cmd, args)
+        if verdict:
+            return verdict
     if scan(ctx, args, cwd, skip):
         return deny("secret", f"{cmd} of a secret file", cmd, how=SECRETS_HOW)
     return None
+
+
+GREP_FLAGS = set("nilcEFwvqHho")
+DIFF_FLAGS = set("uq")
+RECURSIVE_LONG = ("recursive", "dereference-recursive", "directories")
+
+
+def grep_diff_options(cmd, args):
+    """(verdict or None, indexes of pattern words) for grep's and diff's options, an allowlist: grep -n -i -l -c -E -F -w -v -q -H -h -o,
+    --color=never, -e PATTERN, -A/-B/-C N; diff -u -q --brief. Recursion in any spelling is refused with its own reason."""
+    flags = GREP_FLAGS if cmd == "grep" else DIFF_FLAGS
+    recursive = deny("recursive read", f"{cmd} -r reads every file of a folder, secrets included", cmd,
+                     how="use the Grep tool, or name the files")
+    text, k, ended, has_e = set(), 0, False, False
+    while k < len(args):
+        a = args[k]
+        if ended or a == "-" or not a.startswith("-"):
+            k += 1
+            continue
+        if a == "--":
+            ended = True
+        elif a.startswith("--"):
+            name = a[2:].split("=", 1)[0]
+            if name and any(x.startswith(name) for x in RECURSIVE_LONG):
+                return recursive, set()
+            if not (a == "--color=never" and cmd == "grep") and not (a == "--brief" and cmd == "diff"):
+                return deny(f"{cmd} option", f"the {cmd} option {a[:30]}", cmd), set()
+        else:
+            j = 1
+            while j < len(a):
+                ch = a[j]
+                if ch in "rRd":
+                    return recursive, set()
+                if cmd == "grep" and ch in "eABC":
+                    value = a[j + 1:]
+                    if not value:
+                        k += 1
+                        if k >= len(args):
+                            return deny(f"{cmd} option", f"{cmd} -{ch} without a value", cmd), set()
+                        value = args[k]
+                        if ch == "e":
+                            text.add(k)
+                    elif ch == "e":
+                        text.add(k)
+                    if ch == "e":
+                        has_e = True
+                    elif not value.isdigit():
+                        return deny(f"{cmd} option", f"{cmd} -{ch} with a value that is not a number", cmd), set()
+                    break
+                if ch not in flags:
+                    return deny(f"{cmd} option", f"the {cmd} option -{ch}", cmd), set()
+                j += 1
+        k += 1
+    if cmd == "grep" and not has_e:
+        ended, first = False, None
+        for i, a in enumerate(args):
+            if i in text:
+                continue
+            if not ended and a == "--":
+                ended = True
+            elif ended or not a.startswith("-") or a == "-":
+                if args[i - 1:i] and re.fullmatch(r"-[a-zA-Z]*[ABC]", args[i - 1]) and not ended:
+                    continue                                     # the N of -A N
+                first = i
+                break
+        if first is not None:
+            text.add(first)
+    return None, text
 
 
 def git_command(part, ctx, cwd):
@@ -778,9 +956,12 @@ def git_command(part, ctx, cwd):
 
 
 def git_paths_writable(paths, ctx, gcwd, sub):
+    """Pathspecs git writes to: plain paths only (no glob characters, quoted or not, no :magic), inside the run's places, not protected."""
+    if not paths:
+        return deny("not on the list", f"git {sub} without a path", "git")
     for p in paths:
-        if p.glob:
-            continue                                         # git matches pathspecs inside the repository only
+        if re.search(r"[*?\[]", p) or p.startswith(":"):
+            return deny("unsure", f"git {sub} with a pathspec pattern (*, ?, [ or :magic)", "git", how="name each file")
         target = ctx.path(p, gcwd)
         if not ctx.writable(target) or protected(target, ctx):
             return deny("write outside the worktrees", f"git {sub} of a path outside the worktree or protected", "git")
@@ -791,6 +972,16 @@ def git_sub(sub, words, ctx, gcwd, part):
     no = deny("not on the list", f"git {sub} {' '.join(words[:1])[:30]}".strip() + " is not on the guard's list", "git")
     if part.stdin and sub != "commit":
         return deny("unsure", "a here-document other than git commit -F -", "git")
+    if sub == "diff":
+        if any(w.startswith("--no-i") for w in words):
+            return deny("git option", "git diff --no-index reads files outside the repository", "git")
+        after = words.index("--") if "--" in words else len(words)
+        for k, w in enumerate(words):
+            if k == after or (k < after and (w.startswith("-") or not os.path.exists(ctx.path(w, gcwd)))):
+                continue
+            if not ctx.writable(ctx.path(w, gcwd)):
+                return deny("read outside the worktrees", "git diff of a path outside the run's places", "git")
+        return None
     if sub in GIT_READ or sub == "add":
         return None
     if sub == "commit":
@@ -801,7 +992,18 @@ def git_sub(sub, words, ctx, gcwd, part):
             return deny("unsure", "a here-document without git commit -F -", "git")
         return None
     if sub == "restore":
-        paths = [w for w in words if not w.startswith("-")]
+        paths, k, ended = [], 0, False
+        while k < len(words):
+            w = words[k]
+            if ended or not w.startswith("-"):
+                paths.append(w)
+            elif w == "--":
+                ended = True
+            elif w in ("-s", "--source"):
+                k += 1
+            elif not (w.startswith("--source=") or w in ("-S", "--staged", "-W", "--worktree", "-q", "--quiet", "--ours", "--theirs")):
+                return deny("not on the list", f"the git restore option {w[:30]}", "git")
+            k += 1
         return git_paths_writable(paths, ctx, gcwd, sub)
     if sub == "merge":
         rest = [w for w in words if w not in ("--no-edit", "-q", "--quiet")]
@@ -832,7 +1034,8 @@ def git_sub(sub, words, ctx, gcwd, part):
         if bad:
             return deny("not on the list", f"git {sub} with {bad[0][:30]}", "git")
         positional = [w for w in words if not w.startswith("-")]
-        if not positional or not ctx.worker_branch.match(positional[0]) or len(positional) > 2:
+        most = 2 if any(w in ("-b", "-c", "--create") for w in words) else 1     # a start point only for a new branch, never a path
+        if not positional or not ctx.worker_branch.match(positional[0]) or len(positional) > most:
             return deny("not a worker branch", f"git {sub} to a branch that is not a worker's (<type>/<n>-<words>)", "git",
                         how="saani start <n> makes the issue's worktree and branch")
         return None
@@ -975,6 +1178,13 @@ def gh_command(args, ctx, cwd):
     heredocs = {k for k, w in enumerate(rest) if w.heredoc}
     if heredocs and (key not in GH_HEREDOC or not heredocs <= text_at):
         return deny("unsure", "a $(cat <<'EOF' ...) other than the --body or --title of gh issue comment, pr create, pr comment", "gh")
+    own = re.compile(r"https://github\.com/" + re.escape(ctx.repo) + r"(/|$)", re.I)
+    for name, value, _ in flags + [(None, p, None) for p, _ in positional]:
+        if value is None or name in ("title", "body", "jq", "template", "json"):
+            continue
+        low = value.lower()
+        if ("://" in low or "github." in low or re.fullmatch(r"[\w.-]+/[\w.-]+#\d+", value)) and (not own.match(value) or ".." in value or "@" in value):
+            return deny("another repository", f"gh with a URL outside https://github.com/{ctx.repo}", "gh")
     if key == ("issue", "edit") and not all(re.fullmatch(r"#?\d+|https://\S+", p) for p, _ in positional):
         return deny("gh issue edit", "gh issue edit other than labels", "gh", how="comment on the issue instead")
     if key == ("pr", "create") and (values.get("base") != ctx.production or values.get("head") != ctx.integration):
@@ -1076,39 +1286,62 @@ def bash(text, ctx):
                     "quoted text, no $, backticks, redirections (but 2>&1 and >/dev/null) or subshells")
     if not parts:
         return deny("unreadable command", "an empty command")
-    cwd = ctx.cwd
-    for part in parts:
-        verdict, cwd = command(part, ctx, cwd)
+    cwd, sure = ctx.cwd, True                    # sure: every part so far runs, in order (only && before it)
+    for k, part in enumerate(parts):
+        verdict, moved = command(part, ctx, cwd)
         if verdict:
             return verdict
+        if part.words[0] == "cd" and k < len(parts) - 1:
+            # the folder carries only when the cd surely ran and the next part runs only after it: && all the way, a real folder
+            if not (sure and part.sep == "&&" and os.path.isdir(moved)):
+                return deny("cd outside the worktrees", "a cd followed by anything but && (or into a folder that does not exist), "
+                            "so the guard cannot tell where the next part runs", "cd", how="cd <folder> && <command>")
+            cwd = moved
+        sure = sure and part.sep in ("&&", None)
     return allow("every part of the command is on the guard's list")
 
 
-# ---------------------------------------------------------------- the switch: saani auto on / off, seen by the guard
+# ---------------------------------------------------------------- the switch: registering a session after `saani auto on` ran
 
-def auto_switch(command, cwd):
-    """("on", [its options]) or ("off", []) when the whole Bash command is the plugin's `saani auto on|off`, else None."""
-    if "auto" not in command:
+# The line the `saani auto on` process prints once the run is on (its last line, exit code 0). The PostToolUse hook registers the session
+# only when the Bash call was the whole plugin `saani auto on ...` command, it ended normally, and its output holds exactly one such line.
+MARKER = re.compile(r"^saani auto: on (?P<id>[0-9A-Za-z_-]{1,64}) folder=(?P<folder>\S.*?)[ \t\r]*$", re.M)
+
+
+def auto_on_options(command, cwd):
+    """The options of `saani auto on` when the whole Bash command is the plugin's `saani auto on ...`, else None."""
+    if not isinstance(command, str) or "auto" not in command:
         return None
-    parts = split_bash(command)
+    try:
+        parts = split_bash(command)
+    except Unsure:
+        return None
     if len(parts) != 1 or parts[0].stdin:
         return None
     words = parts[0].words
     start = saani_start(words, cwd)
-    if not start or words[start:start + 1] != ["auto"]:
+    if not start or words[start:start + 2] != ["auto", "on"]:
         return None
-    if words[start + 1:start + 2] == ["on"]:
-        return "on", list(words[start + 2:])
-    if words[start + 1:] == ["off"]:
-        return "off", []
-    return None
+    return list(words[start + 2:])
 
 
-def register(session_id, options, cwd):
-    """Registers the session from `saani auto on [--id ID] [--folder PATH] [--deploy]` run in `cwd`: the repository's main checkout, its
-    worktrees folder and settings from the main checkout's saani.toml, the run's folder (inside the worktrees folder; default: `cwd` when
-    it is there). Returns the entry, or None when it cannot (then the guard stays out of the way)."""
-    import time
+def finished_output(response):
+    """The Bash call's output when it ended normally, else None: not interrupted, no non-zero exit code if the response reports one."""
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict) or response.get("interrupted") is True:
+        return None
+    for key in ("exit_code", "exitCode", "returncode", "returnCode", "code"):
+        if response.get(key) not in (None, 0):
+            return None
+    out = response.get("stdout")
+    return out if isinstance(out, str) else None
+
+
+def register(session_id, options, cwd, run_id, folder):
+    """Registers the session after `saani auto on [--id ID] [--folder PATH] [--deploy]` printed its marker (`run_id`, `folder`): the
+    repository's main checkout, its worktrees folder and settings from the main checkout's saani.toml, the run's folder (an existing folder
+    inside the worktrees folder). Returns the entry, or None when it cannot (then nothing is registered: present mode)."""
     import tomllib
     from . import config
     opts, k = {"deploy": False}, 0
@@ -1126,8 +1359,12 @@ def register(session_id, options, cwd):
         else:
             return None
         k += 1
-    folder = resolve(opts["folder"], cwd) if "folder" in opts else norm(cwd)
-    dirs = git_dirs(folder if os.path.isdir(folder) else cwd)
+    if opts.get("id", run_id) != run_id:
+        return None
+    folder = norm(folder)
+    if not os.path.isdir(folder) or ("folder" in opts and resolve(opts["folder"], cwd) != folder):
+        return None
+    dirs = git_dirs(folder)
     if not dirs or os.path.basename(dirs[1]).lower() != ".git":
         return None
     main = os.path.dirname(dirs[1])
@@ -1138,12 +1375,25 @@ def register(session_id, options, cwd):
         cfg = config.from_toml(tomllib.load(f), main)
     wt = norm(cfg.wt_dir)
     if not (inside(folder, wt) and folder != wt):
-        if "folder" in opts:
-            return None
-        folder = None
-    run_id = opts.get("id") or (os.path.basename(folder).removeprefix("auto-") if folder else time.strftime("%Y-%m-%d_%H%M"))
+        return None
     return turn_on(session_id, run_id, main, wt, folder, deploy=opts["deploy"], repo=cfg.repo, integration=cfg.integration,
                    production=cfg.production, tests=[cfg.tier1, cfg.full, cfg.check], worker_branch=cfg.worker_branch.pattern)
+
+
+def post_tool_use(event):
+    """PostToolUse: registers the session when `saani auto on` ran and said so. Prints nothing; returns the entry or None."""
+    if event.get("tool_name") != "Bash" or state(event.get("session_id")) is not None:
+        return None                                          # never re-armed: a run on stays as it started
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) and os.path.isdir(event.get("cwd")) else os.getcwd()
+    options = auto_on_options(tool_input.get("command"), cwd)
+    if options is None:
+        return None
+    out = finished_output(event.get("tool_response"))
+    found = MARKER.findall(out or "")
+    if len(found) != 1:
+        return None
+    return register(event.get("session_id"), options, cwd, found[0][0], found[0][1])
 
 
 # ---------------------------------------------------------------- the hook
@@ -1154,8 +1404,9 @@ def emit(decision, reason):
 
 
 def main(raw=None):
-    """The hook: JSON on stdin (or `raw`, already read); a decision on stdout for an auto session, nothing in present mode. Never
-    raises."""
+    """The hook: JSON on stdin (or `raw`, already read). PreToolUse: a decision on stdout for an auto session, nothing in present mode
+    (`saani auto on` included: the owner's normal permissions decide it). PostToolUse: the registration after `saani auto on`, nothing on
+    stdout. Never raises."""
     try:
         if raw is None:
             raw = sys.stdin.buffer.read()
@@ -1175,6 +1426,12 @@ def main(raw=None):
         if some:
             emit("deny", error.format("unreadable hook input"))
         return 0
+    if event.get("hook_event_name") == "PostToolUse":
+        try:
+            post_tool_use(event)
+        except (Exception, SystemExit):
+            pass
+        return 0
     session_id = event.get("session_id")
     try:
         st = state(session_id)
@@ -1182,37 +1439,11 @@ def main(raw=None):
         log_refusal({}, event.get("tool_name", "?"), "guard error", "")
         emit("deny", error.format(f"registry {type(e).__name__}"))
         return 0
-    cwd = event.get("cwd")
-    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
-    try:
-        cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else os.getcwd()
-        command = tool_input.get("command")
-        switch = auto_switch(command, cwd) if event.get("tool_name") == "Bash" and isinstance(command, str) else None
-    except Exception:
-        switch = None
-    if switch and switch[0] == "on":
-        try:
-            entry = register(session_id, switch[1], cwd)
-        except (Exception, SystemExit):
-            entry = None
-        if entry:
-            emit("allow", f"Saani guard: auto run {entry['id']} on for this session; the guard decides every call until saani auto off.")
-        elif st is not None:
-            log_refusal(st, "Bash", "auto on refused", "saani")
-            emit("deny", "Saani guard (auto run): refused, saani auto on could not register this run (not inside a Saani project, or a "
-                         "folder outside its worktrees). To go on: run it from the run's folder.")
-        return 0
-    if switch and switch[0] == "off":
-        if st is not None:
-            try:
-                turn_off(session_id)
-                emit("allow", f"Saani guard: auto run {st.get('id')} off; Claude Code's own permissions apply again.")
-            except Exception as e:
-                emit("deny", error.format(f"auto off {type(e).__name__}"))
-        return 0
     if st is None:
         return 0
+    cwd = event.get("cwd")
     try:
+        cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else os.getcwd()
         decision, reason, code, word = decide(event, context(cwd, st))
     except (Exception, SystemExit) as e:
         decision, reason, code, word = "deny", error.format(type(e).__name__), "guard error", ""
@@ -1224,5 +1455,5 @@ def main(raw=None):
 
 def add_parsers(sub):
     """`saani guard`, listed in the help; saani.py runs it before loading anything else."""
-    p = sub.add_parser("guard", help="the Claude Code PreToolUse hook of the plugin (reads the hook's JSON on stdin)")
+    p = sub.add_parser("guard", help="the Claude Code PreToolUse and PostToolUse hook of the plugin (reads the hook's JSON on stdin)")
     p.set_defaults(run=lambda args: main())

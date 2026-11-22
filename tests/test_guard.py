@@ -42,7 +42,7 @@ def ctx(tmp_path, home):
     c = guard.Context(wt / "12-cart-total", wt_dir=wt, folder=wt / "auto-2026-01-02_0300", temp=temp, main=main, repo="acme/webshop",
                       integration="dev", production="main", tests=[["{python}", "-m", "pytest", "-q"], ["npm", "test"]])
     c.places = {"main": fwd(main), "wt": fwd(wt), "run": fwd(wt / "auto-2026-01-02_0300"), "work": fwd(wt / "12-cart-total"),
-                "temp": fwd(temp), "home": fwd(home), "plugin": PLUGIN}
+                "temp": fwd(temp), "home": fwd(home), "plugin": PLUGIN, "python_exe": fwd(sys.executable)}
     return c
 
 
@@ -95,11 +95,16 @@ def test_the_security_review_cases(ctx, name, inp, expected):
 
 ALLOWED = [
     "saani status", "saani land --worktree {work}", "saani start 12", "saani test --kind tier1 -- python -m pytest -q",
-    "saani test -- npm test", "saani comment 12 progress", "saani kpis", "saani progress show", "saani ui", "saani ci status",
-    "saani ci pr", "saani auto --id 2026-01-02_0300", "saani auto status", "saani auto pick", "saani auto no-action",
+    "saani test -- npm test", "saani test --kind=full -- python -m pytest -q", "saani comment 12 progress",
+    "saani comment 12 progress --text 'half done, the token is not here' --field Step=2", "saani kpis", "saani kpis --since 2026-01-01 --json",
+    "saani progress show build/run.txt", "saani progress watch build/run.txt --every 60", "saani ui", "saani ui --port 8772", "saani map",
+    "saani ci status", "saani ci pr", "saani ci pr --pc", "saani auto pick", "saani auto pick --json --only 3 4 --limit 2",
+    "saani start 12 --slug cart-total --no-comment", "saani land --worktree {work} --no-comment --wait 5",
     "python -I {plugin}/saani.py status", "{plugin}/bin/saani status",
     "cd {work}", "cd {run} && saani start 12", "cd {wt}/12-cart-total/src", "cd ../auto-2026-01-02_0300",
     "ls -la", "cat src/app.py", "head -n 5 README.md", "tail -20 build/log.txt", "grep -n total src/app.py", "grep -e x -e y a.txt",
+    "grep -inA3 total src/app.py", "grep -C 2 -w total src/app.py", "grep --color=never -c total a.txt", "grep -- -x a.txt",
+    "diff -u a.txt b.txt", "diff --brief a.txt b.txt", "git diff -- src/app.py", "git diff HEAD src", "cd {run}",
     "wc -l src/*.py", "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
     "test -f README.md", "[ -d src ]", "[ a = b ]", "pwd", "diff a.txt b.txt",
     "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git add src/app.py", "git add -A",
@@ -115,8 +120,8 @@ ALLOWED = [
     "git branch", "git ls-files", "git stash", "git stash push -m 'wip on .env text'", "git stash pop", "git restore src/app.py",
     "git -C {work} status", "git --no-pager log", "git diff --exit-code",
     "python -m pytest -q", "python -m pytest -q tests/test_cart.py", "python -m pytest -q -x -k cart", "python -m pytest -q --tb=short",
-    "npm test",
-    "gh issue view 12", "gh issue list --label bug", "gh issue list -lbug -L5", "gh pr view 3", "gh pr list", "gh pr checks 3",
+    "npm test", "'{python_exe}' -m pytest -q",
+    "gh issue view 12", "gh issue view https://github.com/acme/webshop/issues/12", "gh issue list --label bug", "gh issue list -lbug -L5", "gh pr view 3", "gh pr list", "gh pr checks 3",
     "gh pr diff 3", "gh run view 9", "gh run list", "gh run watch 9", "gh api repos/acme/webshop/issues/12",
     "gh api repos/acme/webshop/pulls --jq .title", "gh api -i repos/acme/webshop/pulls", "gh api --paginate repos/acme/webshop/pulls",
     "gh issue comment 12 --body 'On dev: abc123, the token is gone'",
@@ -164,7 +169,43 @@ DENIED = [
     ("python -I saani.py status", "python"), ("python -I {work}/saani.py status", "python"), ("./bin/saani status", "not on the list"),
     ("saani merge", "saani command"), ("saani prune", "saani command"), ("saani deploy", "saani command"),
     ("saani projects add x", "saani command"), ("saani ci merged 3", "saani command"), ("saani ci sync", "saani command"),
-    ("saani check-msg x", "saani command"), ("saani auto prune", "saani command"), ("cd {run} && saani auto on", "unsure"),
+    ("saani check-msg x", "saani command"), ("saani auto prune", "saani command"),
+    ("cd {run} && saani auto on", "saani auto switch"), ("saani auto on", "saani auto switch"), ("saani auto off", "saani auto switch"),
+    ("saani auto on --deploy", "saani auto switch"), ("saani auto off --run 2026-01-02_0300", "saani auto switch"),
+    ("python -I {plugin}/saani.py auto on", "saani auto switch"),
+    ("saani progress run --out x -- ls", "saani command"), ("saani progress run -- python -c 1", "saani command"),
+    ("saani progress watch f --out x", "saani command"), ("saani progress show", "saani command"),
+    ("saani start 12 --hotfix", "saani command"), ("saani start 12 --hot", "saani command"), ("saani start x", "saani command"),
+    ("saani land --work {work}", "saani command"), ("saani land --worktree {main}", "cd outside the worktrees"),
+    ("saani land extra", "saani command"), ("saani auto --id x", "saani command"), ("saani auto", "saani command"),
+    ("saani kpis --out x", "saani command"), ("saani ui --json=1", "saani command"), ("saani ci pr --head feat/1-x", "saani command"),
+    ("saani comment 12", "saani command"), ("saani progress show .env", "secret"), ("saani status -h", "saani command"),
+    ("saani test --kind tier1 --foo -- python -m pytest -q", "saani command"),
+    ("cd {run} ; rm -rf build", "cd outside the worktrees"), ("cd {run} | ls", "cd outside the worktrees"),
+    ("cd {run} || ls", "cd outside the worktrees"), ("cd {run} & ls", "cd outside the worktrees"),
+    ("cd {run}\nls", "cd outside the worktrees"), ("cd {work}/nope && ls", "cd outside the worktrees"),
+    ("ls || cd {run} && ls", "cd outside the worktrees"), ("ls | cd {run} && ls", "cd outside the worktrees"),
+    ("grep --rec x .", "recursive read"), ("grep --directories=recurse x .", "recursive read"), ("grep -d recurse x .", "recursive read"),
+    ("grep -nr x .", "recursive read"), ("grep --include=*.py x a", "grep option"), ("grep -P x a", "grep option"),
+    ("grep -A x y z", "grep option"), ("grep -f .env a.txt", "grep option"), ("grep --file=x a.txt", "grep option"),
+    ("grep --color=always x a", "grep option"), ("diff --recursive a b", "recursive read"), ("diff --rec a b", "recursive read"),
+    ("diff -N a b", "diff option"), ("diff --to-file=x a", "diff option"),
+    ("git diff --no-index a b", "git option"), ("git diff --no-i a b", "git option"), ("git diff -- {main}/x", "read outside the worktrees"),
+    ("git diff HEAD {home}", "read outside the worktrees"),
+    ("git restore '*.py'", "unsure"), ("git restore src/*.py", "unsure"), ("git restore ':/x'", "unsure"),
+    ("git restore --source HEAD~1 {main}/a.txt", "write outside the worktrees"), ("git restore -s HEAD '*.py'", "unsure"),
+    ("git restore -p x", "not on the list"), ("git restore --source=HEAD", "not on the list"),
+    ("git checkout feat/12-cart-total src/app.py", "not a worker branch"), ("git switch feat/12-cart-total origin/dev", "not a worker branch"),
+    ("git checkout -- '*.py'", "unsure"), ("git checkout origin/dev -- 'src/[a]pp.py'", "unsure"),
+    ("gh issue view https://github.com/other/repo/issues/1", "another repository"),
+    ("gh pr view https://evil.example/acme/webshop/pull/1", "another repository"), ("gh issue view other/repo#1", "another repository"),
+    ("gh issue view https://github.com/acme/webshop.evil/issues/1", "another repository"),
+    ("gh issue comment https://github.com/acme/webshop/../x/issues/1 --body x", "another repository"),
+    ("gh issue edit https://github.com/other/repo/issues/1 --add-label x", "another repository"),
+    ("gh pr checks https://github.com/acme/webshop@evil.example/pull/1", "another repository"),
+    ("python -m pytest -q @args.txt", "test option"), ("saani test -- python -m pytest -q @args.txt", "test option"),
+    ("/usr/bin/python -m pytest -q", "not on the list"), ("./python -m pytest -q", "not on the list"),
+    ("{work}/python.exe -m pytest -q", "not on the list"),
     ("saani test -- cat x", "not a test command"), ("saani test --kind tier1 -- bash -c ls", "not a test command"),
     ("python -m pytest -q --rootdir=/", "test option"), ("python -m pytest -q -c x.ini", "test option"),
     ("python -m pytest -q -o addopts=-pevil", "test option"), ("python -m pytest -q -qp evil", "test option"),
@@ -172,7 +213,7 @@ DENIED = [
     ("cd {main}", "cd outside the worktrees"), ("cd {home}", "cd outside the worktrees"), ("cd", "cd outside the worktrees"),
     ("cd {wt}", "cd outside the worktrees"), ("cd -", "cd outside the worktrees"), ("cd -P {work}", "cd outside the worktrees"),
     ("cd src*", "cd outside the worktrees"),
-    ("cd .. && cd ..", "cd outside the worktrees"), ("git -C {main} status", "cd outside the worktrees"),
+    ("cd .. && ls", "cd outside the worktrees"), ("git -C {main} status", "cd outside the worktrees"),
     ("git -C {wt} status", "cd outside the worktrees"),
     ("git -c core.sshCommand=x fetch", "git option"), ("git fetch --upload-pack=x origin", "git option"),
     ("git diff --output=/x", "git option"), ("git log --out=x", "git option"), ("git log --o=x", "git option"),
@@ -299,7 +340,7 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                                      "git add .env", "git show HEAD:.env", "git diff -- config/credentials.yml", "cat .envrc",
                                      "diff a.txt api_token.txt", "python -m pytest -q {work}/.env",
                                      "gh issue create --body-file .env", "ls {home}/.ssh", "wc -l app_secret.txt", "cat {home}/.netrc",
-                                     "cat /proc/self/environ", "grep -f .env a.txt", "grep --file=.env a.txt", "grep -if .env a.txt",
+                                     "cat /proc/self/environ",
                                      "cat {home}/.kube/config", "git commit -F .env", "rm .env"])
 def test_secrets_are_refused_inside_shell_commands(ctx, command):
     decision, reason, code, _ = sh(ctx, command)
@@ -351,16 +392,48 @@ def test_grep_reads_contents_only_inside_the_run_s_folders(ctx):
     assert tool(ctx, "Grep", pattern="total", path="{temp}")[2] == "grep outside the worktrees"
     assert tool(ctx, "Grep", pattern="total", path="{home}/.ssh")[2] == "secret"
     assert tool(ctx, "Grep", pattern="x", type="pem")[2] == "secret"
-    (pathlib.Path(ctx.places["work"]) / ".env").write_text("x")
+    deep = pathlib.Path(ctx.places["work"]) / "src" / "deep"
+    deep.mkdir()
+    (deep / ".env").write_text("x")                                                      # anywhere in the tree, not only at the top
     assert tool(ctx, "Grep", pattern="total", path="{work}")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.env")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="**/.env*")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.{{py,env}}")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.json")[2] == "secret"   # could be credentials.json: walked
     assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.py")[0] == "allow"
     assert tool(ctx, "Grep", pattern="total", path="{work}", type="py")[0] == "allow"
+    assert tool(ctx, "Grep", pattern="total", path="{work}/src/app.py")[0] == "allow"
+
+
+def test_grep_and_rm_refuse_a_tree_too_big_to_look_through(ctx, monkeypatch):
+    monkeypatch.setattr(guard, "WALK_CAP", 3)
+    big = pathlib.Path(ctx.places["work"]) / "big"
+    big.mkdir()
+    for k in range(5):
+        (big / f"f{k}.txt").write_text("x")
+    assert tool(ctx, "Grep", pattern="x", path="{work}/big")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="x", path="{work}/big", glob="*.txt")[2] == "secret"   # could match token.txt: walked
+    assert tool(ctx, "Grep", pattern="x", path="{work}/big", glob="*.py")[0] == "allow"
+    assert sh(ctx, "rm -rf {work}/big")[2] == "guard file"
+
+
+def test_rm_of_a_folder_looks_at_its_whole_tree(ctx):
+    docs = pathlib.Path(ctx.places["work"]) / "docs" / "sub"
+    docs.mkdir(parents=True)
+    (docs / "notes.md").write_text("x")
+    assert sh(ctx, "rm -rf {work}/docs")[0] == "allow"
+    (docs / "CLAUDE.local.md").write_text("x")
+    assert sh(ctx, "rm -rf {work}/docs")[2] == "guard file"
+    (docs / "CLAUDE.local.md").unlink()
+    (docs / ".github" / "workflows").mkdir(parents=True)
+    assert sh(ctx, "rm -rf {work}/docs")[2] == "guard file"
 
 
 def test_edits_are_allowed_only_in_the_worktrees_the_run_s_folder_and_temp(ctx):
     for t, key in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit", "file_path"), ("NotebookEdit", "notebook_path")):
         for ok in ("{work}/src/app.py", "{run}/notes.md", "{temp}/scratch.txt", "{wt}/13-other/x.py", "src/relative.py",
-                   "{work}/.github/workflows/ci.yml"):
+                   "{work}/.github/ISSUE_TEMPLATE/bug.md", "{work}/docs/workflows/x.md"):
             assert tool(ctx, t, **{key: ok})[0] == "allow", (t, ok)
         for bad in ("{main}/src/app.py", "{home}/notes.txt", "{home}/.bashrc", "{wt}/../outside.py", "{work}/../../webshop/x.py",
                     "~/x.txt"):
@@ -371,7 +444,10 @@ def test_edits_are_allowed_only_in_the_worktrees_the_run_s_folder_and_temp(ctx):
                                   "{work}/.claude/settings.json", "{work}/.claude/settings.local.json", "{work}/.claude/agents/x.md",
                                   "{work}/.git", "{work}/.githooks/commit-msg", "{work}/.mcp.json", "{work}/CLAUDE.md",
                                   "{work}/src/CLAUDE.md", "{temp}/saani/guard.py", "{temp}/.git/config", "{home}/.saani/auto/x.json",
-                                  "{home}/.saani/projects.toml", "{main}/saani.toml", "{main}/.git/hooks/pre-commit"])
+                                  "{home}/.saani/projects.toml", "{main}/saani.toml", "{main}/.git/hooks/pre-commit",
+                                  "{work}/.github/workflows/ci.yml", "{work}/.github/actions/setup/action.yml", "{work}/.github/CODEOWNERS",
+                                  "{work}/CODEOWNERS", "{work}/docs/CODEOWNERS", "{work}/.github/dependabot.yml", "{work}/CLAUDE.local.md",
+                                  "{work}/.git./config", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml"])
 def test_protected_files_are_never_edited_in_an_auto_run(ctx, path):
     decision, reason, code, _ = tool(ctx, "Write", file_path=path, content="x")
     assert (decision, code) == ("deny", "guard file"), (path, reason)
@@ -421,9 +497,11 @@ def fake_repo(tmp_path, toml=None):
     return main, work
 
 
-def hook(home, cwd, tool_name, session="s-1", raw=None, **tool_input):
-    event = {"session_id": session, "transcript_path": "t", "cwd": str(cwd), "permission_mode": "default", "hook_event_name": "PreToolUse",
+def hook(home, cwd, tool_name, session="s-1", raw=None, event_name="PreToolUse", response=None, **tool_input):
+    event = {"session_id": session, "transcript_path": "t", "cwd": str(cwd), "permission_mode": "default", "hook_event_name": event_name,
              "tool_name": tool_name, "tool_input": tool_input}
+    if response is not None:
+        event["tool_response"] = response
     env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home)}
     r = subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "guard"], input=raw if raw is not None else json.dumps(event).encode(),
                        capture_output=True, cwd=cwd, timeout=60, env=env)
@@ -433,6 +511,26 @@ def hook(home, cwd, tool_name, session="s-1", raw=None, **tool_input):
 
 
 AUTO_ON = f"python -I {PLUGIN}/saani.py auto on"
+
+
+def ran(text, **more):
+    """The Bash tool's response to a call that ended normally."""
+    return {"stdout": text, "stderr": "", "interrupted": False, "isImage": False, **more}
+
+
+def marker(run_id, folder):
+    return f"auto run {run_id} is on\nsaani auto: on {run_id} folder={guard.norm(folder)}\n"
+
+
+def run_folder(tmp_path, main, name="auto-run-1"):
+    run = tmp_path / "webshop-wt" / name
+    run.mkdir()
+    (run / ".git").write_text(f"gitdir: {fwd(main / '.git' / 'worktrees' / '12-cart-total')}\n")
+    return run
+
+
+def post(home, cwd, command, response, session="s-1"):
+    return hook(home, cwd, "Bash", session=session, event_name="PostToolUse", response=response, command=command)
 
 
 def test_the_shared_git_folder_is_found_from_a_worktree_without_git(tmp_path):
@@ -476,13 +574,12 @@ def test_present_mode_prints_nothing(tmp_path, home):
     assert not (home / ".saani" / "auto" / guard.REFUSALS).exists()
 
 
-def test_saani_auto_on_registers_the_session_and_off_removes_it(tmp_path, home):
+def test_saani_auto_on_is_asked_then_registered_after_it_ran_and_only_the_owner_ends_it(tmp_path, home):
     main, work = fake_repo(tmp_path)
-    run = tmp_path / "webshop-wt" / "auto-run-1"
-    run.mkdir()
-    (run / ".git").write_text(f"gitdir: {fwd(main / '.git' / 'worktrees' / '12-cart-total')}\n")
-    out = hook(home, run, "Bash", command=AUTO_ON)
-    assert out["permissionDecision"] == "allow" and "auto run run-1 on" in out["permissionDecisionReason"]
+    run = run_folder(tmp_path, main)
+    assert hook(home, run, "Bash", command=AUTO_ON) is None                             # present: the owner's permissions decide
+    assert guard.state("s-1") is None
+    assert post(home, run, AUTO_ON, ran(marker("run-1", run))) is None                  # PostToolUse prints nothing
     st = guard.state("s-1")
     assert st["id"] == "run-1" and st["main"] == str(main) and st["repo"] == "acme/webshop"
     assert guard.norm(st["folder"]) == guard.norm(run) and guard.norm(st["wt_dir"]) == guard.norm(tmp_path / "webshop-wt")
@@ -497,30 +594,71 @@ def test_saani_auto_on_registers_the_session_and_off_removes_it(tmp_path, home):
     sub = {"agent_id": "a-1", "agent_type": "saani:coder"}                              # a subagent's call: same session
     event = {"session_id": "s-1", "cwd": str(work), "tool_name": "Bash", "tool_input": {"command": "git push"}, **sub}
     assert hook(home, work, "Bash", raw=json.dumps(event).encode())["permissionDecision"] == "deny"
+    for switch in (AUTO_ON, AUTO_ON + " --deploy", "saani auto off", "saani auto off --run run-1"):
+        out = hook(home, run, "Bash", command=switch)
+        assert out["permissionDecision"] == "deny" and "saani auto off --run" in out["permissionDecisionReason"], switch
+    started = guard.state("s-1")["started"]
+    post(home, run, AUTO_ON + " --deploy", ran(marker("run-1", run)))                  # never re-armed
+    assert guard.state("s-1")["started"] == started and guard.state("s-1")["deploy"] is False
     log = (home / ".saani" / "auto" / guard.REFUSALS).read_text().splitlines()
     rows = [json.loads(line) for line in log]
-    assert [(r["tool"], r["reason"], r["word"], r["run"]) for r in rows] == [
+    assert [(r["tool"], r["reason"], r["word"], r["run"]) for r in rows][:4] == [
         ("Bash", "git push", "git", "run-1"), ("Read", "secret", "", "run-1"), ("Write", "guard file", "", "run-1"),
         ("Bash", "git push", "git", "run-1")]
     assert "secret-words-here" not in "".join(log) and "HEAD:dev" not in "".join(log)
-    assert guard.refusals("run-1") == {"total": 4, "by_reason": {"git push": 2, "secret": 1, "guard file": 1}}
+    assert guard.refusals("run-1") == {"total": 8, "by_reason": {"git push": 2, "secret": 1, "guard file": 1, "saani auto switch": 4}}
     assert guard.refusals("other")["total"] == 0
-    out = hook(home, work, "Bash", command="saani auto off")
-    assert out["permissionDecision"] == "allow" and guard.state("s-1") is None
-    assert hook(home, work, "Bash", command="git push") is None
-    assert guard.refusals()["total"] == 4
-
-
-def test_auto_on_registers_only_the_whole_command_from_inside_a_saani_project(tmp_path, home):
-    main, work = fake_repo(tmp_path)
-    assert hook(home, work, "Bash", command=f"cd {fwd(work)} && {AUTO_ON}") is None
-    assert hook(home, work, "Bash", command="python -I saani.py auto on") is None       # not the plugin's saani.py
-    assert hook(home, tmp_path, "Bash", command=AUTO_ON) is None                         # not a git checkout
+    assert guard.turn_off_run("run-1") == 1 and guard.turn_off_run("run-1") == 0       # the owner, from a terminal
     assert guard.state("s-1") is None
-    assert hook(home, work, "Bash", command=AUTO_ON + " --folder " + fwd(main)) is None  # a run folder outside the worktrees
-    assert hook(home, main, "Bash", command=AUTO_ON + " --id r-2")["permissionDecision"] == "allow"
-    assert guard.state("s-1")["folder"] is None                                          # the main checkout is never the run's folder
-    assert hook(home, main, "Bash", command="cd " + fwd(main))["permissionDecision"] == "deny"
+    assert hook(home, work, "Bash", command="git push") is None
+    assert guard.refusals()["total"] == 8
+
+
+@pytest.mark.parametrize("command,response,why", [
+    (AUTO_ON, {"stdout": "auto run run-1 is on\n", "interrupted": False}, "no marker"),
+    (AUTO_ON, "MARKER", "a plain text response with the marker"),
+    (AUTO_ON, {"stdout": "MARKER", "interrupted": True}, "interrupted"),
+    (AUTO_ON, {"stdout": "MARKER", "interrupted": False, "exit_code": 1}, "a non-zero exit code"),
+    (AUTO_ON, {"stdout": "MARKER" + "MARKER", "interrupted": False}, "the marker twice"),
+    (AUTO_ON, {"stdout": "  MARKER", "interrupted": False}, "the marker not at the start of a line"),
+    (AUTO_ON, {"stderr": "MARKER", "interrupted": False}, "the marker on stderr"),
+    (AUTO_ON + " --id other", {"stdout": "MARKER", "interrupted": False}, "another id than the marker's"),
+    (AUTO_ON + " --bogus", {"stdout": "MARKER", "interrupted": False}, "an unknown option"),
+    ("cd . && " + AUTO_ON, {"stdout": "MARKER", "interrupted": False}, "a chained command"),
+    ("echo 'saani auto: on run-1 folder=x'", {"stdout": "MARKER", "interrupted": False}, "not saani auto on"),
+    ("python -I saani.py auto on", {"stdout": "MARKER", "interrupted": False}, "not the plugin's saani.py"),
+])
+def test_registration_needs_the_whole_command_a_normal_end_and_one_marker(tmp_path, home, command, response, why):
+    main, work = fake_repo(tmp_path)
+    run = run_folder(tmp_path, main)
+    text = marker("run-1", run).split("\n", 1)[1]
+    response = response.replace("MARKER", text) if isinstance(response, str) else {
+        k: v.replace("MARKER", text) if isinstance(v, str) else v for k, v in response.items()}
+    post(home, run, command, response)
+    if why == "a plain text response with the marker":
+        assert guard.state("s-1")["id"] == "run-1"                                       # a string response is the output itself
+    else:
+        assert guard.state("s-1") is None, why
+
+
+def test_registration_needs_a_run_folder_inside_the_worktrees_of_a_saani_project(tmp_path, home):
+    main, work = fake_repo(tmp_path)
+    run = run_folder(tmp_path, main)
+    post(home, run, AUTO_ON, ran(marker("run-1", main)))                                 # the main checkout as the run's folder
+    post(home, run, AUTO_ON, ran(marker("run-1", tmp_path / "webshop-wt")))              # the worktrees folder itself
+    post(home, run, AUTO_ON, ran(marker("run-1", tmp_path / "webshop-wt" / "nope")))     # a folder that does not exist
+    post(home, run, AUTO_ON + " --folder " + fwd(work), ran(marker("run-1", run)))      # --folder and the marker disagree
+    post(home, tmp_path, AUTO_ON, ran(marker("run-1", tmp_path)))                        # not a git checkout
+    assert guard.state("s-1") is None
+    post(home, run, AUTO_ON + " --id run-1 --deploy", ran(marker("run-1", run)))
+    assert guard.state("s-1")["deploy"] is True
+
+
+def test_an_expired_entry_is_deleted(tmp_path, home):
+    old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
+    guard.turn_on("s-1", "r", "m", "w", started=old)
+    assert guard.state("s-1") is None
+    assert not (home / ".saani" / "auto" / "s-1.json").exists()
 
 
 def test_the_guard_fails_closed(tmp_path, home):
@@ -544,6 +682,8 @@ def test_the_plugin_ships_the_hook_through_its_own_saani_command():
     (entry,) = hooks["hooks"]["PreToolUse"]
     assert entry["matcher"] == "*"
     assert entry["hooks"] == [{"type": "command", "command": '"${CLAUDE_PLUGIN_ROOT}/bin/saani" guard', "timeout": 15}]
+    (after,) = hooks["hooks"]["PostToolUse"]
+    assert after["matcher"] == "Bash" and after["hooks"] == entry["hooks"]
     launcher = (ROOT / "bin" / "saani").read_text()
     assert '"$@"' in launcher and "%*" in (ROOT / "bin" / "saani.cmd").read_text()
     assert "py -3" in launcher and "WindowsApps" in launcher and "sys.exit(sys.version_info" not in launcher
