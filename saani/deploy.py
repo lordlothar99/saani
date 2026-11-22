@@ -126,9 +126,9 @@ def step_ci(gh):
     state, problem = green_on_itself(gh, sha)
     if state not in (None, "success"):
         raise Stop(f"{c.ci_status_context} is {state} on {sha[:7]}, the head of {c.production}: wait for it or fix it, then saani deploy again")
+    if problem:          # the head's own check runs (e.g. workflows on the push to production) count, status or not
+        raise Stop(problem + " (then saani deploy again)")
     if state == "success":
-        if problem:
-            raise Stop(problem + " (then saani deploy again)")
         print(f"1. CI: {c.ci_status_context} is success on {sha[:7]} (origin/{c.production})")
         return sha
     # No status of its own: a merge commit (what `gh pr merge --merge` leaves) is the same content as a parent that was tested.
