@@ -424,15 +424,15 @@ def test_the_board_is_the_default_page_and_the_kanban_has_its_own_address(monkey
     try:
         board, kanban = get("/"), get("/kanban")
         assert board == get("/board") == get("/index.html") and board.count('id="demo"') == 1
-        assert 'class="pages"' in kanban and 'href="/kanban" aria-current="page"' in kanban and 'href="/">Board</a>' in kanban
-        assert 'id="pages"' in board and 'href="/" aria-current="page">Board</a>' in board and 'href="/kanban">Kanban</a>' in board
+        assert 'class="pages"' in kanban and 'href="/kanban" aria-current="page"' in kanban and 'href="/">Map</a>' in kanban
+        assert 'id="pages"' in board and 'href="/" aria-current="page">Map</a>' in board and 'href="/kanban">Kanban</a>' in board
         assert 'id="refresh"' in board and 'id="refresh"' in kanban and 'id="proj"' in board
         with pytest.raises(urllib.error.HTTPError) as e:
             get("/nowhere")
         assert e.value.code == 404
     finally:
         server.shutdown()
-    assert '$("#pages").hidden = !live' in fp.BOARD_FILE.read_text(encoding="utf-8")     # the artifact build has no server: no page switch
+    assert '$("#pages").hidden = false' in fp.BOARD_FILE.read_text(encoding="utf-8")     # the artifact build shows the same menu, inert (no server)
 
 
 def two_projects(monkeypatch, tmp_path):

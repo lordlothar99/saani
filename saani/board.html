@@ -2,7 +2,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Michroma&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!-- Saani's board: the issues of a project as a desert war-game board seen from above. One source: served by `saani ui` at /board (live /api/state)
-     and published as a private artifact (falls back to mock-state.json beside it). Original desert world: no names, logos, typefaces,
+     and published as a private artifact (falls back to mock-state.json beside it; the top menu is the same there, the page switch, project selector and refresh inert). Original desert world: no names, logos, typefaces,
      characters or vehicle designs from any film or book. -->
 <style>
 /* Layout: a full-screen isometric board (SVG, pan and zoom), the HUD floating at the corners, panels over it. One dusk look, dark. */
@@ -31,7 +31,7 @@ body{background:var(--night);color:var(--bone);font:15px/1.5 var(--body);overflo
 .brand .title-row{display:flex;align-items:center;gap:14px}
 .brand .title-row .btn{padding:6px 8px;font-size:10px}
 .strip{font:500 11px/1.35 var(--mono);color:var(--dust);padding:2px 0 0;max-width:260px}.strip b{color:var(--sand)}.strip i{color:var(--ok);font-style:normal}.strip.warn b{color:var(--amber)}
-.pages{display:flex;gap:6px}.pages a{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--sand);text-decoration:none;padding:6px 8px;border:1px solid var(--edge-hi);background:rgba(20,13,8,.5)}.pages a:hover{color:var(--bone);border-color:var(--sand)}.pages a[aria-current]{color:var(--night);background:var(--sand);border-color:var(--sand)}
+.pages{display:flex;gap:6px}.pages a{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--sand);text-decoration:none;padding:6px 8px;border:1px solid var(--edge-hi);background:rgba(20,13,8,.5)}.pages a:hover{color:var(--bone);border-color:var(--sand)}.pages a[aria-disabled]{opacity:.45;pointer-events:none}.pages a[aria-current]{color:var(--night);background:var(--sand);border-color:var(--sand)}
 .brand .title-row select.btn{cursor:pointer;max-width:220px}
 .brand .title-row select.btn option{background:#140d08;color:var(--sand)}
 .badge{padding:5px 8px;border:1px solid var(--edge-hi);letter-spacing:.08em;text-transform:uppercase;font-size:10px}
@@ -177,7 +177,7 @@ a{color:var(--amber)}
  <radialGradient id="g-glow"><stop offset="0" stop-color="var(--amber)" stop-opacity=".55"/><stop offset="1" stop-color="var(--amber)" stop-opacity="0"/></radialGradient>
 </defs><g id="world"><g id="ground"></g><g id="worms"></g><g id="things"></g><g id="air"></g></g></svg></div>
 
-<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><nav id="pages" class="pages" aria-label="Pages" hidden><a href="/" aria-current="page">Board</a><a href="/kanban">Kanban</a></nav><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select><button id="refresh" class="btn" type="button" title="Ask GitHub and the rest again now (the board refreshes by itself every 5 seconds)" hidden>↻ Refresh</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
+<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><nav id="pages" class="pages" aria-label="Pages" hidden><a href="/" aria-current="page">Map</a><a href="/kanban">Kanban</a></nav><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select><button id="refresh" class="btn" type="button" title="Ask GitHub and the rest again now (the board refreshes by itself every 5 seconds)" hidden>↻ Refresh</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
 
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
@@ -1143,7 +1143,9 @@ function setData(d, live) {
   $("#src").textContent = live ? "Live" : "Sample data"; $("#src").className = "badge " + (live ? "live" : "sample");
   $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : (DATA.sample || {}).note || "Sample data";
   $("#clock").textContent = live ? "updated " + (DATA.time || "") : "snapshot " + ((DATA.sample || {}).taken || "");
-  $("#demo").hidden = live; $("#pages").hidden = !live; $("#refresh").hidden = !live;      // the page switch needs the server: the artifact build has none
+  $("#demo").hidden = live; $("#pages").hidden = false; $("#refresh").hidden = false;      // the same menu in the artifact build, but the page switch and refresh need the server: shown inert there
+  for (const x of document.querySelectorAll("#pages a")) { x.toggleAttribute("aria-disabled", !live); x.title = live ? "" : "Needs the Saani server on this PC"; }
+  $("#refresh").disabled = !live; $("#refresh").style.opacity = live ? "" : ".45"; $("#refresh").style.cursor = live ? "" : "default";
   projects(DATA.projects);
 }
 function demoStep() {
@@ -1169,7 +1171,8 @@ function pinProject() {
 function projects(list) {
   const sel = $("#proj"), slugs = (list || []).map(p => p.slug);
   if (PROJECT && !slugs.includes(PROJECT)) PROJECT = "";                    // a project taken out of the list: back to the first
-  sel.hidden = slugs.length < 2;
+  if (!slugs.length && !LIVE && DATA.project) { list = [{slug: slugOf(DATA.project.repo), name: DATA.project.name || DATA.project.repo, waiting: 0}]; slugs.push(list[0].slug); }   // the artifact build shows the selector too, with its one sample project
+  sel.hidden = LIVE ? slugs.length < 2 : !slugs.length; sel.disabled = !LIVE;
   const key = (list || []).map(p => p.slug + ":" + p.waiting).join();
   if (sel.dataset.key !== key) { sel.dataset.key = key; sel.replaceChildren(...(list || []).map(p => el("option", {value: p.slug}, (p.waiting ? "● " : "") + p.name + (p.waiting ? " (" + p.waiting + " wait for you)" : "")))); }
   sel.value = PROJECT || slugOf(DATA.project && DATA.project.repo) || slugs[0] || "";
