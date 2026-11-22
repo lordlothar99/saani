@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `saani comment <n> <kind>`: a status comment in the shape of `.github/COMMENT_KINDS.md` and its label change. `saani start` posts `Started` (`--no-comment` skips it), `saani land` posts `On dev` through it, `saani ci pr` posts `In PR` and `saani ci merged` posts `On main`, each once per pull request and issue.
 - The `saani` command: `start` (worktree per issue, hotfix from the prod tag), `land` (one landing at a time behind a lock, generated files
   rebuilt, tier 1 through the queue, retries when the integration branch moves), `status`, `prune`, `test` (one test queue for the PC),
   `check-msg` (the commit-msg hook), `ci` (GitHub Actions within the free minutes, the PC for the rest), `kpis`, `ui` (status page and

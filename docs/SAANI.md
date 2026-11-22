@@ -69,15 +69,16 @@ flowchart TB
 
 | Command | What it does |
 |---|---|
-| `saani start <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment. Warns when the issue has no milestone. |
+| `saani start <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment, `--no-comment` skips the `Started` comment (branch, worktree folder name). Warns when the issue has no milestone. |
 | `saani start <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: tier 1 against production, the branch pushed, the pull request into production opened. |
 | `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
+| `saani comment <n> <kind> [--text T] [--field K=V ...] [--dry-run]` | Posts a status comment on issue `n` and applies the kind's label change (Status comments, below). |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. |
 | `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
-| `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
+| `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). `ci pr` also posts `In PR` on the issues the pull request names, `ci merged` posts `On main` on those it relabels. |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
 | `saani ui [--open] [--json]` | The local map and kanban page (below): one map for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | The projects the map's selector offers, in `~/.saani/projects.toml`. |
@@ -158,9 +159,17 @@ The auto checklist is the plugin's skill (`skills/auto/SKILL.md`).
 
 Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
 (Auto, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
-A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
-`🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the auto fit, what is deployed, what the owner is
+A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `🔎 In review`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
+`📦 In PR`, `🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the auto fit, what is deployed, what the owner is
 asked, what blocks the issue); the map and the auto run read it through that one parser.
+
+### Status comments
+`saani comment <n> <kind>` writes a comment in the shape of `.github/COMMENT_KINDS.md` (heading, `--field KEY=VALUE` as a one-row table, `--text`
+as the body), posts it with `gh issue comment`, then applies the kind's label change with `gh issue edit` (labels from `[issues] labels`).
+Kinds: `started`, `review`, `blocked`, `question` (adds `answer`), `progress`, `on-dev` (adds `in_dev`), `in-pr`, `on-main` (adds `in_main`,
+removes `in_dev`), `deployed`, `linked`. The commands post theirs themselves: `start` (`Started`, unless `--no-comment`), `land` (`On dev`,
+unless `--no-comment`), `ci pr` (`In PR`) and `ci merged` (`On main`), the last two once per pull request and issue. A comment that gh
+refuses is a warning, never an undone step.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),

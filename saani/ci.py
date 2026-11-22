@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import time
 
-from . import config, core
+from . import comments, config, core
 
 LOG_NAME = "saani-ci.json"
 
@@ -262,10 +262,11 @@ def cmd_pr(run, head=None, force_pc=False):
     c = cfg()
     head = head or c.integration
     prs = run.json("gh", "pr", "list", "--repo", c.repo, "--base", c.production, "--head", head, "--state", "open",
-                   "--json", "number,headRefOid") or []
+                   "--json", "number,headRefOid,url") or []
     if not prs:
         raise SystemExit(f"no open {head} -> {c.production} pull request")
     number, sha = prs[0]["number"], prs[0]["headRefOid"]
+    comment_in_pr(run, number, prs[0].get("url"))
     if run.read("git", "rev-parse", f"origin/{head}", check=False) != sha:
         run.read("git", "fetch", "--quiet", "origin")
     b = current_budget(run)
@@ -300,7 +301,7 @@ def cmd_merged(run, number):
     """After a merge: the relabel (GitHub's workflow when it is on (sync); otherwise, or when it was refused, `[ci] relabel` or gh here) and the
     removal of the auto runs that are finished."""
     c = cfg()
-    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "state,mergedAt,title,body,commits") or {}
+    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "state,mergedAt,title,body,commits,mergeCommit") or {}
     if pr.get("state") != "MERGED":
         print(f"pull request #{number} is not merged: nothing to relabel")
         return 1
@@ -347,6 +348,16 @@ def issues_named(pr):
     return sorted({int(n) for n in re.findall(r"#(\d+)", "\n".join(texts))})
 
 
+def comment_in_pr(run, number, url=None):
+    """`In PR` on each issue the pull request names, once per pull request and issue; a refusal only prints."""
+    c = cfg()
+    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "title,body,commits") or {}
+    fields = {"PR": f"#{number}", **({"URL": url} if url else {})}
+    for n in issues_named(pr):
+        if n != number:
+            comments.try_post(n, "in-pr", fields, io=run, once=f"#{number}")
+
+
 def relabel_issues(run, number, pr):
     """The relabel done here, with gh: each issue the pull request names that carries the in-dev label swaps it for in-main."""
     c = cfg()
@@ -362,6 +373,10 @@ def relabel_issues(run, number, pr):
         except SystemExit as e:
             print(e)
             failed += 1
+            continue
+        oid = (pr.get("mergeCommit") or {}).get("oid")
+        comments.try_post(n, "on-main", {"PR": f"#{number}", **({"Merge commit": oid[:7]} if oid else {})}, io=run, labels=False,
+                          once=f"#{number}")
     if not run.dry:
         log({"job": "relabel", "pr": number, "place": "pc", "result": "failed" if failed else "passed"})
     return 1 if failed else 0

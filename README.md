@@ -111,6 +111,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers (`~/.saani/projects.toml`); one map shows them all |
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
+| `saani comment <n> <kind> [--text T] [--field K=V]` | `/saani:comment 42 blocked --text ...` | a status comment on an issue and its label (`start`, `land`, `ci pr` and `ci merged` post theirs by themselves) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |

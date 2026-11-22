@@ -1,6 +1,7 @@
 """The saani command: `python -I saani.py <command> ...` from inside a project's git checkout (README.md, docs/SAANI.md).
 
   start, auto, land, status, prune, test, check-msg     worktrees, landings, the test queue, the commit-msg hook (saani/core.py)
+  comment                                       a status comment on an issue and its label (saani/comments.py)
   ci                                            hybrid CI: GitHub Actions within the free minutes, the PC for the rest (saani/ci.py)
   kpis                                          the numbers over a window of days (saani/kpis.py)
   ui (aliases: map, board)                      the local status page and the isometric map (saani/board_server.py)
@@ -17,14 +18,14 @@ if sys.version_info < (3, 11):
 # -I leaves the script's folder off sys.path: put Saani's own folder there, and nothing else.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from saani import __version__, board_server, ci, core, kpis, progress  # noqa: E402
+from saani import __version__, board_server, ci, comments, core, kpis, progress  # noqa: E402
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="saani", description="Saani: GitHub issues from idea to production")
     parser.add_argument("--version", action="version", version=f"saani {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for module in (core, ci, kpis, board_server, progress):
+    for module in (core, ci, comments, kpis, board_server, progress):
         module.add_parsers(sub)
     args = parser.parse_args(argv)
     return args.run(args)
