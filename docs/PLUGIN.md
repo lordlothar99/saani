@@ -7,7 +7,7 @@ worker agents and the guard hook.
 |---|---|
 | `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:start`, `/saani:land`, `/saani:merge`, `/saani:deploy`, `/saani:comment`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `start`, `land`, `merge` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
 | `bin/saani`, `bin/saani.cmd` | the `saani` command inside Claude Code: `bin/` is on the PATH of Claude's shell while the plugin is enabled, and the launchers run `saani.py` from the plugin's own copy (bash: `py -3`, else `python`, else `python3`, never the Windows Store stub, and one Python process only, since the guard hook runs through it before every tool call; saani.py refuses a Python older than 3.11; Windows: `python`). `.gitattributes` keeps `bin/saani` in LF, or bash fails on Windows checkouts |
-| `skills/auto/SKILL.md` | `/saani:auto`, `/saani:auto 12 15`, `/saani:auto off`, and `/saani:auto run <id> --folder <path>` (the away part, in the headless session `claude -p ... --permission-mode auto --permission-prompts none` the present part prints: [SAANI.md, An auto run](SAANI.md#an-auto-run)): the checklist of an auto run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani auto`; `saani auto` makes the run's worktree and `saani auto on` switches the guard and the run's record on, both before the work, `saani auto status --check` before each pick applies the stop rules, `saani auto report --pr N --post` ends the run's work; the owner ends the run from a terminal with `saani auto off --run <id>`, since the guard refuses `off` inside it) |
+| `skills/auto/SKILL.md` | `/saani:auto`, `/saani:auto 12 15`, `/saani:auto off`, and `/saani:auto run <id> --folder <path>` (the away part, in the headless session `claude -p ... --permission-mode auto --permission-prompts none` the present part prints: [SAANI.md, An auto run](SAANI.md#an-auto-run)): the checklist of an auto run (Claude Code works alone for hours on the open issues, in a throwaway worktree made by `saani auto`; `saani auto` makes the run's worktree and `saani auto on` switches the guard and the run's record on, both before the work, `saani auto status --check` before each pick applies the stop rules, `saani auto report --pr N --post` ends the run's work; the owner ends the run from a terminal with `saani auto off --run <id>`, since the guard refuses `off` inside it) |
 | `hooks/hooks.json` | the guard: a PreToolUse hook on every tool and a PostToolUse hook on Bash (`"${CLAUDE_PLUGIN_ROOT}/bin/saani" guard`; on Windows Claude Code runs hooks through Git Bash, so `bin/saani` runs it there too). Present mode (no auto run registered for the session): it prints nothing and Claude Code asks as usual. Once `saani auto on` has run in that session (the owner is asked for it as usual; the PostToolUse hook then registers the session from the line `saani auto: on <id> folder=<path>` the command prints), for the session and its subagents: it allows the run's work at once and refuses the rest with a reason, never asks, and logs each refusal. A 15 s timeout: if the hook cannot run, Claude Code's normal permissions apply. A guardrail, not a sandbox: the tests run the worktree's code. How it decides: [SAANI.md, The guard](SAANI.md#the-guard). The **git** commit-msg hook is not part of the plugin: it is [.githooks/commit-msg](../.githooks/commit-msg), and needs `SAANI_HOME` because git runs it outside Claude Code |
 | `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`, `deployer`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` waits for its issue |
 
@@ -26,26 +26,26 @@ harness, is a one-line change after the cost per landing is measured (#8). A wor
 | Deployer | Sonnet | runs `saani deploy --dry-run`, reports the risks (the issues and commits in the range), reads a deploy log and says what a failure means; never deploys, never touches keys: the main session, which sees the owner, runs `saani deploy` or `saani merge --deploy` after the owner asks and taps their SSH agent |
 
 ## The pipeline from an issue to dev
-The Architect (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.
+Claude Code (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.
 
 | Step | Who | What |
 |---|---|---|
-| 1 | Architect | `saani start <n>`; reads the issue; decides alone or delegated (below) |
+| 1 | Claude Code | `saani start <n>`; reads the issue; decides alone or delegated (below) |
 | 2 | `saani:coder` | the change in that worktree, tier 0, tier 1 through the queue, one commit with `refs #n` and the trailers |
 | 3 | `saani:reviewer` | the diff and the issue only, never the coder's reasoning; a list of findings |
-| 4 | `saani:coder` | fixes the findings that are real (the Architect decides which); a new commit |
-| 5 | Architect | `saani land --worktree <path>` (the checks, the lock, tier 1, the push to dev) |
+| 4 | `saani:coder` | fixes the findings that are real (Claude Code decides which); a new commit |
+| 5 | Claude Code | `saani land --worktree <path>` (the checks, the lock, tier 1, the push to dev) |
 | 6 | `saani:scribe` | a comment on the issue only when `land` has not made it; labels from `saani.toml` |
 
-`saani:tester` drives any run of the tests that the Architect does not want in its own context (a full run), and `saani:researcher` answers a
-question before step 1 or 2. Only the Architect lands, pushes, closes or merges.
+`saani:tester` drives any run of the tests that Claude Code does not want in its own context (a full run), and `saani:researcher` answers a
+question before step 1 or 2. Only Claude Code, the main session, lands, pushes, closes or merges.
 
-**When the Architect works alone:** a change of a few lines in one or two files, a typo, a document sentence, a setting. A subagent costs a
+**When Claude Code works alone:** a change of a few lines in one or two files, a typo, a document sentence, a setting. A subagent costs a
 briefing and a report; below that size it costs more than it saves. **When it delegates:** the change spans many files or needs a long
 read; a failure log to read (Tester); a fresh review (Reviewer, always for a change to the guard, the landing or the CI); a question that
 needs reading many pages (Researcher). Parallel coders each get their own worktree.
 
-**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`, at most 3): the Architect asks `saani auto pick --json` for
+**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`, at most 3): Claude Code asks `saani auto pick --json` for
 the free slots and the next eligible issues, starts each (`saani start`), runs its coder in the background, and reviews and lands as each
 coder finishes. Landings are one at a time (the lock); a slot that frees is filled at once by a new `saani auto pick`. Issues whose likely
 files overlap are not run side by side. See `skills/auto/SKILL.md`.

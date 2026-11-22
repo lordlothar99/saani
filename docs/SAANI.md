@@ -1,6 +1,6 @@
 # Saani
 
-Saani is how an AI workshop builds a GitHub project. The owner talks to one contact, **the Architect** (the main Claude Code session), who
+Saani is how an AI workshop builds a GitHub project. The owner talks to one contact, **Claude Code** (the main session), which
 plans the work, hands parts of it to **workers** (Claude Code subagents, each with a model that fits its job), checks what they bring back
 and reports. Saani is the set of commands, rules and pages that keeps that workshop safe and fast: one worktree per task, landings one at a
 time, one test queue for the whole PC, CI within GitHub's free minutes, long unattended runs, and a map that shows every issue on its way.
@@ -9,7 +9,7 @@ The status of each feature lives in its GitHub issue (epic: Saani v1), never in 
 `saani.toml` ([CONFIG.md](CONFIG.md)).
 
 ## Principles
-- **One contact.** The owner speaks with the Architect. The Architect delegates, follows up, decides what comes back to the owner, and asks
+- **One contact.** The owner speaks with Claude Code. Claude Code delegates, follows up, decides what comes back to the owner, and asks
   one question at a time, with a recommendation.
 - **The right model for each job, from any provider.** A worker is defined by its role and its contract (a task in; a result and its cost
   out), never by a vendor. Each role gets the cheapest model that meets its quality bar, measured. No model at all where a script does the
@@ -33,7 +33,7 @@ The status of each feature lives in its GitHub issue (epic: Saani v1), never in 
 ```mermaid
 flowchart TB
     owner(["The owner"])
-    architect["Architect<br/>plans, delegates, reviews, reports"]
+    architect["Claude Code<br/>plans, delegates, reviews, reports"]
     owner <-->|one contact| architect
     subgraph workers["Workers · Claude Code subagents, one worktree each"]
         coder["Coder"]
@@ -143,7 +143,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 ## The map and the kanban page
 `saani ui` (aliases `saani map`, `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
 - **`/kanban`, the kanban page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
-  needs and a "Copy prompt" to paste to the Architect; the open pull request with its CI in three colours; the Claude Code sessions of the
+  needs and a "Copy prompt" to paste to Claude Code; the open pull request with its CI in three colours; the Claude Code sessions of the
   project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in); the
   PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
@@ -252,7 +252,7 @@ asked, what blocks the issue); the map and the auto run read it through that one
 ### An auto run
 An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM, at most 3). Each
 issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`, the coder (in the background, so several issues
-progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a time (the lock). The Architect asks `saani auto pick
+progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a time (the lock). Claude Code asks `saani auto pick
 --json` whenever a slot is free and takes the first eligible issue, so an issue that lands is replaced at once and the list is never a
 stale one. Two issues whose likely files overlap (the paths the issue body names between backticks, against the files the running
 worktrees changed and the other picked issues) are not run side by side: the later one waits, and `pick` says "overlaps #m (path)". The
@@ -281,7 +281,7 @@ The skill runs `saani auto status --check` before each pick and whenever a slot 
 
 **The journal.** While a run is on, every status comment (`saani comment`, and those `start`, `ci pr` and `ci merged` post) and every landing adds one JSON line `{time, issue, kind}` to `build/saani-auto-<id>.jsonl`; it never fails the command it notes.
 
-**The report.** `saani auto report` builds the Markdown from the record, git, gh, the guard's log and the journal: start, end, duration, why the run stopped ("Stopped by": the limit reached, or "finished the list"), id and the folder's name only (a report posted on a pull request holds no path of the owner's machine); the issues landed (the `refs #n` of the integration commits since the start, with their titles); the issues left with a question or blocked (open issues whose latest status comment, written since the start, is the question or blocked kind, or whose latest journal line is; an issue that landed is never left); the refusals by reason; the cost for the window (`saani/cost.py`: tokens and the estimate per issue, role and model; the window counts whole days from the start's date); the timeline; and the next step: `/saani:merge N` or `/saani:merge N --deploy`. With `--post` it is also a comment on the pull request. The skill adds what only the Architect knows (the options for each pending issue).
+**The report.** `saani auto report` builds the Markdown from the record, git, gh, the guard's log and the journal: start, end, duration, why the run stopped ("Stopped by": the limit reached, or "finished the list"), id and the folder's name only (a report posted on a pull request holds no path of the owner's machine); the issues landed (the `refs #n` of the integration commits since the start, with their titles); the issues left with a question or blocked (open issues whose latest status comment, written since the start, is the question or blocked kind, or whose latest journal line is; an issue that landed is never left); the refusals by reason; the cost for the window (`saani/cost.py`: tokens and the estimate per issue, role and model; the window counts whole days from the start's date); the timeline; and the next step: `/saani:merge N` or `/saani:merge N --deploy`. With `--post` it is also a comment on the pull request. The skill adds what only Claude Code knows (the options for each pending issue).
 
 ### Status comments
 `saani comment <n> <kind>` writes a comment in the shape of `.github/COMMENT_KINDS.md` (heading, `--field KEY=VALUE` as a one-row table, `--text`
@@ -351,17 +351,17 @@ that uses `{key}` may ask for its own tap.
 landings and conflicts by file, test jobs per kind (median wait and run, failures). The owner's waiting time and interventions
 have no machine record: it says "not measured". It also reads Claude Code's session transcripts (`~/.claude/projects/<folder>/`, or under
 `CLAUDE_CONFIG_DIR`; the folder of the main checkout and those of the worktrees, subagents included, never a sibling project's) and shows "Tokens and cost (estimate)":
-input, output, cache read and cache write tokens and an estimated cost per issue (top 10 by cost), per role (the Architect, or the
+input, output, cache read and cache write tokens and an estimated cost per issue (top 10 by cost), per role (`architect`: Claude Code's main session, or the
 subagent's type: coder, reviewer...) and per model, also in `--json` under `tokens`. Only ids, models, usage numbers, folders, branches,
 times and subagent descriptions are kept, never a message's text (the lines are parsed whole, only those fields are retained); a message id counts once. A message belongs to the issue named by its
-worker branch (the project's own branch pattern), else by its worktree folder, else by `#n` in its subagent's description, else to "unattributed" (the Architect's overhead).
+worker branch (the project's own branch pattern), else by its worktree folder, else by `#n` in its subagent's description, else to "unattributed" (the main session's overhead).
 The prices are one table in `saani/cost.py` (USD per million tokens, by model id or family; a cache write costs 1.25x the input price for 5 minutes, 2x for 1 hour): estimates, to check against the provider's price
 page; a model without a price shows its tokens and a cost of "?". `--baseline` adds the window of the same length just before (git history only).
 
 ## Models and cost
 1. **No model where a script will do.** Running tests, landing, relabelling and the gate are scripts. A model only reads a failure and says
    what it means.
-2. **Judgement stays on the strongest model.** The Architect and the Reviewer keep a top model; a weak review lets bugs through.
+2. **Judgement stays on the strongest model.** Claude Code's main session and the Reviewer keep a top model; a weak review lets bugs through.
 3. **Routine roles go to the cheapest model that passes.** The Scribe, the Researcher's first pass, the Tester's summary and simple coding
    tasks are candidates for cheaper models, from any provider. Chosen by a trial, never by a price list alone.
 4. **Through a harness that keeps the rules.** Whatever the tool, a worker gets the same limits: its own worktree, no push except through the
@@ -371,7 +371,7 @@ page; a model without a price shows its tokens and a cost of "?". `--baseline` a
 
 ## Choices, and why
 - **Claude Code subagents.** A coding tool with editing, git, tests, review, hooks and permissions per worker.
-- **No cockpit app.** Multi-agent cockpits show many agents to a human who dispatches them; here the Architect dispatches and the owner keeps
+- **No cockpit app.** Multi-agent cockpits show many agents to a human who dispatches them; here Claude Code dispatches and the owner keeps
   one conversation. The map is enough for a glance.
 - **Agent teams later.** Claude Code's agent teams are experimental and document no worktree per teammate; they are to be tried on research
   and review only.

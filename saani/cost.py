@@ -9,7 +9,7 @@ Only numbers and ids are read: message id, model, usage, folder, branch, time, a
 A message id seen on several lines is counted once.
 
 An issue is found, first match: the worker branch (`task/12-words`), the worktree folder in the session's folder, `#12` in a subagent's
-description; else "unattributed" (the Architect's own overhead). A role is "architect" for a main session, else the subagent's type
+description; else "unattributed" (the main session's own overhead). A role is "architect" for Claude Code's main session, else the subagent's type
 without its `saani:` prefix.
 """
 import datetime
@@ -76,7 +76,7 @@ def issue_of(branch, cwd, wt_name, description="", worker_branch=None):
 
 
 def role_of(agent_type):
-    """None (a main session) is the architect; a subagent is its type without the `saani:` prefix."""
+    """None (Claude Code's main session) is the role `architect`; a subagent is its type without the `saani:` prefix."""
     if not agent_type:
         return "architect"
     return agent_type[len("saani:"):] if agent_type.startswith("saani:") else agent_type

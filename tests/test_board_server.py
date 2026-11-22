@@ -273,7 +273,7 @@ def test_the_pull_request_shows_green_yellow_or_red_and_only_its_tasks():
 
 
 def test_the_top_left_shows_the_architect_sessions():
-    """the Architect sessions in the top left, in place of the explanations."""
+    """the Claude Code sessions in the top left, in place of the explanations."""
     top = fp.page()[fp.page().index('<div class="top">'):fp.page().index('<div class="slab pc"')]
     assert 'id="crew"' in top and "How to work" not in fp.page() and fp.page().count('id="crew"') == 1
 

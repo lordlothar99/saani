@@ -22,13 +22,13 @@ One Claude Code session is fast. Several at once, or one left alone for hours, r
 | You have to stay at the keyboard | `/saani:auto` lets Claude work through the open issues for hours, then hand back one pull request and a report |
 | You don't know where things stand | `saani ui` opens the map: every issue, worktree, test job and Claude session on a local page |
 
-You talk to one Claude Code session, **the Architect**. It plans the work, hands tasks to subagents (**workers**), checks what they return
+You talk to one **Claude Code** session. It plans the work, hands tasks to subagents (**workers**), checks what they return
 and reports back to you. Saani provides the commands and rules that keep this safe.
 
 ## How it works
 ```mermaid
 flowchart LR
-    you(["You"]) <--> arch["Architect<br/>(main Claude Code session)"]
+    you(["You"]) <--> arch["Claude Code<br/>(the main session)"]
     arch --> w1["worker · worktree #12"] & w2["worker · worktree #15"]
     w1 & w2 -->|saani test| q[["test queue<br/>one job at a time"]]
     w1 & w2 -->|saani land| lock{{"landing lock"}}

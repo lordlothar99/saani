@@ -1,6 +1,6 @@
 ---
 name: auto
-description: Run a Saani auto run (the Architect works for hours alone on the open GitHub issues of the project). Use when the owner types /saani:auto, /saani:auto 12 15 (only those issues), or /saani:auto off.
+description: Run a Saani auto run (Claude Code works for hours alone on the open GitHub issues of the project). Use when the owner types /saani:auto, /saani:auto 12 15 (only those issues), or /saani:auto off.
 ---
 
 # /saani:auto: a Saani auto run
@@ -50,7 +50,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that.
-1. **The pipeline, several issues at once.** You are the Architect: you brief, decide and land; the coder and the reviewer do the reading
+1. **The pipeline, several issues at once.** You are Claude Code, the main session: you brief, decide and land; the coder and the reviewer do the reading
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
    - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel` less those in worktrees) and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping

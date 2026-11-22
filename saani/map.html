@@ -931,7 +931,7 @@ const ROLE = {
   Coder: {color: "ochre", glyph: "M2 8L6 4M4.5 2.5L7.5 5.5L9 4L6 1Z"}, Tester: {color: "water", glyph: "M4 1H6V4L8.5 9H1.5L4 4Z"},
   Reviewer: {color: "bone", glyph: "M1 5Q5 1 9 5Q5 9 1 5ZM5 3.8A1.2 1.2 0 1 0 5 6.2A1.2 1.2 0 1 0 5 3.8"}, Scribe: {color: "sand", glyph: "M8.5 1Q3 3 2 9L3 8Q6 6 8.5 1Z"},
   Researcher: {color: "ok", glyph: "M4 1.5A2.6 2.6 0 1 0 4 6.7A2.6 2.6 0 1 0 4 1.5M5.9 6L9 9"}, Sentinel: {color: "alert", glyph: "M5 1L9 2.5V5Q9 8 5 9.5Q1 8 1 5V2.5Z"},
-  Deployer: {color: "ember", glyph: "M1 8L9 2L6 9L5 6Z"}, Architect: {color: "amber", glyph: "M5 1L6.2 5L5 9L3.8 5ZM1 5H9"},
+  Deployer: {color: "ember", glyph: "M1 8L9 2L6 9L5 6Z"}, "Claude Code": {color: "amber", glyph: "M5 1L6.2 5L5 9L3.8 5ZM1 5H9"},
 };
 // A worker's look is its role's, wherever it stands: `saani:coder` (a plugin's agent), `coder` and `Coder` are all the Coder (#42)
 const roleOf = name => Object.keys(ROLE).find(k => k.toLowerCase() === String(name || "").split(":").pop().toLowerCase());
@@ -955,7 +955,7 @@ function workers() {
     out.push({id: "r:" + r.name, name: r.name, role: r.name, kind: r.kind, model: r.model, what: r.what, file: r.file, runs: r.runs || 0, running,
               state: running.length ? "working" : r.kind === "planned" ? "planned" : "idle", issue, staged: r.staged});
   }
-  (DATA.crew || []).forEach((s, i) => out.push({id: "s:" + (s.session || i), name: "Architect", role: "Architect", kind: "architect", model: s.model, folder: s.name, branch: s.branch,
+  (DATA.crew || []).forEach((s, i) => out.push({id: "s:" + (s.session || i), name: "Claude Code", role: "Claude Code", kind: "architect", model: s.model, folder: s.name, branch: s.branch,
     state: s.state, issue: s.issue || null, age: s.age_min}));
   return out;
 }
@@ -1266,7 +1266,7 @@ function zonePanel(z) {
 }
 function workerPanel(w) {
   const where = w.issue ? DATA.cards.find(c => c.number === w.issue) : null;
-  const kind = {defined: "Defined in the repo", planned: "Planned role, not hired yet", "built-in": "Built into Claude Code", architect: "An Architect chat"}[w.kind] || w.kind;
+  const kind = {defined: "Defined in the repo", planned: "Planned role, not hired yet", "built-in": "Built into Claude Code", architect: "A Claude Code chat"}[w.kind] || w.kind;
   return el("div", {class: "panel small", role: "dialog", "aria-modal": "true", "aria-label": w.name},
     el("header", {}, el("svg", {width: 44, height: 56, viewBox: "-22 -46 44 56", html: workerSVG({...w, state: w.state === "working" ? "idle" : w.state})}),
       el("div", {}, el("h2", {}, w.name + (w.folder ? " · " + w.folder : "")), el("div", {class: "chips"}, el("span", {class: "tag"}, kind), el("span", {class: w.state === "working" ? "tag hot" : "tag"}, stateWord(w)), w.staged ? el("span", {class: "tag staged"}, "Staged sample") : null)),

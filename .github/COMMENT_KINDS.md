@@ -1,6 +1,6 @@
 # Comment kinds
 
-Every comment the Architect (or a worker) writes on an issue starts with one of these headings, so the owner and the map can scan the
+Every comment Claude Code (or a worker) writes on an issue starts with one of these headings, so the owner and the map can scan the
 history. Tables and checkboxes over prose.
 
 | Heading | When | Content |

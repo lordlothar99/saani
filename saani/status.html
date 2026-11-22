@@ -166,11 +166,11 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 <canvas id="dust"></canvas><div class="shade"></div>
 <div class="wrap">
 <header>
- <div class="brand"><small>THE ARCHITECT'S WORKSHOP · THIS PC</small><h1>SAANI</h1><nav class="pages" aria-label="Pages"><a href="/">Map</a><a href="/kanban" aria-current="page">Kanban</a></nav></div>
+ <div class="brand"><small>CLAUDE CODE'S WORKSHOP · THIS PC</small><h1>SAANI</h1><nav class="pages" aria-label="Pages"><a href="/">Map</a><a href="/kanban" aria-current="page">Kanban</a></nav></div>
  <div class="hud"><span class="pill" id="clock">--:--:--</span><span class="pill" id="lock">no task joining dev</span><span class="pill" id="counts"></span><select class="pill refresh" id="proj" aria-label="Project" hidden></select><button class="pill refresh" id="refresh" type="button" title="The page refreshes every 5 s. Behind it: the PC every 5 s, the pull request every 30 s, the issues every minute, where CI runs every 10 min. Click: ask GitHub and the PC again now.">↻ Refresh</button></div>
 </header>
 <div class="top">
- <div class="slab sessions"><h3>Architect sessions <i id="crew-n"></i></h3><div class="list" id="crew"></div></div>
+ <div class="slab sessions"><h3>Claude Code sessions <i id="crew-n"></i></h3><div class="list" id="crew"></div></div>
  <div class="slab pc" id="pc"></div>
 </div>
 <h2>Tasks <i>one card per issue · the agent on it · click a column's title to fold it</i></h2>
@@ -195,7 +195,7 @@ function table(head,rows){return el("table",{},el("tr",{},head.map(h=>el("th",{}
 const err=x=>x&&x.error?el("div",{class:"err"},x.error):null;
 function fmt(x){if(x==null||x==="")return"";const n=Number(x);return isNaN(n)?String(x):(n>=90?(n/60).toFixed(1)+" min":Math.round(n)+" s")}
 async function copy(text,btn,label="Copy prompt"){try{await navigator.clipboard.writeText(text)}catch(e){const t=el("textarea",{});t.value=text;document.body.append(t);t.select();document.execCommand("copy");t.remove()}
- btn.textContent="Copied · paste it to the Architect";btn.classList.add("done");setTimeout(()=>{btn.textContent=label;btn.classList.remove("done")},2600)}
+ btn.textContent="Copied · paste it to Claude Code";btn.classList.add("done");setTimeout(()=>{btn.textContent=label;btn.classList.remove("done")},2600)}
 function agentLine(a){const running=a.subagents.filter(s=>s.state!=="done");
  return el("div",{class:"agent "+a.state},el("div",{class:"who"},el("span",{class:"dot"}),a.name+" · "+a.state+(a.model?" · "+model(a.model):"")),
   running.map(s=>el("div",{class:"sub"},"↳ "+s.type+": "+s.description)))}
