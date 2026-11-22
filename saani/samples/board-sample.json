@@ -1,0 +1,1678 @@
+{
+ "sample": {
+  "taken": "sample",
+  "note": "Synthetic sample: an invented project (acme/webshop) with every step of the board filled. No real data.",
+  "staged": []
+ },
+ "time": "10:00:00",
+ "project": {
+  "name": "webshop",
+  "repo": "acme/webshop",
+  "integration": "dev",
+  "production": "main",
+  "folders": {
+   "work": "C:/work/webshop",
+   "deploy": "C:/work/webshop-main"
+  },
+  "labels": {
+   "answer": "help wanted",
+   "act": "owner-action",
+   "in_dev": "in-dev",
+   "in_main": "in-main",
+   "idea": "idea"
+  }
+ },
+ "cards": [
+  {
+   "number": 101,
+   "title": "Dark mode for the settings screen",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": null,
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "inbox",
+   "detail": {
+    "summary": "Sample issue. Dark mode for the settings screen: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/101"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 102,
+   "title": "Export orders as CSV",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": null,
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "inbox",
+   "detail": {
+    "summary": "Sample issue. Export orders as CSV: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/102"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 103,
+   "title": "Cache product images on the CDN",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Cache product images on the CDN: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/103"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 104,
+   "title": "Retry failed payment webhooks",
+   "state": "OPEN",
+   "labels": [
+    "infra"
+   ],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Retry failed payment webhooks: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/104"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 105,
+   "title": "Search: typo tolerance",
+   "state": "OPEN",
+   "labels": [
+    "owner-action"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": "act",
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Search: typo tolerance: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/105"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 106,
+   "title": "Accessibility audit of checkout",
+   "state": "OPEN",
+   "labels": [
+    "owner-action"
+   ],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": "act",
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Accessibility audit of checkout: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/106"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 107,
+   "title": "Rate-limit the public API",
+   "state": "OPEN",
+   "labels": [
+    "infra",
+    "owner-action"
+   ],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": "act",
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "longrun": {
+    "fit": "partly",
+    "why": "the code yes; the carrier's sandbox account is the owner's",
+    "source": "At a glance"
+   },
+   "detail": {
+    "summary": "Sample issue. Rate-limit the public API: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/107"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 108,
+   "title": "Weekly sales digest by email",
+   "state": "OPEN",
+   "labels": [
+    "infra"
+   ],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Weekly sales digest by email: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/108"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 109,
+   "title": "Archive old carts after 90 days",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Archive old carts after 90 days: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/109"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 110,
+   "title": "Upgrade the web framework",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Upgrade the web framework: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/110"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 111,
+   "title": "Translate the help pages",
+   "state": "OPEN",
+   "labels": [
+    "infra"
+   ],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Translate the help pages: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/111"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 112,
+   "title": "Shipping estimate on the product page",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "backlog",
+   "detail": {
+    "summary": "Sample issue. Shipping estimate on the product page: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/112"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 113,
+   "title": "Choose the payment provider for Norway",
+   "state": "OPEN",
+   "labels": [
+    "help wanted"
+   ],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": "answer",
+   "prompt": null,
+   "runs": [],
+   "step": "you",
+   "detail": {
+    "summary": "Sample issue. Choose the payment provider for Norway: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/113"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 114,
+   "title": "Approve the new pricing table",
+   "state": "OPEN",
+   "labels": [
+    "owner-action"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": "act",
+   "prompt": null,
+   "runs": [],
+   "step": "you",
+   "detail": {
+    "summary": "Sample issue. Approve the new pricing table: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/114"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 115,
+   "title": "Create the production API key for the carrier",
+   "state": "OPEN",
+   "labels": [
+    "owner-action"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": "act",
+   "prompt": null,
+   "runs": [],
+   "step": "you",
+   "detail": {
+    "summary": "Sample issue. Create the production API key for the carrier: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/115"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 116,
+   "title": "Coupon codes with an end date",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "started",
+   "detail": {
+    "summary": "Sample issue. Coupon codes with an end date: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/116"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 117,
+   "title": "Wishlist shared by link",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": {
+    "path": "../webshop-wt/117-work",
+    "folder": "117-work",
+    "branch": "feat/117-work",
+    "issue": 117,
+    "ahead": 3,
+    "dirty": 1,
+    "last": "wip",
+    "when": "5 minutes ago"
+   },
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "building",
+   "detail": {
+    "summary": "Sample issue. Wishlist shared by link: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/117"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 118,
+   "title": "Faster cart totals",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": {
+    "path": "../webshop-wt/118-work",
+    "folder": "118-work",
+    "branch": "feat/118-work",
+    "issue": 118,
+    "ahead": 3,
+    "dirty": 1,
+    "last": "wip",
+    "when": "5 minutes ago"
+   },
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [
+    {
+     "checkout": "118-work",
+     "file": "tier1.out",
+     "line": "tier 1 · 120/240 tests · 50% · 1 min left",
+     "age_min": 0,
+     "live": true
+    }
+   ],
+   "step": "testing",
+   "detail": {
+    "summary": "Sample issue. Faster cart totals: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/118"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 119,
+   "title": "Fix: totals rounding in SEK",
+   "state": "OPEN",
+   "labels": [
+    "in-dev"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "dev",
+   "detail": {
+    "summary": "Sample issue. Fix: totals rounding in SEK: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/119"
+   },
+   "type": "Bug"
+  },
+  {
+   "number": 120,
+   "title": "Order page shows the carrier",
+   "state": "OPEN",
+   "labels": [
+    "in-dev"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "dev",
+   "detail": {
+    "summary": "Sample issue. Order page shows the carrier: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/120"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 121,
+   "title": "Login loop on expired sessions",
+   "state": "OPEN",
+   "labels": [
+    "in-dev"
+   ],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "pr",
+   "detail": {
+    "summary": "Sample issue. Login loop on expired sessions: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/121"
+   },
+   "type": "Bug"
+  },
+  {
+   "number": 122,
+   "title": "Stock count per warehouse",
+   "state": "OPEN",
+   "labels": [
+    "in-dev"
+   ],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "pr",
+   "detail": {
+    "summary": "Sample issue. Stock count per warehouse: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/122"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 123,
+   "title": "New checkout address form",
+   "state": "OPEN",
+   "labels": [
+    "in-main"
+   ],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "deploy",
+   "detail": {
+    "summary": "Sample issue. New checkout address form: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/123"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 124,
+   "title": "Test tiers for the API",
+   "state": "OPEN",
+   "labels": [
+    "in-main"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "close",
+   "detail": {
+    "summary": "Sample issue. Test tiers for the API: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/124"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 125,
+   "title": "Release notes template",
+   "state": "OPEN",
+   "labels": [
+    "in-main"
+   ],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "close",
+   "detail": {
+    "summary": "Sample issue. Release notes template: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/125"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 126,
+   "title": "v1.2 live checks: the checklist of the live system",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "checks",
+   "anchor": true,
+   "detail": {
+    "summary": "Sample issue. v1.2 live checks: the checklist of the live system: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": false,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/126"
+   },
+   "type": "Task"
+  },
+  {
+   "number": 127,
+   "title": "Password reset email",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Password reset email: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/127"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 128,
+   "title": "Product reviews moderation",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Product reviews moderation: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/128"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 129,
+   "title": "Sitemap for search engines",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Sitemap for search engines: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/129"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 130,
+   "title": "Invoice PDF layout",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v1.1.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Invoice PDF layout: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/130"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 131,
+   "title": "Cookie banner text",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Cookie banner text: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/131"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 132,
+   "title": "Order status webhooks",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Order status webhooks: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/132"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 133,
+   "title": "Fix: duplicate emails",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v2.0.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Fix: duplicate emails: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/133"
+   },
+   "type": "Bug"
+  },
+  {
+   "number": 134,
+   "title": "Admin: bulk price edit",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Admin: bulk price edit: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/134"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 135,
+   "title": "Health check endpoint",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Health check endpoint: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/135"
+   },
+   "type": "Feature"
+  },
+  {
+   "number": 136,
+   "title": "Slow category page",
+   "state": "CLOSED",
+   "labels": [],
+   "milestone": "v1.2.0",
+   "worktree": null,
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "done",
+   "detail": {
+    "summary": "Sample issue. Slow category page: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": false,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/136"
+   },
+   "type": "Bug"
+  }
+ ],
+ "pr": {
+  "number": 250,
+  "title": "dev into main: sample release",
+  "url": "https://github.com/acme/webshop/pulls",
+  "ci": {
+   "state": "running",
+   "text": "saani/ci: full run on the PC, 40%"
+  },
+  "inside": [
+   121,
+   122
+  ]
+ },
+ "crew": [
+  {
+   "session": "a1b2c3",
+   "name": "webshop",
+   "branch": "dev",
+   "model": "",
+   "state": "working",
+   "age_min": 0,
+   "issue": 117
+  },
+  {
+   "session": "d4e5f6",
+   "name": "webshop",
+   "branch": "main",
+   "model": "",
+   "state": "asleep",
+   "age_min": 200,
+   "issue": null
+  }
+ ],
+ "roster": [
+  {
+   "name": "Coder",
+   "kind": "planned",
+   "model": "Sonnet or Opus",
+   "what": "writes the change for one issue in its own worktree",
+   "file": "planned: .claude/agents/coder.md",
+   "runs": 2,
+   "running": [
+    {
+     "description": "#117 wishlist by link",
+     "session": "webshop",
+     "state": "working",
+     "issue": 117
+    }
+   ]
+  },
+  {
+   "name": "Tester",
+   "kind": "planned",
+   "model": "Haiku",
+   "what": "runs the tests and says what a failure means",
+   "file": "planned: .claude/agents/tester.md",
+   "runs": 3,
+   "running": [
+    {
+     "description": "#118 tier 1 run",
+     "session": "webshop",
+     "state": "working",
+     "issue": 118
+    }
+   ]
+  },
+  {
+   "name": "Reviewer",
+   "kind": "planned",
+   "model": "Opus",
+   "what": "reviews the diff with fresh eyes",
+   "file": "planned: .claude/agents/reviewer.md",
+   "runs": 0,
+   "running": []
+  },
+  {
+   "name": "Scribe",
+   "kind": "planned",
+   "model": "Haiku",
+   "what": "issue comments and labels",
+   "file": "planned: .claude/agents/scribe.md",
+   "runs": 0,
+   "running": []
+  },
+  {
+   "name": "Researcher",
+   "kind": "planned",
+   "model": "Sonnet",
+   "what": "reads docs and code",
+   "file": "planned: .claude/agents/researcher.md",
+   "runs": 0,
+   "running": []
+  },
+  {
+   "name": "Sentinel",
+   "kind": "planned",
+   "model": "Sonnet",
+   "what": "server diagnostics with a read-only key",
+   "file": "planned: .claude/agents/sentinel.md",
+   "runs": 0,
+   "running": []
+  },
+  {
+   "name": "Deployer",
+   "kind": "planned",
+   "model": "Sonnet",
+   "what": "deploys production after the owner's tap",
+   "file": "planned: .claude/agents/deployer.md",
+   "runs": 0,
+   "running": []
+  },
+  {
+   "name": "Explore",
+   "kind": "built-in",
+   "model": "",
+   "what": "searches many files, read-only",
+   "file": "built into Claude Code (no file in the repo)",
+   "runs": 0,
+   "running": []
+  },
+  {
+   "name": "Plan",
+   "kind": "built-in",
+   "model": "",
+   "what": "designs an implementation plan",
+   "file": "built into Claude Code (no file in the repo)",
+   "runs": 0,
+   "running": []
+  }
+ ],
+ "resources": {
+  "now": null
+ },
+ "landing": {
+  "summary": {
+   "landed": 12,
+   "with_conflicts": 1,
+   "conflicts_per_landing": 0.08,
+   "stopped": 2
+  },
+  "recent": []
+ },
+ "tests": {
+  "tier1": []
+ },
+ "phases": []
+}

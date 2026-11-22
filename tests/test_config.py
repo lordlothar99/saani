@@ -1,0 +1,80 @@
+"""saani.toml: every table read into the settings, the defaults kept, a typo refused, the shipped example valid. No git, no gh."""
+import pathlib
+import sys
+import tomllib
+
+import pytest
+
+from saani import config
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def test_the_shipped_example_is_a_valid_saani_toml():
+    data = tomllib.loads((ROOT / "examples" / "saani.toml").read_text(encoding="utf-8"))
+    cfg = config.from_toml(data, ROOT)
+    assert cfg.repo == "acme/webshop"
+    assert (cfg.integration, cfg.production, cfg.prod_tag) == ("dev", "main", "prod")
+    assert cfg.trailers == ("Why", "Undo")
+    assert "pr-ci" in cfg.ci_jobs
+
+
+def test_saani_own_settings_are_valid():
+    cfg = config.from_toml(tomllib.loads((ROOT / "saani.toml").read_text(encoding="utf-8")), ROOT)
+    assert cfg.name == "saani"
+
+
+def test_an_unknown_setting_is_refused_so_a_typo_is_never_silent():
+    with pytest.raises(SystemExit, match=r"unknown setting \[tests\] teir1"):
+        config.from_toml({"project": {"repo": "acme/webshop"}, "tests": {"teir1": []}}, ".")
+
+
+def test_a_setting_outside_a_table_is_refused():
+    with pytest.raises(SystemExit, match="must be a table"):
+        config.from_toml({"project": {"repo": "acme/webshop"}, "repo": "acme/webshop"}, ".")
+
+
+def test_repo_must_be_owner_slash_name():
+    with pytest.raises(SystemExit, match="owner/name"):
+        config.from_toml({"project": {"repo": "webshop"}}, ".")
+
+
+def test_labels_given_in_part_keep_the_other_defaults():
+    cfg = config.from_toml({"project": {"repo": "acme/webshop"}, "issues": {"labels": {"in_dev": "on-dev"}}}, ".")
+    assert cfg.labels["in_dev"] == "on-dev"
+    assert cfg.labels["in_main"] == "in-main"
+    assert cfg.labels["idea"] == "idea"
+
+
+def test_lists_that_must_not_change_become_tuples_and_hints_are_free_text():
+    cfg = config.from_toml({"project": {"repo": "acme/webshop"}, "commits": {"trailers": ["Why"]},
+                            "land": {"generated": ["docs/SPEC.md"]}, "hints": {"deploy": "run deploy.ps1"}}, ".")
+    assert cfg.trailers == ("Why",)
+    assert cfg.generated == ("docs/SPEC.md",)
+    assert cfg.hints == {"deploy": "run deploy.ps1"}
+
+
+def test_the_worktrees_sit_beside_the_main_checkout_unless_a_folder_is_set(tmp_path):
+    root = tmp_path / "webshop"
+    assert config.Config(repo="acme/webshop", root=root).wt_dir == tmp_path / "webshop-wt"
+    assert config.Config(repo="acme/webshop", root=root, worktree_folder="../wt").wt_dir == (root / "../wt").resolve()
+    absolute = tmp_path / "elsewhere"
+    assert config.Config(repo="acme/webshop", root=root, worktree_folder=str(absolute)).wt_dir == absolute
+
+
+def test_python_in_a_command_is_the_interpreter_that_runs_saani():
+    cfg = config.Config(tier1=["{python}", "-m", "pytest", "-q"])
+    assert cfg.command("tier1") == [sys.executable, "-m", "pytest", "-q"]
+
+
+def test_worker_branches_follow_the_issue_types():
+    cfg = config.Config(types={"Task": "task", "Bug": "bug", "Chore": "chore"})
+    assert cfg.worker_branch.match("chore/12-bump-deps")
+    assert not cfg.worker_branch.match("feat/12-bump-deps")      # not a type of this project
+    assert not cfg.worker_branch.match("chore/12-Bump")          # slugs are lower case
+    assert cfg.hotfix_branch.match("bug/3-hotfix-login")
+
+
+def test_load_outside_git_says_so(tmp_path):
+    with pytest.raises(SystemExit, match="git checkout"):
+        config.load(tmp_path)

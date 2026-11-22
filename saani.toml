@@ -1,0 +1,31 @@
+# Saani builds itself with Saani (docs/CONFIG.md).
+
+[project]
+repo = "lordlothar99/saani"
+owner = "lordlothar99"
+
+[branches]
+integration = "dev"
+production = "main"
+prod_tag = "prod"
+
+[worktrees]
+folder = "../saani-wt"
+
+[issues]
+types = { Task = "task", Feature = "feat", Bug = "bug" }
+
+[commits]
+trailers = ["Why", "Undo"]
+
+[tests]
+tier1 = ["{python}", "-m", "pytest", "-q"]
+full = ["{python}", "-m", "pytest", "-q"]
+
+[board]
+session_match = "saani"
+
+[ci]
+workflow = "ci.yml"
+status_context = "saani/ci"
+jobs = { pr-ci = { minutes = 3, heavy = true, what = "the tests of the dev -> main pull request" } }

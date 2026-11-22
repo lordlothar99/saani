@@ -1,0 +1,138 @@
+"""saani/ci.py: GitHub Actions within the free minutes, the PC for the rest; a refused run falls back to the PC; the PC tests the pull
+request's head in its own worktree, through the test queue."""
+import datetime
+import pathlib
+
+import pytest
+
+from saani import ci as fci
+
+
+@pytest.fixture(autouse=True)
+def jobs(cfg):
+    """A project with one heavy job and two small automatic workflows, and its PC checks."""
+    cfg.ci_jobs = {"pr-ci": {"minutes": 24, "heavy": True, "what": "the pull request CI"},
+                   "main-ci": {"minutes": 5, "heavy": False, "what": "CI on a push to production"},
+                   "relabel": {"minutes": 1, "heavy": False, "what": "in-dev -> in-main after a merge", "workflow": "Relabel merged issues"},
+                   "watch": {"minutes": 1, "heavy": False, "what": "a weekly dependency watch", "workflow": "Release watch"}}
+    cfg.check = ["{python}", "-I", "scripts/check_repo.py"]
+    cfg.full = ["{python}", "scripts/test_all.py"]
+    return cfg
+
+DAY = datetime.date(2026, 12, 10)          # day 10 of 31
+
+
+def b(used, today=DAY):
+    return fci.budget(used, today)
+
+
+def test_only_this_months_actions_minutes_count_and_storage_never_does():
+    """Storage gigabyte-hours once added to the minutes gave 2,372 instead of 2,000; only unitType Minutes counts."""
+    items = [{"date": "2026-12-01T00:00:00Z", "product": "actions", "sku": "Actions Linux", "quantity": 300, "unitType": "Minutes"},
+             {"date": "2026-12-01T00:00:00Z", "product": "actions", "sku": "Actions storage", "quantity": 372, "unitType": "GigabyteHours"},
+             {"date": "2026-12-01T00:00:00Z", "product": "actions", "sku": "Actions Linux", "quantity": 20, "unitType": "Minutes",
+              "repositoryName": "another-repo"},
+             {"date": "2026-11-01T00:00:00Z", "product": "actions", "sku": "Actions Linux", "quantity": 2000, "unitType": "Minutes"},
+             {"date": "2026-12-01T00:00:00Z", "product": "packages", "quantity": 99, "unitType": "Minutes"}]
+    assert fci.month_used(items, DAY) == 320                  # every repo of the account: the free minutes are one pool
+
+
+def test_the_budget_knows_what_is_left_and_how_much_of_the_month_passed():
+    x = b(500)
+    assert x["left"] == 1500 and x["days_left"] == 21
+    assert x["share_passed"] == pytest.approx(10 / 31, abs=0.001) and x["share_used"] == 0.25
+
+
+def test_the_pull_request_ci_runs_on_github_when_minutes_are_left_and_the_month_is_on_pace():
+    where, why = fci.place("pr-ci", b(300))
+    assert where == "github" and "1700 minutes left" in why
+
+
+def test_the_pull_request_ci_goes_to_the_pc_when_the_reserve_would_be_touched():
+    where, why = fci.place("pr-ci", b(fci.cfg().ci_free_minutes - fci.cfg().ci_reserve_minutes - 10))
+    assert where == "pc" and "reserve" in why
+
+
+def test_the_pull_request_ci_goes_to_the_pc_when_the_month_spends_ahead_of_time():
+    where, why = fci.place("pr-ci", b(1200))                  # 60% used on day 10 of 31
+    assert where == "pc" and "ahead" in why
+
+
+def test_a_small_job_still_runs_on_github_when_a_heavy_one_would_not():
+    x = b(1200)
+    assert fci.place("relabel", x)[0] == "github" and fci.place("pr-ci", x)[0] == "pc"
+
+
+def test_everything_goes_to_the_pc_when_github_refuses_or_nothing_is_left():
+    for x, refused in ((b(300), True), (b(fci.cfg().ci_free_minutes), False)):
+        assert all(fci.place(job, x, refused)[0] == "pc" for job in fci.cfg().ci_jobs)
+
+
+def test_the_small_automatic_workflows_are_switched_off_when_the_month_is_spent():
+    assert all(fci.wanted_workflows(b(300)).values())
+    assert not any(fci.wanted_workflows(b(fci.cfg().ci_free_minutes - 5)).values())
+    assert not any(fci.wanted_workflows(b(300), refused=True).values())
+    assert set(fci.wanted_workflows(b(0))) == {"Relabel merged issues", "Release watch"}
+
+
+def test_a_refused_run_has_no_step_and_a_failed_run_has_some():
+    refused = [{"name": "Repo checks", "conclusion": "failure", "steps": []}]
+    failed = [{"name": "Unit tests", "conclusion": "failure", "steps": [{"name": "pytest", "conclusion": "failure"}]}]
+    assert fci.refused_run(refused) and fci.refused_run([]) and not fci.refused_run(failed)
+
+
+def test_the_dispatched_run_is_found_by_its_commit_event_and_time():
+    runs = [{"databaseId": 1, "headSha": "abc", "event": "workflow_dispatch", "createdAt": "2026-12-10T08:00:00Z"},
+            {"databaseId": 2, "headSha": "abc", "event": "push", "createdAt": "2026-12-10T09:00:00Z"},
+            {"databaseId": 3, "headSha": "abc", "event": "workflow_dispatch", "createdAt": "2026-12-10T09:01:00Z"},
+            {"databaseId": 4, "headSha": "zzz", "event": "workflow_dispatch", "createdAt": "2026-12-10T09:02:00Z"}]
+    assert fci.pick_run(runs, "abc", "2026-12-10T09:00:30Z")["databaseId"] == 3
+    assert fci.pick_run(runs, "abc", "2026-12-10T10:00:00Z") is None
+
+
+def test_every_job_has_a_measured_cost_and_the_heavy_one_is_the_pull_request_ci():
+    assert {j for j, s in fci.cfg().ci_jobs.items() if s["heavy"]} == {"pr-ci"}
+    assert all(s["minutes"] >= 1 for s in fci.cfg().ci_jobs.values())
+
+
+class FakeProcess:
+    def __init__(self, returncode):
+        self.returncode = returncode
+
+
+def pc_run(monkeypatch, tmp_path, check_code=0, full_code=0):
+    """on_pc with git, the queue and check_repo replaced: what ran where, in order."""
+    calls = []
+    main = tmp_path / "webshop"
+    fci.cfg().root = main                  # the worktrees sit beside it
+
+    def git(*args, cwd=None, check=True):
+        calls.append(("git",) + args)
+        if args[:2] == ("worktree", "add"):
+            pathlib.Path(args[3]).mkdir(parents=True)
+        return ""
+
+    monkeypatch.setattr(fci.core, "main_checkout", lambda cwd=None: main)
+    monkeypatch.setattr(fci.core, "latest_timing_report", lambda cwd=None: None)
+    monkeypatch.setattr(fci.core, "git", git)
+    monkeypatch.setattr(fci.core, "queued_run", lambda kind, command, cwd: calls.append(("queue", kind, command[-1], cwd)) or full_code)
+    monkeypatch.setattr(fci.subprocess, "run", lambda cmd, cwd=None: calls.append(("run", cmd[-1], cwd)) or FakeProcess(check_code))
+    return fci.on_pc("ab432e0da646abf025f055f1b8f0e920abd2a22b")[0], calls, fci.cfg().wt_dir / "ci-ab432e0da646"
+
+
+def test_the_pc_tests_the_pull_requests_head_in_its_own_worktree_through_the_queue(monkeypatch, tmp_path):
+    """Run from a checkout on another branch, the PC's CI once tested that branch and posted the result on the pull request's commit."""
+    result, calls, folder = pc_run(monkeypatch, tmp_path)
+    assert result == "passed"
+    assert calls[0] == ("git", "worktree", "add", "--detach", str(folder), "ab432e0da646abf025f055f1b8f0e920abd2a22b")
+    assert ("run", "scripts/check_repo.py", folder) in calls
+    assert ("queue", "full", "scripts/test_all.py", folder) in calls        # one test job at a time on the PC
+    assert calls[-1] == ("git", "worktree", "remove", "--force", str(folder))
+
+
+def test_a_failed_check_skips_the_full_run_and_the_worktree_is_still_removed(monkeypatch, tmp_path):
+    result, calls, folder = pc_run(monkeypatch, tmp_path, check_code=1)
+    assert result == "failed" and not [c for c in calls if c[0] == "queue"]
+    assert calls[-1] == ("git", "worktree", "remove", "--force", str(folder))
+    result, calls, folder = pc_run(monkeypatch, tmp_path / "again", full_code=1)
+    assert result == "failed" and calls[-1][:3] == ("git", "worktree", "remove")

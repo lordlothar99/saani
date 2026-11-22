@@ -1,0 +1,154 @@
+"""Saani's settings for one project: read from `saani.toml` at the project's root (docs/CONFIG.md). Standard library only.
+
+Every module asks `current()` for the settings at call time, so a test can put its own with `use(Config(...))`. The project is the git
+checkout of the current folder; its main checkout (the first worktree) holds the logs (`build/`), the worktrees sit beside it.
+"""
+import dataclasses
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tomllib
+
+FILE = "saani.toml"
+
+
+@dataclasses.dataclass
+class Config:
+    repo: str = "owner/name"                     # GitHub owner/name
+    owner: str = ""                              # GitHub login of the person Saani works for: assigned when work starts
+    integration: str = "dev"                     # where work lands, one landing at a time
+    production: str = "main"                     # what is released
+    prod_tag: str = "prod"                       # the tag that marks what is live (a hotfix starts there)
+    worktree_folder: str = ""                    # where the workers' worktrees go; default ../<name>-wt beside the main checkout
+    types: dict = dataclasses.field(default_factory=lambda: {"Task": "task", "Feature": "feat", "Bug": "bug"})
+    hotfix_default_type: str = "bug"             # an urgent fix is never refused for a missing issue Type
+    trailers: tuple = ("Why", "Undo")            # each commit on a worker's branch or the integration branch carries them
+    tier1: list = dataclasses.field(default_factory=list)       # the tests a change can affect, before every landing
+    full: list = dataclasses.field(default_factory=list)        # everything, before a release
+    check: list = dataclasses.field(default_factory=list)       # quick repository checks run before the full run on the PC
+    generated: tuple = ()                        # files rebuilt by `land`, never by hand (a conflict there takes the integration copy)
+    rebuild: list = dataclasses.field(default_factory=list)     # commands that rebuild them, in order
+    frozen: dict = dataclasses.field(default_factory=dict)      # path -> mark: once the mark is on the integration branch, no change
+    timing_reports: tuple = ()                   # copied into a new worktree so its first test estimate is not blind
+    lock_stale_hours: float = 2
+    push_attempts: int = 3
+    labels: dict = dataclasses.field(default_factory=lambda: {"in_dev": "in-dev", "in_main": "in-main", "answer": "help wanted",
+                                                              "act": "owner-action", "idea": "idea"})
+    folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / longrun: the folders named in the board's prompts
+    session_match: str = ""                      # the board lists Claude Code sessions whose project folder name contains this
+    board_port: int = 8771
+    ci_workflow: str = "ci.yml"
+    ci_free_minutes: int = 2000
+    ci_reserve_minutes: int = 50
+    ci_pace_slack: float = 0.15
+    ci_status_context: str = "saani/ci"
+    ci_jobs: dict = dataclasses.field(default_factory=lambda: {
+        "pr-ci": {"minutes": 20, "heavy": True, "what": "the CI of the integration -> production pull request"}})
+    relabel: list = dataclasses.field(default_factory=list)     # command that swaps in-dev for in-main after a merge, run on the PC
+    hints: dict = dataclasses.field(default_factory=dict)       # free texts: hotfix_after_merge, deploy
+    root: pathlib.Path = dataclasses.field(default_factory=pathlib.Path.cwd)   # the project's main checkout
+
+    @property
+    def name(self):
+        return self.repo.split("/")[-1]
+
+    @property
+    def wt_dir(self):
+        """The folder of the workers' worktrees."""
+        if self.worktree_folder:
+            p = pathlib.Path(self.worktree_folder)
+            return p if p.is_absolute() else (self.root / p).resolve()
+        return self.root.parent / f"{self.name}-wt"
+
+    @property
+    def worker_branch(self):
+        """`task/12-some-words`: a worker's branch, its prefix one of the issue types'."""
+        return re.compile(r"^(" + "|".join(map(re.escape, sorted(set(self.types.values())))) + r")/(\d+)-[a-z0-9-]+$")
+
+    @property
+    def hotfix_branch(self):
+        return re.compile(r"^(" + "|".join(map(re.escape, sorted(set(self.types.values())))) + r")/(\d+)-hotfix(-[a-z0-9-]+)?$")
+
+    def command(self, name):
+        """A command list from the settings, `{python}` replaced by this interpreter."""
+        return [sys.executable if part == "{python}" else part for part in getattr(self, name)]
+
+
+def from_toml(data, root):
+    """A Config from the parsed TOML (docs/CONFIG.md for the tables). Unknown keys are refused, so a typo is never silent."""
+    flat = {}
+    maps = {("project", "repo"): "repo", ("project", "owner"): "owner",
+            ("branches", "integration"): "integration", ("branches", "production"): "production", ("branches", "prod_tag"): "prod_tag",
+            ("worktrees", "folder"): "worktree_folder",
+            ("issues", "types"): "types", ("issues", "hotfix_default_type"): "hotfix_default_type", ("issues", "labels"): "labels",
+            ("commits", "trailers"): "trailers",
+            ("tests", "tier1"): "tier1", ("tests", "full"): "full", ("tests", "check"): "check", ("tests", "timing_reports"): "timing_reports",
+            ("land", "generated"): "generated", ("land", "rebuild"): "rebuild", ("land", "frozen"): "frozen",
+            ("land", "lock_stale_hours"): "lock_stale_hours", ("land", "push_attempts"): "push_attempts",
+            ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
+            ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
+            ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
+            ("ci", "relabel"): "relabel", ("hints",): "hints"}
+    for table, values in data.items():
+        if table == "hints":
+            flat["hints"] = dict(values)
+            continue
+        if not isinstance(values, dict):
+            raise SystemExit(f"{FILE}: `{table}` must be a table")
+        for key, value in values.items():
+            field = maps.get((table, key))
+            if not field:
+                raise SystemExit(f"{FILE}: unknown setting [{table}] {key} (docs/CONFIG.md lists them)")
+            flat[field] = value
+    for key in ("trailers", "generated", "timing_reports"):
+        if key in flat:
+            flat[key] = tuple(flat[key])
+    if "labels" in flat:
+        flat["labels"] = {**Config().labels, **flat["labels"]}
+    cfg = Config(**flat, root=pathlib.Path(root))
+    if "/" not in cfg.repo:
+        raise SystemExit(f"{FILE}: [project] repo must be owner/name")
+    return cfg
+
+
+def main_checkout(start=None):
+    """The main checkout of the git repository holding `start` (the first worktree), or None outside git."""
+    r = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=start or os.getcwd(), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    for line in r.stdout.splitlines() if r.returncode == 0 else []:
+        if line.startswith("worktree "):
+            return pathlib.Path(line[9:])
+    return None
+
+
+def load(start=None):
+    """The settings of the project holding `start`: its checkout's saani.toml (a worktree has it too), else the main checkout's."""
+    here = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=start or os.getcwd(), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    main = main_checkout(start)
+    if here.returncode != 0 or main is None:
+        raise SystemExit("saani runs inside a git checkout of the project (no git repository here)")
+    for folder in (pathlib.Path(here.stdout.strip()), main):
+        path = folder / FILE
+        if path.is_file():
+            return from_toml(tomllib.loads(path.read_text(encoding="utf-8")), main)
+    raise SystemExit(f"no {FILE} at the project's root ({main}): copy examples/saani.toml from Saani and fill it (docs/CONFIG.md)")
+
+
+_current = None
+
+
+def current():
+    global _current
+    if _current is None:
+        _current = load()
+    return _current
+
+
+def use(cfg):
+    """Put these settings in place (tests, or a caller that loaded them itself)."""
+    global _current
+    _current = cfg
+    return cfg

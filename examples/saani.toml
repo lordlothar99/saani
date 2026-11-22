@@ -1,0 +1,53 @@
+# saani.toml: Saani's settings for one project. Put it at the project's root and commit it (docs/CONFIG.md explains every setting).
+# Commands are lists; "{python}" is replaced by the Python that runs Saani.
+
+[project]
+repo = "acme/webshop"            # GitHub owner/name
+owner = "your-github-login"      # assigned to an issue when its work starts (the "in progress" sign); "" to never assign
+
+[branches]
+integration = "dev"              # where work lands, one landing at a time
+production = "main"              # what is released
+prod_tag = "prod"                # the tag that marks what is live; a hotfix starts there
+
+[worktrees]
+# folder = "../webshop-wt"       # default: ../<repo name>-wt beside the main checkout
+
+[issues]
+types = { Task = "task", Feature = "feat", Bug = "bug" }   # GitHub issue Type -> branch prefix; an issue with no Type is refused
+hotfix_default_type = "bug"      # a hotfix is never refused for a missing Type
+# The labels Saani reads and writes (these are the defaults):
+labels = { in_dev = "in-dev", in_main = "in-main", answer = "help wanted", act = "owner-action", idea = "idea" }
+
+[commits]
+trailers = ["Why", "Undo"]       # each commit on a worker's branch or the integration branch carries these lines
+
+[tests]
+tier1 = ["{python}", "-m", "pytest", "-q"]          # before every landing: the tests a change can affect (here: all of them)
+full = ["{python}", "-m", "pytest", "-q"]           # before a release, and the PC's CI
+check = []                                          # quick checks before the full run on the PC (lint, repository rules)
+timing_reports = []                                 # e.g. ["build/tests.json"]: copied into new worktrees for test estimates
+
+[land]
+generated = []                   # files rebuilt at landing, never by hand; a conflict there takes the integration copy
+rebuild = []                     # commands that rebuild them, in order, e.g. [["{python}", "-I", "scripts/build_docs.py"]]
+frozen = {}                      # path = "mark": once the mark is in the file on the integration branch, no branch may change it
+lock_stale_hours = 2
+push_attempts = 3
+
+[board]
+folders = { work = "C:/work/webshop", deploy = "C:/work/webshop-main", longrun = "C:/work/webshop-longrun" }
+session_match = "webshop"        # Claude Code sessions whose project folder name contains this are listed
+port = 8771
+
+[ci]
+workflow = "ci.yml"              # the GitHub Actions workflow `saani ci pr` starts (workflow_dispatch)
+free_minutes = 2000              # GitHub Free, private repositories, per month, the whole account
+reserve_minutes = 50
+pace_slack = 0.15
+status_context = "saani/ci"      # the commit status set on the pull request's head
+relabel = []                     # a command that swaps in-dev for in-main after a merge, given the PR number
+jobs = { pr-ci = { minutes = 20, heavy = true, what = "the CI of the dev -> main pull request" } }
+
+[hints]
+hotfix_after_merge = "After the merge: deploy from main, then merge main back into dev."

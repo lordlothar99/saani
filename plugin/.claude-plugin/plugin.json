@@ -1,0 +1,9 @@
+{
+  "name": "saani",
+  "version": "0.1.0",
+  "description": "Saani: an AI workshop for GitHub projects. The long-run skill, and later the worker agents and hooks.",
+  "author": {
+    "name": "lordlothar99"
+  },
+  "repository": "https://github.com/lordlothar99/saani"
+}

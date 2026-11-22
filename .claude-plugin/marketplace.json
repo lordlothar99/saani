@@ -1,0 +1,14 @@
+{
+  "name": "saani",
+  "description": "Saani: an AI workshop for GitHub projects, as a Claude Code plugin.",
+  "owner": {
+    "name": "lordlothar99"
+  },
+  "plugins": [
+    {
+      "name": "saani",
+      "source": "./plugin",
+      "description": "Saani: an AI workshop for GitHub projects (long runs; worker agents and hooks to come)."
+    }
+  ]
+}
