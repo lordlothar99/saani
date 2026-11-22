@@ -38,6 +38,7 @@ class Config:
                                                               "act": "owner-action", "idea": "idea"})
     folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / longrun: the folders named in the board's prompts
     session_match: str = ""                      # the board lists Claude Code sessions whose project folder name contains this
+    deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
     board_port: int = 8771
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
@@ -87,7 +88,7 @@ def from_toml(data, root):
             ("tests", "tier1"): "tier1", ("tests", "full"): "full", ("tests", "check"): "check", ("tests", "timing_reports"): "timing_reports",
             ("land", "generated"): "generated", ("land", "rebuild"): "rebuild", ("land", "frozen"): "frozen",
             ("land", "lock_stale_hours"): "lock_stale_hours", ("land", "push_attempts"): "push_attempts",
-            ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
+            ("deploy", "paths"): "deploy_paths", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
             ("ci", "relabel"): "relabel", ("hints",): "hints"}
@@ -102,7 +103,7 @@ def from_toml(data, root):
             if not field:
                 raise SystemExit(f"{FILE}: unknown setting [{table}] {key} (docs/CONFIG.md lists them)")
             flat[field] = value
-    for key in ("trailers", "generated", "timing_reports"):
+    for key in ("trailers", "generated", "timing_reports", "deploy_paths"):
         if key in flat:
             flat[key] = tuple(flat[key])
     if "labels" in flat:

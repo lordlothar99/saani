@@ -1,7 +1,7 @@
 <title>Saani</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Michroma&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- Saani's board: the issues of a project as a desert war-game board seen from above. One source: served by `saani board` at /board (live /api/state)
+<!-- Saani's board: the issues of a project as a desert war-game board seen from above. One source: served by `saani ui` at /board (live /api/state)
      and published as a private artifact (falls back to mock-state.json beside it). Original desert world: no names, logos, typefaces,
      characters or vehicle designs from any film or book. -->
 <style>
@@ -30,6 +30,10 @@ body{background:var(--night);color:var(--bone);font:15px/1.5 var(--body);overflo
 .brand .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font:500 11px/1 var(--mono);color:var(--dust)}
 .brand .title-row{display:flex;align-items:center;gap:14px}
 .brand .title-row .btn{padding:6px 8px;font-size:10px}
+.strip{font:500 11px/1.35 var(--mono);color:var(--dust);padding:2px 0 0;max-width:260px}.strip b{color:var(--sand)}.strip i{color:var(--ok);font-style:normal}.strip.warn b{color:var(--amber)}
+.pages{display:flex;gap:6px}.pages a{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--sand);text-decoration:none;padding:6px 8px;border:1px solid var(--edge-hi);background:rgba(20,13,8,.5)}.pages a:hover{color:var(--bone);border-color:var(--sand)}.pages a[aria-current]{color:var(--night);background:var(--sand);border-color:var(--sand)}
+.brand .title-row select.btn{cursor:pointer;max-width:220px}
+.brand .title-row select.btn option{background:#140d08;color:var(--sand)}
 .badge{padding:5px 8px;border:1px solid var(--edge-hi);letter-spacing:.08em;text-transform:uppercase;font-size:10px}
 .badge.sample{color:var(--night);background:var(--amber);border-color:var(--amber)}
 .badge.live{color:var(--ok);border-color:var(--ok)}
@@ -173,7 +177,7 @@ a{color:var(--amber)}
  <radialGradient id="g-glow"><stop offset="0" stop-color="var(--amber)" stop-opacity=".55"/><stop offset="1" stop-color="var(--amber)" stop-opacity="0"/></radialGradient>
 </defs><g id="world"><g id="ground"></g><g id="things"></g><g id="air"></g></g></svg></div>
 
-<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
+<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><nav id="pages" class="pages" aria-label="Pages" hidden><a href="/" aria-current="page">Board</a><a href="/kanban">Kanban</a></nav><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select><button id="refresh" class="btn" type="button" title="Ask GitHub and the rest again now (the board refreshes by itself every 5 seconds)" hidden>↻ Refresh</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
 
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
@@ -630,9 +634,13 @@ ROUTE.splice(0, ROUTE.length, ...ROUTE.map(TURN));
 let DATA = null, LIVE = false, PREV = {}, demoTimer = null;
 function normalize(d) {
   if (d.cards) return d;
-  const map = {you: "you", ready: "started", building: "building", testing: "testing", dev: "dev", main: "deploy", live: "done"};
+  // "Ready" (assigned, nothing blocks it) is the backlog's until an agent session works on it: the Workshops hold only work that is going on
+  const map = {you: "you", ready: "backlog", building: "building", testing: "testing", dev: "dev", main: "deploy", close: "close", live: "done"};
   const cards = []; let pr = null;
-  for (const col of d.board || []) { for (const c of col.cards) cards.push({...c, step: map[col.id] || "backlog"}); if (col.pr) pr = col.pr; }
+  for (const col of d.board || []) {
+    for (const c of col.cards) cards.push({...c, step: col.id === "ready" && (c.agents || []).length ? "started" : map[col.id] || "backlog"});
+    if (col.pr) pr = col.pr;
+  }
   if (pr) for (const c of cards) if ((pr.inside || []).includes(c.number)) c.step = "pr";
   return {...d, cards, pr};
 }
@@ -791,6 +799,7 @@ function render() {
 let WORKERS = {};
 
 // ------------------------------------------------------------------ HUD
+const HYGIENE = {closed_labelled: "Closed, still labelled in-dev / in-main", no_milestone: "No milestone", landed_unlabelled: "On dev without in-dev"};
 function summary(byZone, ws) {
   const need = DATA.cards.filter(c => c.need).length, prog = (byZone.works || []).length + (byZone.proving || []).length;
   const pr = DATA.pr, ci = pr ? (pr.ci || {}).state || "none" : null;
@@ -800,7 +809,9 @@ function summary(byZone, ws) {
     ["tower", pr ? ({green: C.ok, red: C.alert}[ci] || C.amber) : C.faint, pr ? "#" + pr.number : "—", pr ? "release PR · " + ci : "no release PR"],
     ["workers", C.sand, busy, busy === 1 ? "worker busy" : "workers busy"],
   ];
-  $("#summary").innerHTML = rows.map(r => `<button class="chip${FILTER.chip === r[0] ? " on" : ""}" type="button" data-chip="${r[0]}"><span class="dot" style="background:${r[1]}"></span><b>${esc(r[2])}</b>${esc(r[3])}</button>`).join("");
+  $("#summary").innerHTML = rows.map(r => `<button class="chip${FILTER.chip === r[0] ? " on" : ""}" type="button" data-chip="${r[0]}"><span class="dot" style="background:${r[1]}"></span><b>${esc(r[2])}</b>${esc(r[3])}</button>`).join("")
+    + (DATA.milestones || []).map(m => `<div class="strip"><b>${esc(m.title)}</b> ${m.closed} of ${m.open + m.closed} closed${m.ready ? " · <i>ready to release</i>" : ""}${m.checks ? " · live checks #" + m.checks : ""}</div>`).join("")
+    + (DATA.hygiene || []).map(h => `<div class="strip warn" title="Tidy these up"><b>${esc(HYGIENE[h.kind] || h.kind)}</b> ${h.issues.map(n => "#" + n).join(", ")}</div>`).join("");
 }
 const FILTER = {q: "", ms: "", lr: "", chip: ""};
 function filters() {
@@ -955,11 +966,20 @@ function copyButton(getText) {
   });
   return b;
 }
+const DETAILS = {};                                       // issue number -> its context, criteria and history, asked of the server when a panel opens
+async function fetchDetail(c) {
+  try {
+    const r = await fetch("/api/issue?n=" + c.number + (PROJECT ? "&project=" + encodeURIComponent(PROJECT) : ""), {cache: "no-store"}); if (!r.ok) return;
+    DETAILS[c.number] = await r.json(); const v = $("#veil");
+    if (!v.hidden && v.querySelector('[aria-label="Issue ' + c.number + '"]')) { v.replaceChildren(issuePanel(c)); }
+  } catch (_) {}
+}
 function issuePanel(c) {
-  const d = c.detail || {}, fit = longrun(c), f = folderFor(c), prompt = promptFor(c), url = d.url || `https://github.com/${REPO}/issues/${c.number}`;
+  const d = c.detail || DETAILS[c.number] || {}, fit = longrun(c), f = folderFor(c), prompt = promptFor(c), url = d.url || `https://github.com/${REPO}/issues/${c.number}`;
   const tags = el("div", {class: "chips"},
     el("span", {class: "tag"}, typeInfo(c).word), el("span", {class: "tag"}, STEP_LABEL[c.step] || c.step), el("span", {class: "tag"}, c.milestone || "No milestone"),
     c.need ? el("span", {class: "tag hot"}, c.need === "answer" ? "Needs your answer" : "Needs you to act") : null,
+    c.blocked ? el("span", {class: "tag hot", title: "The Blocked by row of its At a glance table"}, "Blocked" + ((c.blocked_by || []).length ? " by " + c.blocked_by.map(n => "#" + n).join(", ") : "")) : null,
     (c.labels || []).filter(l => ![LAB("answer"), LAB("act")].includes(l)).map(l => el("span", {class: "tag"}, l)),
     c.staged ? el("span", {class: "tag staged", title: "Moved by hand in the sample data to show this zone"}, "Staged sample") : null);
   const left = el("div", {},
@@ -1008,7 +1028,7 @@ function workerPanel(w) {
 function clickAt(e) {
   const t = e.target; if (!t || !t.closest) return;
   const b = t.closest(".blk"), w = t.closest(".wkr"), z = t.closest(".plaque");
-  if (b) openPanel(issuePanel(DATA.cards.find(c => c.number == b.dataset.n)));
+  if (b) { const c = DATA.cards.find(c => c.number == b.dataset.n); openPanel(issuePanel(c)); if (LIVE && !DETAILS[c.number] && !c.detail) fetchDetail(c); }
   else if (w) openPanel(workerPanel(WORKERS[w.dataset.w]));
   else if (z) { const zz = ZONE[z.dataset.zone]; centerOn(zz.cx, zz.cy, Math.max(VIEW.s, 1.1)); }
 }
@@ -1059,7 +1079,8 @@ function setData(d, live) {
   $("#src").textContent = live ? "Live" : "Sample data"; $("#src").className = "badge " + (live ? "live" : "sample");
   $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : (DATA.sample || {}).note || "Sample data";
   $("#clock").textContent = live ? "updated " + (DATA.time || "") : "snapshot " + ((DATA.sample || {}).taken || "");
-  $("#demo").hidden = live;
+  $("#demo").hidden = live; $("#pages").hidden = !live; $("#refresh").hidden = !live;      // the page switch needs the server: the artifact build has none
+  projects(DATA.projects);
 }
 function demoStep() {
   // now and then an issue gets stuck in the backlog and waits for you: a long move, so it flies
@@ -1071,12 +1092,37 @@ function demoStep() {
   setData(d, false);
 }
 function demo(on) { clearInterval(demoTimer); demoTimer = on && !RM ? setInterval(demoStep, 7000) : null; $("#demo").textContent = "Demo traffic: " + (demoTimer ? "on" : "off"); $("#demo").classList.toggle("on", !!demoTimer); }
+// One page, one address: the project shown is the selector's, asked of the server as ?project=owner-name. It is in the page's address
+// (#acme-webshop: a bookmark opens it) and remembered in this browser, so the kanban page opens on the same one.
+const slugOf = repo => (repo || "").replace("/", "-");
+let PROJECT = ""; try { PROJECT = location.hash.slice(1) || localStorage.getItem("saani-project") || ""; } catch (_) {}
+const stateUrl = fresh => { const q = [PROJECT ? "project=" + encodeURIComponent(PROJECT) : "", fresh ? "fresh=1" : ""].filter(Boolean).join("&"); return "/api/state" + (q ? "?" + q : ""); };
+function pinProject() {
+  try { localStorage.setItem("saani-project", PROJECT); } catch (_) {}
+  if (PROJECT && location.hash.slice(1) !== PROJECT) history.replaceState(null, "", "#" + PROJECT);
+  for (const a of document.querySelectorAll("#pages a")) a.hash = PROJECT ? "#" + PROJECT : "";   // switching page keeps the project
+}
+function projects(list) {
+  const sel = $("#proj"), slugs = (list || []).map(p => p.slug);
+  if (PROJECT && !slugs.includes(PROJECT)) PROJECT = "";                    // a project taken out of the list: back to the first
+  sel.hidden = slugs.length < 2;
+  const key = (list || []).map(p => p.slug + ":" + p.waiting).join();
+  if (sel.dataset.key !== key) { sel.dataset.key = key; sel.replaceChildren(...(list || []).map(p => el("option", {value: p.slug}, (p.waiting ? "● " : "") + p.name + (p.waiting ? " (" + p.waiting + " wait for you)" : "")))); }
+  sel.value = PROJECT || slugOf(DATA.project && DATA.project.repo) || slugs[0] || "";
+  if (PROJECT) pinProject();
+}
 async function load() {
-  try { const r = await fetch("/api/state", {cache: "no-store"}); if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
+  try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.status === 404 && PROJECT) { PROJECT = ""; history.replaceState(null, "", location.pathname); return load(); }   // a bookmark of a project no longer listed
+    if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
   try { const r = await fetch("mock-state.json", {cache: "no-store"}); setData(await r.json(), false); demo(true); }
   catch (_) { $("#src").textContent = "No data"; $("#clock").textContent = "Neither /api/state nor mock-state.json answered."; }
 }
-async function refresh() { try { const r = await fetch("/api/state", {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {} setTimeout(refresh, 5000); }
+async function refresh() { try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {} setTimeout(refresh, 5000); }
+async function switchProject(key) {
+  PROJECT = key; pinProject(); for (const k in DETAILS) delete DETAILS[k];
+  PREV = {}; FILTER.ms = ""; $("#ms").value = "";                            // another project's cards do not fly from the old one's places
+  try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}
+}
 
 // ------------------------------------------------------------------ wiring
 $("#q").addEventListener("input", e => { FILTER.q = e.target.value; applyFilter(); });
@@ -1086,6 +1132,13 @@ $("#lr").addEventListener("change", e => { FILTER.lr = e.target.value; applyFilt
 $("#legend .x").addEventListener("click", () => { $("#legend").open = false; });
 $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip"); if (!b) return; FILTER.chip = FILTER.chip === b.dataset.chip ? "" : b.dataset.chip; render(); });
 $("#demo").addEventListener("click", () => demo(!demoTimer));
+$("#proj").addEventListener("change", e => switchProject(e.target.value));
+addEventListener("hashchange", () => { const k = location.hash.slice(1); if (k && k !== PROJECT) switchProject(k); });
+$("#refresh").addEventListener("click", async e => {
+  const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…";
+  try { const r = await fetch(stateUrl(true), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}
+  b.disabled = false; b.textContent = "↻ Refresh";
+});
 drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 </script>
 

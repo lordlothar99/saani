@@ -106,8 +106,8 @@ def test_the_roster_lists_defined_planned_and_built_in_subagents_with_what_runs_
 
 
 def test_the_columns_have_short_names_and_their_explanations_are_tooltips():
-    """Ready, Building, Testing, Merged on dev, To deploy, Deployed; the explanations as tooltips."""
-    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "Deployed"]
+    """Ready, Building, Testing, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
+    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "To close", "Deployed"]
     assert "Last 7 days" in fp.COLUMNS[-1][2]
     assert '"data-tip":c.hint' in fp.page() and "content:attr(data-tip)" in fp.page()
 
@@ -285,7 +285,7 @@ def test_the_page_is_read_from_its_html_file_at_every_request(tmp_path, monkeypa
 
 def test_a_refresh_button_asks_everything_again_and_the_pull_request_tasks_start_folded(monkeypatch):
     """a refresh button, and the tasks inside a pull request folded by default."""
-    assert 'id="refresh"' in fp.page() and "every 5 s" in fp.page() and 'fresh?"/api/state?fresh=1"' in fp.page()
+    assert 'id="refresh"' in fp.page() and "every 5 s" in fp.page() and 'stateUrl(fresh)' in fp.page() and '"fresh=1"' in fp.page()
     assert 'localStorage.getItem("saani.pr.kids")==="open"' in fp.page()               # folded unless the owner unfolded them
     monkeypatch.setattr(fp, "state", lambda: {"time": "now"})
     fp._cache["issues"] = (0, "old")
@@ -318,7 +318,42 @@ def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
         server.shutdown()
     source = fp.BOARD_FILE.read_text(encoding="utf-8")
     assert "<html" not in source and "<body" not in source and "<!doctype" not in source.lower()
-    assert 'fetch("/api/state"' in source and 'fetch("mock-state.json"' in source
+    assert '"/api/state"' in source and "fetch(stateUrl()" in source and 'fetch("mock-state.json"' in source
+
+
+def test_one_board_shows_the_listed_projects_and_the_selector_picks_one(monkeypatch, tmp_path):
+    """one address for every listed project: /api/state?project=owner/name answers for that project, the home one without it,
+    and an unlisted one is a 404; a project is listed once, whatever the folder, and one that no longer loads is left out."""
+    from saani import config
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    home, other = config.Config(repo="acme/webshop", root=tmp_path / "webshop"), config.Config(repo="acme/api", root=tmp_path / "api")
+    monkeypatch.setattr(fp, "_loaded", {str(home.root): home, str(other.root): other})
+    monkeypatch.setattr(fp, "_home", home)
+    monkeypatch.setattr(config, "_current", home)
+    assert fp.register(other.root) == str(other.root)
+    fp.register(other.root)
+    fp.register(tmp_path / "gone")
+    monkeypatch.setattr(fp, "load_project", lambda folder: fp._loaded.get(folder))
+    assert [c.repo for c in fp.projects()] == ["acme/webshop", "acme/api"]
+    monkeypatch.setattr(fp, "state", lambda: {"repo": fp.cfg().repo})
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/api/state"
+    try:
+        assert json.loads(urllib.request.urlopen(base).read()) == {"repo": "acme/webshop"}
+        assert json.loads(urllib.request.urlopen(base + "?project=acme%2Fapi").read()) == {"repo": "acme/api"}
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(base + "?project=acme%2Fnone")
+        assert err.value.code == 404
+    finally:
+        server.shutdown()
+    assert fp.cfg() is home                                   # the settings are put back after every request
+
+
+def test_a_ready_issue_with_no_agent_is_in_the_backlog_not_the_workshops():
+    """the board page puts a Ready card in the backlog until an agent works on it, then in the Workshops."""
+    source = fp.BOARD_FILE.read_text(encoding="utf-8")
+    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "backlog"' in source
 
 
 def test_the_sample_shows_every_zone_and_keeps_out_private_text():
@@ -330,3 +365,231 @@ def test_the_sample_shows_every_zone_and_keeps_out_private_text():
     raw = json.dumps(mock)
     assert "C:\\Users" not in raw and "/Users/" not in raw and "@" not in raw.replace("@pytest", "")
     assert all(set(s) <= {"session", "name", "branch", "model", "state", "age_min", "issue"} for s in mock["crew"])
+
+
+def test_the_status_page_hides_the_configured_labels_not_hardcoded_names(monkeypatch):
+    """With act = "creator-action" the card shows the badge and no chip: the filter reads state.project.labels, which project_info sends."""
+    html = fp.page()
+    assert "/^in-|^help wanted$|^owner-action$/" not in html
+    assert "LABELS=(s.project&&s.project.labels)||{}" in html and "LABELS.act||\"owner-action\"" in html and "lifecycleLabel(l)" in html
+    from saani import config
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", labels={**config.Config().labels, "act": "creator-action"}))
+    assert fp.project_info()["labels"]["act"] == "creator-action"
+
+
+def test_an_issue_on_production_that_touches_nothing_deployed_is_to_close(monkeypatch):
+    """[deploy] paths names what a served project deploys; an in-main issue whose commits touch none of it is "To close" with a close
+    prompt, the others stay "To deploy"; without paths nothing changes."""
+    from saani import config
+    i = lambda n: {"number": n, "labels": ["in-main"], "state": "OPEN"}
+    assert fp.column_for(i(6), closing={6}) == "close" and fp.column_for(i(7), closing={6}) == "main" and fp.column_for(i(6)) == "main"
+    assert fp.touches_deployed(["server/app.py", "docs/a.md"], ("server/",)) and not fp.touches_deployed(["docs/a.md", "tests/t.py"], ("server/",))
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", deploy_paths=("server/", "web/")))
+    files = {6: "docs/a.md\ntests/t.py\n", 7: "docs/a.md\nserver/app.py\n", 8: ""}
+    monkeypatch.setattr(fp, "run", lambda *a, **k: files[int(a[a.index("-E") + 1].split("#")[1].rstrip("\b\\"))])
+    assert fp.closing_issues([6, 7, 8]) == {6}                                     # no commit found: not claimed to close
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop"))
+    assert fp.closing_issues([6, 7]) == set()
+    board = {c["id"]: c for c in fp.build_board([i(6)], [], set(), [], [], closing={6})}
+    assert [c["number"] for c in board["close"]["cards"]] == [6] and board["main"]["cards"] == []
+    assert "Close #6" in board["close"]["prompt"]
+    assert fp.cfg().deploy_paths == ()
+
+
+def test_the_deploy_paths_are_read_from_saani_toml():
+    from saani import config
+    cfg = config.from_toml({"project": {"repo": "acme/webshop"}, "deploy": {"paths": ["server/", "web/"]}}, "x")
+    assert cfg.deploy_paths == ("server/", "web/")
+
+
+def test_the_board_is_the_default_page_and_the_kanban_has_its_own_address(monkeypatch):
+    """/ and the old /board are the board, /kanban the kanban page; both pages have the page switch in their top bar."""
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    get = lambda p: urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}{p}").read().decode()
+    try:
+        board, kanban = get("/"), get("/kanban")
+        assert board == get("/board") == get("/index.html") and board.count('id="demo"') == 1
+        assert 'class="pages"' in kanban and 'href="/kanban" aria-current="page"' in kanban and 'href="/">Board</a>' in kanban
+        assert 'id="pages"' in board and 'href="/" aria-current="page">Board</a>' in board and 'href="/kanban">Kanban</a>' in board
+        assert 'id="refresh"' in board and 'id="refresh"' in kanban and 'id="proj"' in board
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get("/nowhere")
+        assert e.value.code == 404
+    finally:
+        server.shutdown()
+    assert '$("#pages").hidden = !live' in fp.BOARD_FILE.read_text(encoding="utf-8")     # the artifact build has no server: no page switch
+
+
+def two_projects(monkeypatch, tmp_path):
+    from saani import config
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    home, other = config.Config(repo="acme/webshop", root=tmp_path / "webshop"), config.Config(repo="acme/web-api", root=tmp_path / "api")
+    monkeypatch.setattr(fp, "_loaded", {str(home.root): home, str(other.root): other})
+    monkeypatch.setattr(fp, "load_project", lambda folder: fp._loaded.get(folder))
+    monkeypatch.setattr(fp, "_home", home)
+    monkeypatch.setattr(config, "_current", home)
+    fp.register(other.root)
+    return home, other
+
+
+def test_the_projects_list_is_a_toml_file_read_and_written_by_saani(monkeypatch, tmp_path):
+    """~/.saani/projects.toml holds the checkouts' paths (Windows backslashes included); a missing or broken file is an empty list."""
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    assert fp.read_registry() == [] and fp.registry_path().name == "projects.toml"
+    bs = chr(92)
+    folders = [f"D:{bs}work{bs}webshop", "/work/api", f"D:{bs}wéb{bs}ünï"]
+    fp.write_registry(folders)
+    assert fp.read_registry() == folders
+    assert fp.registry_path().read_text(encoding="utf-8").startswith("# The projects the Saani board offers")
+    fp.registry_path().write_text("projects = [oops", encoding="utf-8")
+    assert fp.read_registry() == []
+
+
+def test_a_project_is_found_by_owner_name_or_by_its_slug_and_the_data_stays_apart(monkeypatch, tmp_path):
+    """acme-web-api is the address of acme/web-api; each project's issues are cached and counted on their own."""
+    home, other = two_projects(monkeypatch, tmp_path)
+    assert fp.slug("acme/web-api") == "acme-web-api"
+    assert fp.find_project("acme-web-api") is other and fp.find_project("acme/web-api") is other and fp.find_project("acme-none") is None
+    assert fp.in_project("acme-web-api", lambda: fp.cfg().repo) == "acme/web-api" and fp.in_project("", lambda: fp.cfg().repo) == "acme/webshop"
+    rows = {"acme/webshop": [{"number": 1, "labels": ["help wanted"]}, {"number": 2, "labels": []}],
+            "acme/web-api": [{"number": 9, "labels": ["in-dev"]}]}
+    monkeypatch.setattr(fp, "issues", lambda: {"open": rows[fp.cfg().repo]})
+    fp._cache.clear()
+    assert fp.waiting(home) == 1 and fp.waiting(other) == 0
+    assert fp.cached("issues", 60, fp.issues) == {"open": rows["acme/webshop"]}      # the current project's, not the last one counted
+    assert fp.cfg() is home
+
+
+def test_the_state_lists_every_project_with_its_slug_and_what_waits_for_the_owner(monkeypatch, tmp_path):
+    home, other = two_projects(monkeypatch, tmp_path)
+    for name in ("tasks", "agents", "defined_agents"):
+        monkeypatch.setattr(fp, name, lambda *a, **k: [])
+    for name in ("landing", "pull_request", "resources", "ci"):
+        monkeypatch.setattr(fp, name, lambda *a, **k: {})
+    monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
+    monkeypatch.setattr(fp, "issues", lambda: {"board": [], "open": [{"number": 1, "title": "t", "labels": ["owner-action"]}], "closed": []})
+    fp._cache.clear()
+    got = fp.state()["projects"]
+    assert [(p["repo"], p["slug"], p["waiting"]) for p in got] == [("acme/webshop", "acme-webshop", 1), ("acme/web-api", "acme-web-api", 1)]
+
+
+def test_a_second_board_finds_the_running_one(monkeypatch):
+    """`saani ui` on a taken port that a board answers on says so instead of failing; a port nothing answers on is not a board."""
+    monkeypatch.setattr(fp, "state", lambda: {"board": []})
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert fp.already_running(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert not fp.already_running(server.server_address[1])
+
+
+def test_saani_projects_adds_lists_and_removes(monkeypatch, tmp_path, capsys):
+    import subprocess
+    from saani import config
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    folder = tmp_path / "shop"
+    folder.mkdir()
+    (folder / "saani.toml").write_text('[project]\nrepo = "acme/shop"\n', encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(folder)], check=True)
+    monkeypatch.setattr(fp, "_loaded", {})
+    monkeypatch.setattr(fp, "_home", None)
+    args = lambda what, target=None: type("A", (), {"what": what, "target": target})()
+    assert fp.projects_command(args("add", str(folder))) == 0
+    assert "listed: acme/shop" in capsys.readouterr().out
+    fp.projects_command(args("list"))
+    assert "acme/shop" in capsys.readouterr().out
+    assert fp.projects_command(args("add", str(tmp_path / "nothing"))) == 1
+    assert fp.projects_command(args("remove", "acme-shop")) == 0 and fp.read_registry() == []
+    assert fp.projects_command(args("remove")) == 1
+
+
+def test_both_pages_keep_the_project_in_their_address_and_show_the_waiting_dot():
+    for source in (fp.BOARD_FILE.read_text(encoding="utf-8"), fp.PAGE_FILE.read_text(encoding="utf-8")):
+        flat = source.replace(" ", "")
+        assert "location.hash.slice(1)" in source and "history.replaceState(null" in source
+        assert 'p.waiting?"●"' in flat.replace("●", "●") or "p.waiting?\"●" in flat
+        assert 'localStorage.setItem("saani-project"' in source and "status===404" in flat
+
+
+GLANCE = {"long_run": {"fit": "partly", "why": "the data model yes"}, "blocked_by": {"issues": [13], "date": None, "text": "#13"}}
+
+
+def test_a_card_carries_what_its_at_a_glance_table_says():
+    """the long-run fit read from the table (source: table), blocked while a named issue is open and not yet on dev, an epic is an anchor."""
+    issue = {"number": 14, "title": "Board data", "labels": [], "state": "OPEN", "glance": GLANCE}
+    assert fp.lifecycle(issue, {13, 14}) == {"blocked": True, "anchor": False, "blocked_by": [13],
+                                            "longrun": {"fit": "partly", "why": "the data model yes", "source": "table"}}
+    assert fp.lifecycle(issue, {14})["blocked"] is False
+    assert fp.lifecycle({"title": "Saani v1 (epic)"}, set())["anchor"] and fp.lifecycle({"title": "Live checks v0.1"}, set())["anchor"]
+    assert "longrun" not in fp.lifecycle({"title": "x"}, set())
+    blocker = {"number": 13, "title": "b", "labels": ["in-dev"], "state": "OPEN"}                 # landed on dev: it blocks no more
+    board = {c["id"]: c for c in fp.build_board([blocker, issue], [], set(), [], [])}
+    assert [(c["number"], c["blocked"]) for c in board["dev"]["cards"] + board["ready"]["cards"]] == [(13, False), (14, False)]
+
+
+def test_the_milestone_strip_counts_and_says_when_a_milestone_is_ready_to_release():
+    rows = [{"title": "v0.2.0", "state": "open", "open_issues": 0, "closed_issues": 4}, {"title": "v0.1.0", "state": "open", "open_issues": 2, "closed_issues": 1},
+            {"title": "v0.0.9", "state": "closed", "open_issues": 0, "closed_issues": 9}, {"title": "v1.0.0", "state": "open", "open_issues": 0, "closed_issues": 0}]
+    got = fp.milestones(rows, [{"number": 30, "title": "Live checks v0.1.0", "milestone": "v0.1.0"}])
+    assert [m["title"] for m in got] == ["v0.1.0", "v0.2.0", "v1.0.0"]
+    assert got[0] == {"title": "v0.1.0", "open": 2, "closed": 1, "checks": 30, "ready": False}
+    assert got[1]["ready"] and not got[2]["ready"]                                                 # nothing done yet is not ready
+
+
+def test_the_hygiene_strip_lists_only_what_needs_tidying():
+    lab = {"in_dev": "in-dev", "in_main": "in-main", "idea": "idea"}
+    open_ = [{"number": 1, "labels": [], "milestone": None}, {"number": 2, "labels": ["idea"], "milestone": None},
+             {"number": 3, "labels": [], "milestone": "v1"}, {"number": 4, "labels": ["in-dev"], "milestone": "v1"}]
+    closed = [{"number": 7, "labels": ["in-main"]}, {"number": 8, "labels": []}]
+    assert fp.hygiene(open_, closed, {3, 4}, lab) == [{"kind": "closed_labelled", "issues": [7]}, {"kind": "no_milestone", "issues": [1]},
+                                                       {"kind": "landed_unlabelled", "issues": [3]}]
+    assert fp.hygiene([], [], set(), lab) == []
+
+
+def test_an_issues_context_criteria_and_history_are_read_from_its_markdown():
+    body = "## Context\n- why\n\n## Acceptance criteria\n- [x] one\n- [ ] two **bold**\n\n## Scope\n- [ ] not a criterion\n"
+    comments = [{"createdAt": "2026-11-22T10:00:00Z", "body": "### ✅ On dev\n| Commit |\n|---|"}, {"createdAt": "2026-11-23T10:00:00Z", "body": "just words"}]
+    got = fp.issue_detail(body, comments, "https://github.com/acme/webshop/issues/9")
+    assert got["summary"] == "- why" and got["url"].endswith("/9")
+    assert got["criteria"] == [{"done": True, "text": "one"}, {"done": False, "text": "two **bold**"}]
+    assert got["history"] == [{"when": "2026-11-22", "kind": "✅ On dev", "text": "| Commit |\n|---|"}, {"when": "2026-11-23", "kind": "Comment", "text": "just words"}]
+    assert fp.issue_detail(None, None, None) == {"summary": "", "criteria": [], "history": [], "url": None}
+
+
+def test_the_issue_detail_is_served_on_demand_and_the_board_asks_for_it(monkeypatch):
+    monkeypatch.setattr(fp, "issue_page", lambda n: {"summary": f"about {n}", "criteria": [], "history": [], "url": None})
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        assert json.loads(urllib.request.urlopen(base + "/api/issue?n=14").read())["summary"] == "about 14"
+        for bad in ("/api/issue", "/api/issue?n=x"):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + bad)
+            assert e.value.code == 404
+    finally:
+        server.shutdown()
+    page = fp.BOARD_FILE.read_text(encoding="utf-8")
+    assert '"/api/issue?n="' in page and "DETAILS[c.number]" in page and "DATA.milestones" in page and "DATA.hygiene" in page
+
+
+def test_landing_comments_the_issue_and_labels_it_and_says_so_when_gh_refuses(monkeypatch):
+    """the On dev comment (commit, tests, what next) and the in-dev label; a refusal leaves the manual step, never an undone landing."""
+    from saani import core
+    calls = []
+    monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 0})())
+    text = core.landing_comment({"head": "abc1234", "seconds": 18})
+    assert text.splitlines()[0] == "### ✅ On dev" and "abc1234" in text and "18 s" in text and "with the next pull request" in text
+    assert core.mark_on_dev("14", text) is True
+    assert calls[0][:4] == ["gh", "issue", "comment", "14"] and calls[1][:4] == ["gh", "issue", "edit", "14"] and calls[1][-2:] == ["--add-label", "in-dev"]
+    monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 1})())
+    assert core.mark_on_dev("14", text) is False
+
+    def missing(cmd, **k):
+        raise FileNotFoundError("gh")
+    monkeypatch.setattr(core.subprocess, "run", missing)
+    assert core.mark_on_dev("14", text) is False

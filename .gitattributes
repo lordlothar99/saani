@@ -1,0 +1,4 @@
+# Line endings the launchers need, whatever core.autocrlf says: bash fails on CRLF, cmd wants it.
+bin/saani text eol=lf
+*.cmd text eol=crlf
+.githooks/* text eol=lf

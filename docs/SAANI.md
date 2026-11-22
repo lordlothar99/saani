@@ -71,14 +71,16 @@ flowchart TB
 |---|---|
 | `saani new <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment. Warns when the issue has no milestone. |
 | `saani new <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: tier 1 against production, the branch pushed, the pull request into production opened. |
-| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed. `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (a long run cannot change folder). |
+| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (a long run cannot change folder). |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches waiting for `prune`, the test queue. |
+| `saani longrun [--id ID]` | A throwaway worktree for a long run: folder `longrun-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `longrun/<same id>` from the integration branch (never landed; `saani prune` keeps it). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two, a `longrun/*` branch or a branch checked out in a worktree. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
-| `saani board [--open] [--json]` | The local status page and the board (below). |
+| `saani ui [--open] [--json]` | The local board and kanban page (below): one board for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
+| `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | The projects the board's selector offers, in `~/.saani/projects.toml`. |
 | `saani progress run\|show\|watch` | A progress bar with the remaining time for a test run in the background. |
 
 ## Landing, in detail
@@ -123,22 +125,24 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 - A **small** job runs on GitHub while any minute is left; `saani ci sync` switches the small automatic workflows (those with a `workflow`)
   on or off.
 - A job GitHub **refuses** (no step ran: quota out or billing) falls back to the PC by itself.
+- A project whose `[ci] workflow` file is not on GitHub's default branch yet has nothing to run there: `saani ci pr` runs the CI on the PC and says so in the status. `saani ci pr --pc` forces the PC whatever the budget says.
 - On the PC, `saani ci pr` tests the pull request's head in a temporary worktree (`[tests] check`, then `[tests] full` through the test
   queue), removed after. Either way the result is the commit status `[ci] status_context` on the pull request's head.
 - After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran, or runs `[ci] relabel` here.
 - Every decision goes to `build/saani-ci.json`.
 
-## The status page and the board
-`saani board` serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
-- **`/`, the status page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
+## The board and the kanban page
+`saani ui` (alias `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
+- **`/kanban`, the kanban page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
   needs and a "Copy prompt" to paste to the Architect; the open pull request with its CI in three colours; the Claude Code sessions of the
   project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in); the
   PC's load.
-- **`/board`, the board:** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
+- **`/`, the board (the default page; `/board` still opens it):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
   (bottom left) to END (top right), with branches (to deploy or to close) and the ways back (tests failed, CI red, needs you, hotfix, not
   planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether a long run can take
   it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, long-run fit, the
   prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+- Both pages have a top bar with the page switch (Board · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
 - The board is one HTML file (`saani/board.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
   `mock-state.json` beside it. Its data: [board-data-contract.md](board-data-contract.md).
 
@@ -150,7 +154,13 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
 | Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
 
-The long-run checklist is the plugin's skill (`plugin/skills/longrun/SKILL.md`).
+The long-run checklist is the plugin's skill (`skills/longrun/SKILL.md`).
+
+Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
+(Long run, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
+A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
+`🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the long-run fit, what is deployed, what the owner is
+asked, what blocks the issue); the board and the long run read it through that one parser.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),

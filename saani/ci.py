@@ -115,6 +115,10 @@ class Run:
             raise SystemExit(f"failed: {' '.join(cmd)}\n{r.stderr.strip()}")
         return r.stdout.strip()
 
+    def ok(self, *cmd):
+        """True when the command succeeds (a read: it runs in a dry run too)."""
+        return subprocess.run(cmd, cwd=cfg().root, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL).returncode == 0
+
     def json(self, *cmd):
         out = self.read(*cmd)
         return json.loads(out) if out else None
@@ -134,6 +138,12 @@ def current_budget(run, today=None):
     today = today or datetime.date.today()
     data = run.json("gh", "api", f"users/{account()}/settings/billing/usage") or {}
     return budget(month_used(data.get("usageItems"), today), today)
+
+
+def workflow_exists(run):
+    """True when GitHub knows the CI workflow file (`[ci] workflow`): a project without it yet gets a 404 from every `gh run` call on it."""
+    c = cfg()
+    return run.ok("gh", "api", f"repos/{c.repo}/actions/workflows/{c.ci_workflow}", "--silent")
 
 
 def refused_this_month(run, today=None):
@@ -246,7 +256,7 @@ def cmd_sync(run):
     return 0
 
 
-def cmd_pr(run, head=None):
+def cmd_pr(run, head=None, force_pc=False):
     """The CI of the open `head` -> production pull request: the integration branch, or a hotfix branch, same rule and same status."""
     c = cfg()
     head = head or c.integration
@@ -258,9 +268,14 @@ def cmd_pr(run, head=None):
     if run.read("git", "rev-parse", f"origin/{head}", check=False) != sha:
         run.read("git", "fetch", "--quiet", "origin")
     b = current_budget(run)
-    refused = refused_this_month(run)
+    missing = not force_pc and not workflow_exists(run)
+    refused = False if force_pc or missing else refused_this_month(run)
     job = "pr-ci" if "pr-ci" in c.ci_jobs else next(iter(c.ci_jobs))
     where, why = place(job, b, refused)
+    if force_pc:
+        where, why = "pc", "forced with --pc"
+    elif missing:
+        where, why = "pc", f"the workflow {c.ci_workflow} is not on {c.repo}'s default branch: GitHub cannot run it"
     print(f"pull request #{number} at {sha[:7]}: {where} ({why})", flush=True)
     url, minutes = None, 0
     if where == "github":
@@ -322,7 +337,7 @@ def run_command(args):
         print(f"{where}: {why}")
         return 0
     if args.what == "pr":
-        return cmd_pr(run, args.head)
+        return cmd_pr(run, args.head, args.pc)
     return {"status": cmd_status, "sync": cmd_sync}[args.what](run)
 
 
@@ -332,4 +347,5 @@ def add_parsers(sub):
     p.add_argument("job", nargs="?", help="the job for place, the pull request number for merged")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--head", help="pr: the pull request's branch (default: the integration branch; a hotfix branch)")
+    p.add_argument("--pc", action="store_true", help="pr: run the CI on the PC whatever the budget says")
     p.set_defaults(run=run_command)

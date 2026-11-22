@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# The saani command for Claude Code: the plugin's bin/ is on the PATH of Claude's shell while the plugin is enabled.
+# Runs saani.py from this copy of the plugin with the first Python 3.11+ found.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+for py in python3 python py; do
+  if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+    exec "$py" -I "$here/saani.py" "$@"
+  fi
+done
+echo "saani: Python 3.11 or newer not found (tried python3, python, py)" >&2
+exit 1

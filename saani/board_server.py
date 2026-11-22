@@ -1,9 +1,10 @@
 """Saani at a glance: a local status page and the board (docs/SAANI.md). Standard library only; read-only (it starts, stops and writes
 nothing); pure functions first (tests/test_board_server.py).
 
-  saani board                  serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s; /board is the isometric board
-  saani board --open           the same, and open the board in the browser
-  saani board --json           print the state once and exit
+  saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s: / is the isometric board (/board still opens it), /kanban the kanban page
+  saani ui --open              the same, and open the board in the browser
+  saani ui --json              print the state once and exit
+  saani board ...              the same as saani ui (the command's former name, kept as an alias)
 
 The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
@@ -35,10 +36,13 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
+import urllib.parse
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import config, core, progress
+from . import config, core, glance, progress
 
 HERE = pathlib.Path(__file__).resolve().parent
 SAANI_PY = HERE.parent / "saani.py"
@@ -59,6 +63,7 @@ COLUMNS = [
     ("testing", "Testing", "Tests run in its folder, or the last check before it lands."),
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request."),
     ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy."),
+    ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it."),
     ("live", "Deployed", f"Last {LIVE_DAYS} days: deployed and closed. Folded by default."),
 ]
 WORKTREE_IN_TEXT = re.compile(r"[\\/]([^\\/\s\"']+-wt)[\\/]+(\d+)-")
@@ -100,6 +105,86 @@ _resources = {"now": None, "history": collections.deque(maxlen=HISTORY_POINTS)}
 
 def cfg():
     return config.current()
+
+
+# ---------------------------------------------------------------- the projects the one board can show (a list in the user's home)
+
+_project_lock = threading.RLock()        # the settings are process-wide: one request at a time works inside one project
+_loaded = {}                             # project folder -> its settings
+_home = None                             # the project `saani ui` was started in: shown until the selector says otherwise
+
+
+def registry_path():
+    return pathlib.Path(os.environ.get("SAANI_HOME") or pathlib.Path.home() / ".saani") / "projects.toml"
+
+
+def read_registry():
+    try:
+        rows = tomllib.loads(registry_path().read_text(encoding="utf-8")).get("projects")
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, str)] if isinstance(rows, list) else []
+
+
+def write_registry(folders):
+    path = registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# The projects the Saani board offers in its selector (saani projects add / remove)", "projects = ["]
+    lines += [f" {json.dumps(f)}," for f in folders]
+    path.write_text("\n".join(lines + ["]", ""]), encoding="utf-8")
+
+
+def register(folder):
+    """Add a project's main checkout to the list (once)."""
+    folder = str(pathlib.Path(folder))
+    rows = read_registry()
+    if folder not in rows:
+        write_registry(rows + [folder])
+    return folder
+
+
+def load_project(folder):
+    """The settings of a registered folder, or None when it is gone or has no saani.toml any more."""
+    if folder not in _loaded:
+        try:
+            _loaded[folder] = config.load(folder)
+        except (SystemExit, OSError):
+            return None
+    return _loaded[folder]
+
+
+def projects():
+    """[(settings)] of the registered projects that still load, the home project first; the same repo only once."""
+    found = {}
+    for folder in ([str(_home.root)] if _home else []) + read_registry():
+        c = load_project(folder)
+        if c and c.repo not in found:
+            found[c.repo] = c
+    return list(found.values())
+
+
+def slug(repo):
+    """owner/name as one word for an address: acme-webshop."""
+    return repo.replace("/", "-")
+
+
+def find_project(key):
+    """The listed project whose owner/name or slug is `key`."""
+    return next((c for c in projects() if key in (c.repo, slug(c.repo))), None)
+
+
+def in_project(repo, fn):
+    """fn() with the settings of the project `repo` (owner/name or its slug; empty: the home project), or None when no such project is listed."""
+    with _project_lock:
+        target = find_project(repo) if repo else (_home or config.current())
+        if target is None:
+            return None
+        previous = config.current()
+        config.use(target)
+        try:
+            return fn()
+        finally:
+            config.use(previous)
 
 
 def needs():
@@ -197,7 +282,7 @@ def need_of(labels):
     return None
 
 
-def column_for(issue, worktree=None, testing=()):
+def column_for(issue, worktree=None, testing=(), closing=()):
     """The status page column of an issue (see the module's docstring), or None when it stays off the board."""
     lab = cfg().labels
     labels = set(issue.get("labels") or [])
@@ -210,7 +295,7 @@ def column_for(issue, worktree=None, testing=()):
     if issue.get("state") == "CLOSED":
         return "live"
     if lab.get("in_main", "in-main") in labels:
-        return "main"
+        return "close" if issue["number"] in closing else "main"
     if lab.get("in_dev", "in-dev") in labels:
         return "dev"
     if need_of(labels):
@@ -244,7 +329,8 @@ def column_prompt(column, numbers, pr=None):
     return {"dev": f"Prepare the {c.integration} into {c.production} pull request (it carries {carries}): milestone, CI until green, then "
                    f"tell me what to check before I merge it.",
             "main": f"Give me the deploy command for what is on {c.production} (it carries {carries}): read those issues for deploy "
-                    f"warnings first."}.get(column)
+                    f"warnings first.",
+            "close": f"Close {carries}: nothing of it is deployed (it touches no deploy path). Check each one, comment, and close it."}.get(column)
 
 
 def milestone_key(name):
@@ -320,7 +406,20 @@ def pr_row(raw, titles, last_run=None):
             "contents": pr_contents(commits, titles)}
 
 
-def build_board(issues, worktrees, testing, sessions, runs, pr=None):
+def lifecycle(issue, open_numbers, today=None):
+    """What the issue's At a glance table adds to its card: the long-run fit (marked as read from the table), whether an open issue or a
+    date still blocks it, and whether it is a tracking issue (an epic, the live checks) drawn as an anchor, not a task."""
+    g = issue.get("glance") or {}
+    out = {"blocked": glance.is_blocked(g, open_numbers, today or datetime.date.today().isoformat()),
+           "anchor": bool(re.search(r"\(epic\)|^live checks", issue.get("title", ""), re.I))}
+    fit = (g.get("long_run") or {}).get("fit")
+    if fit:
+        out["longrun"] = {"fit": fit, "why": g["long_run"].get("why", ""), "source": "table"}
+    out["blocked_by"] = (g.get("blocked_by") or {}).get("issues", [])
+    return out
+
+
+def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
     """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
     by_number = {}
     for i in issues:
@@ -335,13 +434,16 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None):
         if n:
             crew.setdefault(n, []).append(s)
     columns = {key: [] for key, _, _ in COLUMNS}
+    landed = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
+    open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not landed & set(i.get("labels") or [])}
     for n, issue in by_number.items():
         w = trees.get(n)
-        col = column_for(issue, w, testing)
+        col = column_for(issue, w, testing, closing)
         if not col:
             continue
         need = need_of(issue.get("labels"))
-        columns[col].append({**issue, "worktree": w, "agents": crew.get(n, []), "need": need, "prompt": prompt_for(n, col, need),
+        columns[col].append({**issue, **lifecycle(issue, open_numbers), "worktree": w, "agents": crew.get(n, []), "need": need,
+                             "prompt": prompt_for(n, col, need),
                              "runs": [r for r in runs if w and r.get("checkout") == w["folder"]]})
     order = lambda c: (milestone_key(c.get("milestone")), c["number"])
     carried = {g["issue"] for g in (pr or {}).get("contents", []) if g.get("issue")}
@@ -349,6 +451,23 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None):
              "prompt": column_prompt(key, [c["number"] for c in columns[key]], pr),
              "pr": {**pr, "inside": sorted(c["number"] for c in columns[key] if c["number"] in carried)} if key == "dev" and pr else None}
             for key, title, hint in COLUMNS]
+
+
+def touches_deployed(files, paths):
+    """True when one of `files` is under one of the `paths` (prefixes) a served project deploys."""
+    return any(f.startswith(tuple(paths)) for f in files)
+
+
+def closing_issues(numbers):
+    """The issues among `numbers` (on production) whose commits touch nothing deployed: they close at merge. Empty without `[deploy] paths`."""
+    paths = cfg().deploy_paths
+    out = set()
+    for n in numbers if paths else ():
+        raw = run("git", "log", f"origin/{cfg().production}", "-E", f"--grep=#{n}\b", "--name-only", "--format=", timeout=60)
+        files = [f for f in raw.splitlines() if f.strip()]
+        if files and not touches_deployed(files, paths):
+            out.add(n)
+    return out
 
 
 def testing_issues(worktrees, runs, landing_issue):
@@ -421,6 +540,7 @@ def project_info():
 # ---------------------------------------------------------------- collectors (each one fails alone)
 
 def cached(key, seconds, fn):
+    key = (cfg().repo, key)                      # one project's answer is never another's
     with _lock:
         hit = _cache.get(key)
         if hit and time.time() - hit[0] < seconds:
@@ -540,9 +660,10 @@ def tests():
 
 
 def gh_issues(*filters):
-    rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt", timeout=60)
+    rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt,body", timeout=60)
     return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"),
-             "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title")}
+             "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title"),
+             "glance": glance.parse(r.get("body"))}                  # the body itself stays here: the panel asks for it on demand
             for r in json.loads(rows or "[]")]
 
 
@@ -555,10 +676,70 @@ def issues():
         queries["assigned"] = ("--assignee", c.owner, "--state", "open", "--limit", "100")
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
-    # The status page shows what is started (assigned), waits for the owner or is merged; the board (/board) places every open issue.
+    # The status page shows what is started (assigned), waits for the owner or is merged; the board (/) places every open issue.
     lab = c.labels
     flagged = [i for i in got["open"] if set(i["labels"]) & {lab["in_dev"], lab["in_main"], lab["answer"], lab["act"]}]
     return {"board": got.get("assigned", []) + flagged + got["closed"], "open": got["open"], "closed": got["closed"]}
+
+
+def milestones(rows, open_issues):
+    """The milestone strip: per open milestone its open and closed issues, its live-checks issue (an open issue titled "Live checks ..."
+    in it) and whether it is ready to release (everything closed, something done). `rows` is GitHub's milestone list."""
+    out = []
+    for m in rows:
+        if m.get("state") != "open":
+            continue
+        title = m["title"]
+        checks = next((i["number"] for i in open_issues if i.get("milestone") == title and i["title"].lower().startswith("live checks")), None)
+        out.append({"title": title, "open": m["open_issues"], "closed": m["closed_issues"], "checks": checks,
+                    "ready": m["open_issues"] == 0 and m["closed_issues"] > 0})
+    return sorted(out, key=lambda m: milestone_key(m["title"]))
+
+
+def hygiene(open_issues, closed_issues, landed, labels):
+    """What needs tidying: [{kind, issues}] without the empty ones. closed_labelled: closed but still labelled in-dev / in-main;
+    no_milestone: open (not an idea) with no milestone; landed_unlabelled: commits between production and the integration branch name
+    them, yet they carry neither in-dev nor in-main."""
+    life = {labels["in_dev"], labels["in_main"]}
+    found = {
+        "closed_labelled": [i["number"] for i in closed_issues if life & set(i["labels"])],
+        "no_milestone": [i["number"] for i in open_issues if not i.get("milestone") and labels["idea"] not in i["labels"]],
+        "landed_unlabelled": [i["number"] for i in open_issues if i["number"] in landed and not life & set(i["labels"])],
+    }
+    return [{"kind": k, "issues": sorted(v)} for k, v in found.items() if v]
+
+
+def landed_refs():
+    """Issue numbers that commits between production and the integration branch name (`refs #n`)."""
+    c = cfg()
+    raw = run("git", "log", f"origin/{c.production}..origin/{c.integration}", "--format=%B", timeout=60)
+    return {int(n) for n in re.findall(r"refs #(\d+)", raw)}
+
+
+def issue_detail(body, comments, url):
+    """The panel's Context, Acceptance criteria and History from an issue's Markdown and its comments."""
+    def section(name):
+        m = re.search(r"^##\s*" + name + r"\s*$(.*?)(?=^##\s|\Z)", body or "", re.M | re.S | re.I)
+        return m.group(1).strip() if m else ""
+    criteria = [{"done": m.group(1).lower() == "x", "text": m.group(2).strip()}
+                for m in re.finditer(r"^\s*[-*]\s*\[( |x|X)\]\s*(.+)$", section("Acceptance criteria"), re.M)]
+    history = []
+    for c in comments or []:
+        text = (c.get("body") or "").strip()
+        head = re.match(r"^#{1,4}\s*(.+)", text)
+        history.append({"when": (c.get("createdAt") or "")[:10], "kind": head.group(1).strip()[:40] if head else "Comment",
+                        "text": (text[head.end():].strip() if head else text)[:300]})
+    return {"summary": section("Context")[:1500], "criteria": criteria, "history": history, "url": url}
+
+
+def issue_page(number):
+    raw = run("gh", "issue", "view", str(number), "--repo", cfg().repo, "--json", "body,comments,url", timeout=60)
+    got = json.loads(raw) if raw else {}
+    return issue_detail(got.get("body"), got.get("comments"), got.get("url"))
+
+
+def milestone_rows():
+    return json.loads(run("gh", "api", f"repos/{cfg().repo}/milestones?state=all&per_page=50", timeout=60) or "[]")
 
 
 PR_FIELDS = "number,title,url,isDraft,headRefOid,statusCheckRollup,commits,changedFiles,additions,deletions,mergeable,createdAt,comments"
@@ -613,6 +794,18 @@ def resources():
         return {"now": _resources["now"], "history": list(_resources["history"])}
 
 
+def waiting(c):
+    """How many open issues of project `c` wait for its owner (the answer or act label): that project's own issue list, cached 60 s."""
+    with _project_lock:
+        previous = config.current()
+        config.use(c)
+        try:
+            lab = c.labels
+            return len([i for i in cached("issues", 60, issues)["open"] if {lab["answer"], lab["act"]} & set(i["labels"])])
+        finally:
+            config.use(previous)
+
+
 def state():
     trees = safe(tasks, default=[])
     land = safe(landing)
@@ -624,8 +817,17 @@ def state():
     testing = testing_issues(trees, tst["runs"], int(m.group(2)) if m else None)
     titles = {i["number"]: i["title"] for i in iss.get("open", []) + iss.get("closed", [])}
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
+    strips = safe(lambda: cached("strips", 120, lambda: {
+        "milestones": milestones(milestone_rows(), iss.get("open", [])),
+        "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}), default={"milestones": [], "hygiene": []})
+    in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
+    closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
+    closing = closing if isinstance(closing, set) else set()
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
-            "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open")),
+            "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
+                         for c in projects()],
+            "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
+            "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
 
@@ -647,19 +849,31 @@ class Handler(BaseHTTPRequestHandler):
         if not host_allowed(self.headers.get("Host", ""), self.server.server_address[1]):
             self.send_error(403)
             return
-        path = self.path.split("?")[0]
-        if path in ("/", "/index.html"):
-            body, kind = page().encode("utf-8"), "text/html; charset=utf-8"
-        elif path in ("/board", "/board/"):
+        path, _, query = self.path.partition("?")
+        params = urllib.parse.parse_qs(query)
+        repo = (params.get("project") or [""])[0]           # the selector's choice: owner/name; none: the project the server started in
+        if path in ("/kanban", "/kanban/"):
+            text = in_project(repo, page)
+            body, kind = (text or "").encode("utf-8"), "text/html; charset=utf-8"
+        elif path in ("/", "/index.html", "/board", "/board/"):      # the board is the default page; /board is its old address
             body, kind = board_page().encode("utf-8"), "text/html; charset=utf-8"
         elif path in ("/mock-state.json", "/board/mock-state.json"):
             body, kind = MOCK_FILE.read_bytes(), "application/json"
+        elif path == "/api/issue":                           # one issue's context, criteria and history, asked for when its panel opens
+            number = (params.get("n") or [""])[0]
+            data = in_project(repo, lambda: issue_page(int(number))) if number.isdigit() else None
+            body, kind = (json.dumps(data) if data is not None else "").encode("utf-8"), "application/json"
         elif path == "/api/state":
-            if "fresh=1" in self.path.partition("?")[2].split("&"):    # the Refresh button: GitHub and the rest asked again now
+            if "1" in params.get("fresh", []):               # the Refresh button: GitHub and the rest asked again now
                 with _lock:
                     _cache.clear()
-            body, kind = json.dumps(state()).encode("utf-8"), "application/json"
+            data = in_project(repo, state)
+            text = json.dumps(data) if data is not None else None
+            body, kind = (text or "").encode("utf-8"), "application/json"
         else:
+            self.send_error(404)
+            return
+        if not body:                                          # a project that is not in the list
             self.send_error(404)
             return
         self.send_response(200)
@@ -673,18 +887,66 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def projects_command(args):
+    """The list the board's selector reads (~/.saani/projects.toml): list, add FOLDER, remove OWNER/NAME."""
+    if args.what == "add":
+        try:
+            folder = config.main_checkout(args.target) if args.target else config.main_checkout()
+        except OSError:
+            folder = None
+        if folder is None or load_project(str(folder)) is None:
+            print(f"{args.target or 'here'}: no git checkout with a {config.FILE} there")
+            return 1
+        register(folder)
+        print(f"listed: {load_project(str(folder)).repo} ({folder})")
+    elif args.what == "remove":
+        if not args.target:
+            print("remove needs owner/name")
+            return 1
+        rows = read_registry()
+        keep = [f for f in rows if not (load_project(f) and args.target in (load_project(f).repo, slug(load_project(f).repo)))]
+        write_registry(keep)
+        print(f"removed {args.target}" if len(keep) < len(rows) else f"{args.target} was not in the list")
+    else:
+        for c in projects():
+            print(f"{c.repo}  {c.root}")
+        if not projects():
+            print("no project listed: run `saani projects add` in a project, or start `saani ui` in one")
+    return 0
+
+
+def already_running(port):
+    """True when a Saani board answers on this port (it is what holds it)."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=10) as r:
+            return "board" in json.loads(r.read())
+    except (OSError, ValueError):
+        return False
+
+
 def run_command(args):
+    global _home
+    _home = cfg()
     if args.json:
         safe(sample_resources)
         print(json.dumps(state(), indent=1))
         return 0
+    safe(lambda: register(_home.root))                   # the project it starts in is listed from now on, so any later board offers it
     port = args.port or cfg().board_port
-    threading.Thread(target=sampler, daemon=True).start()
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Saani: {url} (status) and {url}board (board), this PC only; Ctrl+C stops it")
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        if not already_running(port):
+            raise
+        print(f"Saani is already running: {url}#{slug(_home.repo)} (this project is in its selector)")
+        if args.open:
+            webbrowser.open(f"{url}#{slug(_home.repo)}")
+        return 0
+    threading.Thread(target=sampler, daemon=True).start()
+    print(f"Saani: {url} (board) and {url}kanban (kanban), this PC only; Ctrl+C stops it")
     if args.open:
-        webbrowser.open(url + "board")
+        webbrowser.open(f"{url}#{slug(_home.repo)}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -693,8 +955,12 @@ def run_command(args):
 
 
 def add_parsers(sub):
-    p = sub.add_parser("board", help="the local status page and the isometric board (this PC only)")
+    p = sub.add_parser("ui", aliases=["board"], help="the local status page and the isometric board (this PC only); board: alias of ui")
     p.add_argument("--port", type=int)
     p.add_argument("--open", action="store_true", help="open the board in the browser")
     p.add_argument("--json", action="store_true", help="print the state once and exit")
     p.set_defaults(run=run_command)
+    p = sub.add_parser("projects", help="the projects the board offers in its selector: list, add [FOLDER], remove OWNER/NAME")
+    p.add_argument("what", nargs="?", choices=["list", "add", "remove"], default="list")
+    p.add_argument("target", nargs="?", help="add: the project's folder (default: here); remove: owner/name")
+    p.set_defaults(run=projects_command)

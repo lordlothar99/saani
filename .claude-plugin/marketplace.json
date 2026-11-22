@@ -7,8 +7,8 @@
   "plugins": [
     {
       "name": "saani",
-      "source": "./plugin",
-      "description": "Saani: an AI workshop for GitHub projects (long runs; worker agents and hooks to come)."
+      "source": "./",
+      "description": "Saani: an AI workshop for GitHub projects (slash commands for every saani command, long runs; worker agents and hooks to come)."
     }
   ]
 }

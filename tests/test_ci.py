@@ -136,3 +136,52 @@ def test_a_failed_check_skips_the_full_run_and_the_worktree_is_still_removed(mon
     assert calls[-1] == ("git", "worktree", "remove", "--force", str(folder))
     result, calls, folder = pc_run(monkeypatch, tmp_path / "again", full_code=1)
     assert result == "failed" and calls[-1][:3] == ("git", "worktree", "remove")
+
+
+class FakeGh:
+    """A Run whose gh calls are answered from a table: no network. `workflow` False: GitHub answers 404 for the workflow file."""
+    dry = False
+
+    def __init__(self, workflow):
+        self.workflow, self.calls = workflow, []
+
+    def ok(self, *cmd):
+        self.calls.append(cmd)
+        return self.workflow
+
+    def read(self, *cmd, check=True):
+        self.calls.append(cmd)
+        return "abc123"
+
+    def json(self, *cmd):
+        self.calls.append(cmd)
+        return [{"number": 7, "headRefOid": "abc123"}] if cmd[:3] == ("gh", "pr", "list") else None
+
+    def write(self, *cmd):
+        self.calls.append(cmd)
+        return ""
+
+
+def pr_run(monkeypatch, workflow, **kw):
+    run = FakeGh(workflow)
+    statuses, logged = [], []
+    monkeypatch.setattr(fci, "current_budget", lambda r: {"left": 1500, "share_used": .1, "share_passed": .5})
+    monkeypatch.setattr(fci, "refused_this_month", lambda r: pytest.fail("asks GitHub's runs of a workflow that is not there"))
+    monkeypatch.setattr(fci, "on_pc", lambda sha: ("passed", 4))
+    monkeypatch.setattr(fci, "on_github", lambda *a: pytest.fail("starts a GitHub run"))
+    monkeypatch.setattr(fci, "set_status", lambda r, sha, state, text, url=None: statuses.append((state, text)))
+    monkeypatch.setattr(fci, "log", logged.append)
+    return fci.cmd_pr(run, **kw), statuses, logged
+
+
+def test_a_missing_workflow_file_sends_the_pull_request_ci_to_the_pc_and_says_why(monkeypatch):
+    """`gh run list` answered HTTP 404 and the command stopped; now the PC runs it, the reason is in the status and in the log."""
+    code, statuses, logged = pr_run(monkeypatch, workflow=False)
+    assert code == 0 and statuses[-1][0] == "success"
+    assert "ci.yml is not on" in statuses[-1][1] and "default branch" in statuses[-1][1]
+    assert logged[0]["place"] == "pc" and "ci.yml" in logged[0]["why"]
+
+
+def test_pc_forces_the_pull_request_ci_onto_the_pc_whatever_the_budget_says(monkeypatch):
+    code, statuses, logged = pr_run(monkeypatch, workflow=True, force_pc=True)
+    assert code == 0 and logged[0]["place"] == "pc" and logged[0]["why"] == "forced with --pc"

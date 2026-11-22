@@ -306,6 +306,25 @@ def hotfix_base():
     return c.prod_tag, unreleased_warning(ahead)
 
 
+def cmd_longrun(args):
+    """A throwaway worktree for a long run: folder `longrun-<YYYY-MM-DD_HHMM>`, branch `longrun/<YYYY-MM-DD_HHMM>` from the integration
+    branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani new`."""
+    c = cfg()
+    stamp = args.id or time.strftime("%Y-%m-%d_%H%M")
+    if not re.fullmatch(r"[0-9A-Za-z_-]+", stamp):
+        raise SystemExit(f"run id '{stamp}': letters, digits, - and _ only")
+    folder, name = c.wt_dir / f"longrun-{stamp}", f"longrun/{stamp}"
+    if folder.exists():
+        raise SystemExit(f"{folder} already exists: this run id is taken")
+    git("fetch", "-q", "origin", c.integration)
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    git("worktree", "add", "--no-track", "-b", name, str(folder), f"origin/{c.integration}")
+    (folder / "build").mkdir(exist_ok=True)
+    print(f"long run:  {stamp}")
+    print(f"worktree:  {folder}")
+    print(f"branch:    {name} (from origin/{c.integration}; never landed, `saani prune` keeps it; remove with: git worktree remove {folder})")
+
+
 def cmd_new(args):
     c = cfg()
     info = issue_info(args.issue)
@@ -558,8 +577,29 @@ def cmd_land(args):
             print(f"removed: {cwd} and the local branch {branch}")
         else:
             print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
-    print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
+    if args.no_comment or not mark_on_dev(m.group(2), landing_comment(row)):
+        print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
     return 0
+
+
+def landing_comment(row):
+    """The issue comment of a landing (.github/COMMENT_KINDS.md, `On dev`): the commit, how long it took, where it goes next."""
+    c = cfg()
+    tests = "tier 1 green" if c.tier1 else "no tier 1 configured"
+    return chr(10).join(["### ✅ On dev", "| Commit | Tests | Next |", "|---|---|---|",
+                      f"| {row['head']} | {tests}, landed in {row['seconds']} s | goes to {c.production} with the next pull request |"])
+
+
+def mark_on_dev(number, text):
+    """Comment the landing on the issue and add its in-dev label. True when both worked; False (nothing said, the caller prints the
+    manual step) when gh is missing or refuses: a landing is never undone by its bookkeeping."""
+    c = cfg()
+    steps = [["gh", "issue", "comment", str(number), "--repo", c.repo, "--body", text],
+             ["gh", "issue", "edit", str(number), "--repo", c.repo, "--add-label", c.labels.get("in_dev", "in-dev")]]
+    try:
+        return all(subprocess.run(s, cwd=c.root, capture_output=True, text=True, stdin=subprocess.DEVNULL).returncode == 0 for s in steps)
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------- saani prune
@@ -667,11 +707,15 @@ def add_parsers(sub):
     p.add_argument("--no-assign", action="store_true", help="do not assign the issue to the owner")
     p.add_argument("--hotfix", action="store_true", help="an urgent fix: from the prod tag, landed as a pull request into production")
     p.set_defaults(run=cmd_new)
+    p = sub.add_parser("longrun", help="a throwaway worktree (longrun-<timestamp>) for a long run to work in")
+    p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM)")
+    p.set_defaults(run=cmd_longrun)
     p = sub.add_parser("land", help="land the current worktree's branch into the integration branch")
     p.add_argument("--keep", action="store_true", help="keep the worktree and its branch after landing")
     p.add_argument("--wait", type=float, default=60, help="minutes to wait for the landing lock")
     p.add_argument("--dry-run", action="store_true", help="check and print the plan, change nothing")
     p.add_argument("--worktree", help="land this worktree instead of the current folder's (a long run cannot change folder)")
+    p.add_argument("--no-comment", action="store_true", help="do not comment the landing on the issue or label it in-dev (print the step instead)")
     p.set_defaults(run=cmd_land)
     p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue")
     p.set_defaults(run=cmd_status)

@@ -1,0 +1,10 @@
+{
+  "name": "saani",
+  "version": "0.2.0",
+  "description": "Saani: an AI workshop for GitHub projects. A slash command for each saani command (/saani:ui, /saani:new, /saani:land...), the long-run skill, and later the worker agents and hooks.",
+  "author": {
+    "name": "lordlothar99"
+  },
+  "repository": "https://github.com/lordlothar99/saani",
+  "license": "AGPL-3.0-only"
+}

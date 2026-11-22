@@ -11,18 +11,21 @@ spaces or commas): only those issues.
 The project's own rules (its CLAUDE.md, its saani.toml) win where they differ from this checklist.
 
 ## Before the run (questions first)
-1. **Folder.** Say the session's working folder. A long run works in its own checkout (`[board] folders` `longrun` in saani.toml); if the
-   session is elsewhere, say so and stop.
+1. **Folder.** A long run works in its own throwaway worktree, never in the owner's folder: run `saani longrun` (it makes
+   `longrun-<YYYY-MM-DD_HHMM>` beside the other worktrees, on the branch `longrun/<YYYY-MM-DD_HHMM>` from the integration branch) and say
+   its folder. Run every command of the run from that folder (the session cannot change folder: `cd` in each call), and
+   `saani new <n>` for each issue from there as usual. `[board] folders` `longrun` is not needed.
 2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (below). For
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those.
-3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time).
+3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani longrun` printed.
 
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that.
 1. **Which issues: as many as possible.** Milestone order (lowest version first), then issues with no milestone; inside one, bugs first.
-   Excluded, real blockers only: the server or a live check, the owner's answer (`[labels] answer`), the owner's action (`[labels] act`), a key or account only the
+   The issue's **At a glance** table says what to expect (`.github/ISSUE_TEMPLATE/`; read like `saani/glance.py` does): `Long run ⛔ No` is not
+   taken, `🟡 Partly` only for the part the table names, and `Blocked by` an issue still open or a date not yet come is not taken. Excluded, real blockers only: the server or a live check, the owner's answer (`[labels] answer`), the owner's action (`[labels] act`), a key or account only the
    owner has. A partly blocked issue: do the repo's part, comment the rest. An unclear one: comment the pending decision (context, options,
    a recommendation) and move on. Never change an issue's milestone. **The next issue is searched again after each one, never taken from a
    list made at the start**, so an issue created, relabelled or answered during the run is seen.
@@ -40,3 +43,8 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 
 ## off
 Say what is left, write the report, stop.
+
+## Running saani
+Run `saani` with the Bash tool: the plugin's `bin/` puts it on that shell's PATH. If it is not found, run
+`python -I "${CLAUDE_PLUGIN_ROOT}/saani.py"` instead. Run it from the project's folder (where saani.toml is). A command that fails: show its
+message as it is, say what it means, never work around it.
