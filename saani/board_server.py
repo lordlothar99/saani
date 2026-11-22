@@ -488,8 +488,14 @@ def frontmatter(text):
     return out
 
 
+def agent_key(kind):
+    """The role an agent type stands for: `saani:coder` (a plugin's agent) and `coder` are both the Coder (#42)."""
+    return str(kind).split(":")[-1].lower()
+
+
 def roster(defined, sessions):
-    """Every subagent kind: defined in the repo, planned for Saani, or built in; with the runs seen in the sessions listed."""
+    """Every subagent kind: defined in the repo or the plugin, planned for Saani, or built in; with the runs seen in the sessions listed.
+    A plugin's agent (`saani:coder`) is the same row as its role (`coder`, `Coder`): its runs are counted there, not in a row of its own."""
     seen = collections.defaultdict(lambda: {"runs": 0, "running": []})
     for s in sessions:
         for sub in s.get("subagents", []):
@@ -502,11 +508,13 @@ def roster(defined, sessions):
     names = {r["name"].lower() for r in rows}
     rows += [{"name": n, "kind": "planned", "model": m, "what": w, "file": f"planned: .claude/agents/{n.lower()}.md"}
              for n, m, w in PLANNED_ROLES if n.lower() not in names]
+    roles = {r["name"].lower() for r in rows}
     rows += [{"name": n, "kind": "built-in", "model": "", "what": w, "file": "built into Claude Code (no file in the repo)"} for n, w in BUILTIN.items()]
     rows += [{"name": n, "kind": "built-in", "model": "", "what": "", "file": "built into Claude Code (no file in the repo)"}
-             for n in seen if n.lower() not in names and n not in BUILTIN]
+             for n in seen if n.lower() not in names and agent_key(n) not in roles and n not in BUILTIN]
     for r in rows:
-        r.update(seen.get(r["name"], {"runs": 0, "running": []}))
+        mine = [seen[t] for t in seen if t == r["name"] or (r["kind"] in ("defined", "planned") and agent_key(t) == r["name"].lower())]
+        r.update({"runs": sum(m["runs"] for m in mine), "running": [x for m in mine for x in m["running"]]})
     def rank(r):                       # running, defined, used lately, planned, the rest
         return 0 if r["kind"] == "defined" else 1 if r["runs"] else 2 if r["kind"] == "planned" else 3
     return sorted(rows, key=lambda r: (-len(r["running"]), rank(r), -r["runs"], r["name"]))
@@ -625,13 +633,18 @@ def agents(now=None):
     return sorted(out, key=lambda s: s["age_min"])
 
 
-def defined_agents():
+def defined_agents(plugin_folder=None):
+    """The agents the project defines (.claude/agents/*.md) and the ones the Saani plugin brings (agents/*.md beside this code), the project's
+    first: a project agent of the same name wins."""
     rows = []
-    folder = cfg().root / ".claude" / "agents"
-    for f in sorted(folder.glob("*.md")) if folder.is_dir() else []:
-        meta = frontmatter(f.read_text(encoding="utf-8"))
-        rows.append({"name": meta.get("name") or f.stem, "description": meta.get("description", "")[:160], "model": meta.get("model", ""),
-                     "file": f.relative_to(cfg().root).as_posix()})
+    for folder, base in ((cfg().root / ".claude" / "agents", cfg().root), (plugin_folder or HERE.parent / "agents", None)):
+        for f in sorted(folder.glob("*.md")) if folder.is_dir() else []:
+            meta = frontmatter(f.read_text(encoding="utf-8"))
+            name = meta.get("name") or f.stem
+            if name.lower() in {r["name"].lower() for r in rows}:
+                continue
+            rows.append({"name": name, "description": meta.get("description", "")[:160], "model": meta.get("model", ""),
+                         "file": f.relative_to(base).as_posix() if base else f"the saani plugin: agents/{f.name}"})
     return rows
 
 
