@@ -315,7 +315,8 @@ def cmd_auto(args):
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     action = getattr(args, "action", None)
     for name, only in (("folder", "on"), ("deploy", "on"), ("check", "status"), ("pr", "report"), ("post", "report"), ("run_id", "off")):
-        if getattr(args, name, None) and action != only:
+        given = getattr(args, name, None)
+        if given is not None and given is not False and action != only:
             raise SystemExit(f"saani auto: --{name.removesuffix('_id')} belongs to `saani auto {only}`")
     if action in ("on", "off", "status", "report"):
         if action != "on" and getattr(args, "id", None):

@@ -349,3 +349,164 @@ def test_the_config_setting_ci_attempts():
     for bad in (0, -1, "3", True):
         with pytest.raises(SystemExit):
             config.from_toml({"auto": {"ci_attempts": bad}}, "x")
+
+
+# ---------------------------------------------------------------- review fixes
+
+def test_the_posted_report_holds_no_local_path(world, monkeypatch):
+    record(world, started=auto.utc_now())
+    posted = {}
+    fake_world(monkeypatch, commits=commit("Add the cart", 12), titles={12: "Cart page"}, posted=[])
+
+    def gh(*a):
+        if a[:2] == ("pr", "comment"):
+            posted["text"] = pathlib.Path(a[a.index("--body-file") + 1]).read_text(encoding="utf-8")
+            return ""
+        return "Cart page\n" if a[:2] == ("issue", "view") else "[]"
+    monkeypatch.setattr(auto, "gh", gh)
+    auto.cmd_report(args(pr=7, post=True))
+    text = posted["text"]
+    assert "| Folder | auto-2026-11-22_0800 |" in text
+    root = world.root.parent
+    for path in (root, world.root, world.wt, world.run, world.home, pathlib.Path.home()):
+        assert str(path) not in text and str(path).replace("\\", "/") not in text
+    assert "\\" not in text.replace("\\|", "")
+
+
+def test_a_report_row_for_why_the_run_stopped(world, monkeypatch):
+    record(world, started=auto.utc_now())
+    fake_world(monkeypatch)
+    auto.cmd_report(args())
+    assert "| Stopped by | finished the list |" in (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    log_refusals(["a"] * 10)
+    auto.cmd_report(args())
+    text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    assert "| Stopped by | refusals for the same reason in a row (10 of 10) |" in text
+
+
+def test_check_at_a_limit_writes_a_journal_line_the_report_shows(world, monkeypatch):
+    record(world, started=auto.utc_now())
+    log_refusals(["x"] * 10)
+    assert auto.cmd_status(args(check=True)) == 3
+    rows = auto.read_journal("r1")
+    assert [r["kind"] for r in rows if r["kind"] == "stop"] == ["stop"] and rows[-1]["issue"] is None and "same reason" in rows[-1]["note"]
+    fake_world(monkeypatch)
+    auto.cmd_report(args())
+    assert "stop: refusals for the same reason in a row reached" in (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    record(world, started=auto.utc_now())
+    (world.root / "build" / "saani-auto-r1.jsonl").unlink()
+    assert auto.cmd_status(args(check=False)) == 0                       # a plain status writes nothing
+    assert not (world.root / "build" / "saani-auto-r1.jsonl").exists()
+
+
+def other_project(world, session="sess-x", run="r1"):
+    guard.turn_on(session, run, world.root.parent / "other", world.wt, folder=world.run)
+
+
+def test_off_run_removes_only_this_projects_entries(world, capsys):
+    guard.turn_on("mine", "r1", world.root, world.wt, folder=world.run)
+    other_project(world)                                                      # the same run id, another repository
+    assert auto.cmd_off(args(run_id="r1")) == 0
+    assert guard.state("mine") is None and guard.state("sess-x")["id"] == "r1"
+    assert "(1 guard entry removed" in capsys.readouterr().out
+
+
+def test_the_project_is_compared_without_case_on_windows(world):
+    guard.turn_on("mine", "r1", str(world.root).swapcase() if os.name == "nt" else world.root, world.wt, folder=world.run)
+    assert auto.end_guard_entries("r1") == 1
+
+
+def test_refusals_of_another_projects_run_with_the_same_id_do_not_count(world):
+    record(world, started=auto.utc_now())
+    other_project(world)
+    log_refusals(["a"] * 12)
+    assert auto.counts(auto.read_record())["refusals"] == 0
+    guard.turn_on("mine", "r1", world.root, world.wt, folder=world.run)      # this project holds the run id too
+    assert auto.counts(auto.read_record())["refusals"] == 12
+
+
+def test_a_refusal_line_with_a_project_key_counts_for_that_project_only(world):
+    record(world, started=auto.utc_now())
+    path = pathlib.Path(guard.registry()) / guard.REFUSALS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [{"run": "r1", "reason": "a", "project": str(world.root)}, {"run": "r1", "reason": "a", "project": str(world.root.parent / "other")},
+            {"run": "r1", "reason": "b"}]
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    assert auto.refusal_reasons("r1") == ["a", "b"]
+
+
+def test_check_without_a_record_but_a_guard_entry_for_this_repo_exits_3(world, capsys):
+    assert auto.cmd_status(args(check=True)) == 0
+    other_project(world)
+    assert auto.cmd_status(args(check=True)) == 0                              # another repository's run is none of ours
+    guard.turn_on("mine", "r1", world.root, world.wt, folder=world.run)
+    assert auto.cmd_status(args(check=True)) == 3
+    assert "the run record is missing" in capsys.readouterr().out
+    assert auto.cmd_status(args(check=False)) == 0                             # a plain status only says no run is on
+
+
+def test_an_issue_that_landed_is_not_left(world, monkeypatch):
+    rec = record(world, started=auto.utc_now() - datetime.timedelta(hours=1))
+    now = auto.stamp(auto.utc_now())
+    listing = [{"number": 1, "title": "Landed after a question", "comments": [{"body": "### ❓ Question", "createdAt": now}]},
+               {"number": 2, "title": "Still waiting", "comments": [{"body": "### ❓ Question", "createdAt": now}]}]
+    monkeypatch.setattr(auto, "gh", lambda *a: json.dumps(listing))
+    assert set(auto.left_issues(rec, [], landed=[1])) == {2}
+    rows = [{"time": "t", "issue": 1, "kind": "question"}]
+    assert auto.left_issues(rec, rows, landed=[1]) == {2: ("question", "Still waiting")}
+
+
+def test_only_the_latest_status_comment_decides_whether_an_issue_is_left(world, monkeypatch):
+    rec = record(world, started=START)
+    c = lambda body, when: {"body": body, "createdAt": when}  # noqa: E731
+    listing = [{"number": 1, "title": "Answered", "comments": [c("### ❓ Question", "2026-11-22T09:00:00Z"),
+                                                              c("### ▶ Started", "2026-11-22T10:00:00Z"),
+                                                              c("an owner's free comment", "2026-11-22T11:00:00Z")]},
+               {"number": 2, "title": "Blocked later", "comments": [c("### ▶ Started", "2026-11-22T09:00:00Z"),
+                                                                    c("### ⛔ Blocked", "2026-11-22T10:00:00Z")]},
+               {"number": 3, "title": "Question before the run", "comments": [c("### ❓ Question", "2026-11-20T10:00:00Z")]}]
+    monkeypatch.setattr(auto, "gh", lambda *a: json.dumps(listing))
+    assert auto.left_issues(rec, []) == {2: ("blocked", "Blocked later")}
+
+
+def test_the_journal_answers_for_an_issue_github_does_not_list_by_its_latest_line(world, monkeypatch):
+    rec = record(world, started=START)
+    monkeypatch.setattr(auto, "gh", lambda *a: "[]" if a[:2] == ("issue", "list") else "T\n")
+    rows = [{"time": "t", "issue": 5, "kind": "question"}, {"time": "t", "issue": 5, "kind": "progress"},
+            {"time": "t", "issue": 6, "kind": "blocked"}]
+    assert auto.left_issues(rec, rows) == {6: ("blocked", "T")}
+
+
+def test_pr_zero_is_not_silently_ignored(world, monkeypatch):
+    record(world)
+    fake_world(monkeypatch)
+    with pytest.raises(SystemExit):
+        auto.cmd_report(args(pr=0))
+    with pytest.raises(SystemExit):
+        auto.cmd_report(args(pr=0, post=True))
+    with pytest.raises(SystemExit) as e:
+        cli(["auto", "status", "--pr", "0"])
+    assert "belongs to `saani auto report`" in e.value.code
+
+
+def test_saani_land_journals_the_landing(world, monkeypatch, capsys):
+    record(world)
+    root = world.root
+
+    def git(*a, cwd=None, check=True):
+        out = {("rev-parse", "--show-toplevel"): str(world.run), ("rev-parse", "--abbrev-ref"): "task/12-cart",
+               ("rev-parse", "--git-common-dir"): str(root / ".git"), ("rev-parse", "--short"): "abc1234"}.get(a[:2], "")
+        return subprocess.CompletedProcess(a, 0, stdout=out, stderr="") if not check else out
+    monkeypatch.setattr(core, "git", git)
+    monkeypatch.setattr(core, "take_lock", lambda *a, **k: True)
+    monkeypatch.setattr(core, "release_lock", lambda *a, **k: None)
+    monkeypatch.setattr(core, "merge_and_rebuild", lambda *a, **k: None)
+    monkeypatch.setattr(core, "queued_run", lambda *a, **k: 0)
+    monkeypatch.setattr(core, "record", lambda *a, **k: None)
+    monkeypatch.setattr(core, "restore_generated", lambda *a, **k: None)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: True)
+    land = type("A", (), {"worktree": None, "keep": True, "dry_run": False, "wait": 1, "no_comment": False})()
+    monkeypatch.chdir(world.run)
+    assert core.cmd_land(land) == 0
+    assert "LANDED: task/12-cart" in capsys.readouterr().out
+    assert [(r["issue"], r["kind"]) for r in auto.read_journal("r1")] == [(12, "landed")]

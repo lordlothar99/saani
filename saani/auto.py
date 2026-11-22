@@ -334,13 +334,15 @@ def journal_path(run_id):
     return build_dir() / f"saani-auto-{run_id}.jsonl"
 
 
-def journal(issue, kind, now=None):
-    """While a run is on, one JSON line {time, issue, kind} in build/saani-auto-<id>.jsonl (the report's timeline). Nothing otherwise, and
-    never an error: the journal never undoes the work it notes."""
+def journal(issue, kind, now=None, note=None):
+    """While a run is on, one JSON line {time, issue, kind[, note]} in build/saani-auto-<id>.jsonl (the report's timeline). Nothing otherwise,
+    and never an error: the journal never undoes the work it notes."""
     try:
         rec = read_record()
         if rec:
-            row = {"time": stamp(now or utc_now()), "issue": int(issue), "kind": str(kind)}
+            row = {"time": stamp(now or utc_now()), "issue": int(issue) if issue is not None else None, "kind": str(kind)}
+            if note:
+                row["note"] = str(note)
             with open(journal_path(rec["id"]), "a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
     except (Exception, SystemExit):
@@ -363,11 +365,49 @@ def read_journal(run_id):
     return out
 
 
-# ---- the refusals (the guard's log is the source; this reads it, never writes it)
+# ---- the project and the refusals (the guard's registry and log are the source; this reads them, never writes them)
 
-def refusal_reasons(run_id):
-    """The reasons of the run's refusals in the order they happened (guard.log_refusal's lines)."""
+def project_of(entry):
+    """The normalized main checkout an entry of the guard's registry was made for."""
     from . import guard
+    return guard.norm(entry.get("main") or "") if isinstance(entry, dict) and entry.get("main") else None
+
+
+def entries():
+    """[(session id, entry)] of the guard's registry, read only."""
+    from . import guard
+    out = []
+    try:
+        names = [x for x in os.listdir(guard.registry()) if x.endswith(".json")]
+    except OSError:
+        return out
+    for name in names:
+        try:
+            with open(os.path.join(guard.registry(), name), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            out.append((name[:-5], data))
+    return out
+
+
+def here():
+    from . import guard
+    return guard.norm(cfg().root)
+
+
+def own_entries(run_id=None):
+    """The registry's entries made for this repository's main checkout (and this run, when `run_id` is given)."""
+    return [(s, e) for s, e in entries() if project_of(e) == here() and (run_id is None or e.get("id") == run_id)]
+
+
+def refusal_rows(run_id):
+    """The run's refusals in order. A line that names its project (`project`) counts only for this repository. The guard's lines name
+    the run only (a project key is for the guard to add): such a line counts unless the registry holds entries of that run id for other
+    projects and none for this one (another repository's run of the same id)."""
+    from . import guard
+    foreign = any(e.get("id") == run_id for _, e in entries()) and not own_entries(run_id)
     out = []
     try:
         with open(os.path.join(guard.registry(), guard.REFUSALS), encoding="utf-8", errors="replace") as f:
@@ -376,11 +416,29 @@ def refusal_reasons(run_id):
                     row = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(row, dict) and row.get("run") == run_id:
-                    out.append(str(row.get("reason", "?")))
+                if not isinstance(row, dict) or row.get("run") != run_id:
+                    continue
+                if row.get("project") is not None:
+                    if guard.norm(str(row["project"])) != here():
+                        continue
+                elif foreign:
+                    continue
+                out.append(row)
     except OSError:
         pass
     return out
+
+
+def refusal_reasons(run_id):
+    """The reasons of the run's refusals in the order they happened."""
+    return [str(r.get("reason", "?")) for r in refusal_rows(run_id)]
+
+
+def refusals_by_reason(run_id):
+    by = {}
+    for reason in refusal_reasons(run_id):
+        by[reason] = by.get(reason, 0) + 1
+    return by
 
 
 def longest_run(reasons):
@@ -393,10 +451,9 @@ def longest_run(reasons):
 
 
 def counts(rec, now=None):
-    """What each stop rule measures now: {refusals, same_reason, hours}. `refusals` is the guard's own counter."""
-    from . import guard
+    """What each stop rule measures now: {refusals, same_reason, hours}, from this project's refusals of this run."""
     reasons = refusal_reasons(rec["id"])
-    return {"refusals": guard.refusals(rec["id"])["total"], "same_reason": longest_run(reasons),
+    return {"refusals": len(reasons), "same_reason": longest_run(reasons),
             "hours": ((now or utc_now()) - parse_stamp(rec["started"])).total_seconds() / 3600}
 
 
@@ -420,24 +477,13 @@ def valid_id(text):
 # ---- on
 
 def end_guard_entries(run_id):
-    """Removes the guard's registry entries of this run (every session that registered it), through the guard's API. Returns how many."""
+    """Removes the guard's registry entries of this run made for this repository (every session that registered it), through the guard's
+    `turn_off`; the entries of another project's run with the same id stay. Returns how many."""
     from . import guard
-    if hasattr(guard, "turn_off_run"):
-        return guard.turn_off_run(run_id) or 0
     n = 0
-    try:
-        names = [x for x in os.listdir(guard.registry()) if x.endswith(".json") and x != guard.REFUSALS]
-    except OSError:
-        return 0
-    for name in names:
-        try:
-            with open(os.path.join(guard.registry(), name), encoding="utf-8") as f:
-                mine = (json.load(f) or {}).get("id") == run_id
-        except (OSError, ValueError, AttributeError):
-            continue
-        if mine:
-            guard.turn_off(name[:-5])
-            n += 1
+    for session, _ in own_entries(run_id):
+        guard.turn_off(session)
+        n += 1
     return n
 
 
@@ -470,12 +516,11 @@ def cmd_on(args):
 # ---- status and off
 
 def status_text(rec, now=None):
-    from . import guard
     now = now or utc_now()
     started = parse_stamp(rec["started"])
     limits = {**LIMITS, **(rec.get("limits") or {})}
     got = counts(rec, now)
-    by = guard.refusals(rec["id"])["by_reason"]
+    by = refusals_by_reason(rec["id"])
     lines = [f"auto run {rec['id']}", f"  started: {rec['started']}, elapsed {duration((now - started).total_seconds())}",
              f"  folder:  {rec.get('folder')}", f"  deploy:  {'yes' if rec.get('deploy') else 'no'}",
              f"  refusals: {got['refusals']}" + (": " + ", ".join(f"{r} {n}" for r, n in sorted(by.items(), key=lambda x: -x[1])) if by else ""),
@@ -489,6 +534,12 @@ def status_text(rec, now=None):
 def cmd_status(args):
     rec = read_record()
     if not rec:
+        if args.check:
+            live = [e for s, e in own_entries() if guard_live(s)]
+            if live:
+                print(f"STOP: the run record is missing (the guard still holds run {live[0].get('id')} for this repository): "
+                      "stop the run; the owner ends it with `saani auto off --run <id>`.")
+                return EXIT_LIMIT
         print("no auto run is on")
         return 0
     print(status_text(rec))
@@ -498,9 +549,20 @@ def cmd_status(args):
     for k, value, limit in hit:
         shown = f"{value:.1f}" if k == "hours" else str(value)
         print(f"STOP: {LIMIT_WORDS[k]} reached ({shown} of {limit})")
+        journal(None, "stop", note=f"{LIMIT_WORDS[k]} reached ({shown} of {limit})")
     if hit:
-        print("write the report (`saani auto report --pr N --post`), then tell the owner to end the run from a terminal: `saani auto off --run <id>`.")
+        print("stop starting issues, finish the end of the run (full run, the pull request, `saani auto report`), then tell the owner to end "
+              "the run from a terminal: `saani auto off --run <id>`.")
     return EXIT_LIMIT if hit else 0
+
+
+def guard_live(session):
+    """True when the guard still holds this session (its entry is not over)."""
+    from . import guard
+    try:
+        return guard.state(session) is not None
+    except Exception:
+        return True
 
 
 def cmd_off(args):
@@ -551,29 +613,49 @@ def issue_title(n):
         return ""
 
 
-def left_issues(rec, journal_rows):
-    """{issue: (kind, title)} of the issues left with a question or a blocked comment since the start: the open issues' comments from GitHub
-    (starting with the mark of the question or blocked kind), plus the journal's `question` and `blocked` lines."""
-    out = {}
+def status_mark(body):
+    """The mark of a status comment (the emoji after its `###`), or None when the comment is not one of ours."""
+    from . import comments
+    text = (body or "").lstrip("# \t")
+    for heading, _, _ in comments.KINDS.values():
+        mark = heading.split(" ", 2)[1]
+        if text.startswith(mark):
+            return mark
+    return None
+
+
+def left_issues(rec, journal_rows, landed=()):
+    """{issue: (kind, title)} of the issues left waiting: the open issues whose latest status comment, written since the start, is the
+    question or the blocked kind (GitHub); issues GitHub does not list are judged by the journal's latest line for them. An issue that
+    landed during the run is never left."""
+    out, seen = {}, set()
     try:
         rows = json.loads(gh("issue", "list", "--repo", cfg().repo, "--state", "open", "--limit", "200", "--json",
                              "number,title,comments") or "[]")
         start = parse_stamp(rec["started"])
         for row in rows:
+            seen.add(row["number"])
+            latest = None
             for cm in row.get("comments") or []:
-                body = (cm.get("body") or "").lstrip("# \t")
+                mark = status_mark(cm.get("body"))
                 try:
                     when = parse_stamp(cm.get("createdAt"))
                 except (TypeError, ValueError):
                     continue
-                if when >= start and body.startswith(LEFT_MARKS):
-                    out[row["number"]] = ("question" if body.startswith(LEFT_MARKS[0]) else "blocked", row.get("title", ""))
+                if mark and (latest is None or when >= latest[0]):
+                    latest = (when, mark)
+            if latest and latest[0] >= start and latest[1] in LEFT_MARKS:
+                out[row["number"]] = ("question" if latest[1] == LEFT_MARKS[0] else "blocked", row.get("title", ""))
     except (SystemExit, ValueError, TypeError):
-        pass
+        seen.clear()
+    last = {}
     for row in journal_rows:
-        if row.get("kind") in ("question", "blocked") and row.get("issue") not in out:
-            out[row["issue"]] = (row["kind"], issue_title(row["issue"]))
-    return out
+        if row.get("issue") is not None and row.get("kind") != "stop":
+            last[row["issue"]] = row["kind"]
+    for n, kind in last.items():
+        if kind in ("question", "blocked") and n not in seen and n not in out:
+            out[n] = (kind, issue_title(n))
+    return {n: v for n, v in out.items() if n not in set(landed)}
 
 
 def cost_text(rec, now):
@@ -584,13 +666,18 @@ def cost_text(rec, now):
         return f"cost not read: {type(e).__name__}"
 
 
-def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None):
-    """The report's Markdown from what was read (pure). `landed`: [(number, title, commit subject)]; `left`: {number: (kind, title)}."""
+def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None, stopped=None):
+    """The report's Markdown from what was read (pure). `landed`: [(number, title, commit subject)]; `left`: {number: (kind, title)};
+    `stopped`: the stop rules reached ([(rule, value, limit)]), none: the run finished the list. The folder is its name only: a report on
+    a pull request holds no path of the owner's machine."""
     started = parse_stamp(rec["started"])
     esc = lambda s: str(s).replace("|", "\\|").replace("\n", " ")  # noqa: E731
+    folder = os.path.basename(str(rec.get("folder") or "").replace("\\", "/").rstrip("/"))
+    why = "; ".join(f"{LIMIT_WORDS[k]} ({v:.1f} of {lim})" if k == "hours" else f"{LIMIT_WORDS[k]} ({v} of {lim})"
+                    for k, v, lim in (stopped or [])) or "finished the list"
     out = [f"# Auto run {rec['id']}", "", "| | |", "|---|---|", f"| Start | {rec['started']} |", f"| End | {stamp(now)} |",
-           f"| Duration | {duration((now - started).total_seconds())} |", f"| Id | {rec['id']} |", f"| Folder | {esc(rec.get('folder'))} |",
-           f"| Deploy | {'the owner started the run so' if rec.get('deploy') else 'no'} |", "",
+           f"| Duration | {duration((now - started).total_seconds())} |", f"| Stopped by | {why} |", f"| Id | {rec['id']} |",
+           f"| Folder | {esc(folder)} |", f"| Deploy | {'the owner started the run so' if rec.get('deploy') else 'no'} |", "",
            f"## Issues landed on the integration branch ({len(landed)})"]
     out += [f"- #{n} {esc(title) or esc(subject)}" for n, title, subject in landed] or ["- none"]
     out += ["", f"## Issues left with a question or blocked ({len(left)})"]
@@ -604,10 +691,11 @@ def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None
     if journal_rows:
         out += ["", "## Timeline"]
         shown = journal_rows[-MAX_TIMELINE:]
-        out += [f"- {r['time']} #{r.get('issue')} {r['kind']}" for r in shown]
+        out += [f"- {r['time']} " + (f"#{r['issue']} " if r.get("issue") is not None else "") + f"{r['kind']}"
+                + (f": {esc(r['note'])}" if r.get("note") else "") for r in shown]
         if len(journal_rows) > len(shown):
             out.append(f"- ({len(journal_rows) - len(shown)} older lines are in the journal)")
-    n = f" {pr}" if pr else ""
+    n = f" {pr}" if pr is not None else ""
     out += ["", "## Next step for the owner",
             f"- `/saani:merge{n}` merges the green pull request, relabels the issues and removes this run's folder and branch.",
             f"- `/saani:merge{n} --deploy` does the same, then deploys."]
@@ -615,16 +703,18 @@ def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None
 
 
 def cmd_report(args):
-    from . import guard
     rec = read_record()
     if not rec:
-        raise SystemExit("saani auto report: no auto run is on (run it before `saani auto off`)")
-    if args.post and not args.pr:
+        raise SystemExit("saani auto report: no auto run is on (run it before the owner ends it)")
+    if args.pr is not None and args.pr < 1:
+        raise SystemExit("saani auto report: --pr is a pull request number, 1 or more")
+    if args.post and args.pr is None:
         raise SystemExit("saani auto report --post: name the pull request with --pr N")
     now = utc_now()
     rows = read_journal(rec["id"])
     landed = [(n, issue_title(n), subject) for n, subject in landed_issues(rec)]
-    text = render_report(rec, now, landed, left_issues(rec, rows), guard.refusals(rec["id"])["by_reason"], rows, cost_text(rec, now), args.pr)
+    text = render_report(rec, now, landed, left_issues(rec, rows, [n for n, _, _ in landed]), refusals_by_reason(rec["id"]), rows,
+                         cost_text(rec, now), args.pr, reached(rec, now))
     path = build_dir() / f"saani-auto-{rec['id']}.md"
     path.write_text(text, encoding="utf-8")
     print(text)
