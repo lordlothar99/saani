@@ -1,9 +1,10 @@
 # Changelog
 
 ## Unreleased
-- The guard: a Claude Code PreToolUse hook shipped by the plugin (`hooks/hooks.json`, `saani guard`). Off unless an auto run is on (a state
-  file in the shared git folder); then it allows the run's work without prompts and refuses, with a reason, pushes, merges, force flags,
-  secrets, edits outside the worktrees and edits to the guard itself, and counts the refusals.
+- The guard: a Claude Code PreToolUse hook shipped by the plugin (`hooks/hooks.json`, `saani guard`). Off unless `saani auto on` registered
+  the Claude Code session (`~/.saani/auto/`); then it allows the run's work without prompts through a strict allowlist and refuses, with a
+  reason, pushes, merges, force flags, secrets, edits outside the worktrees and to protected files, and counts the refusals. It fails
+  closed. `bin/saani` starts one Python only (`py -3`, `python`, `python3`, never the Windows Store stub).
 - `saani comment <n> <kind>`: a status comment in the shape of `.github/COMMENT_KINDS.md` and its label change. `saani start` posts `Started` (`--no-comment` skips it), `saani land` posts `On dev` through it, `saani ci pr` posts `In PR` and `saani ci merged` posts `On main`, each once per pull request and issue.
 
 ## 0.3.0 (2026-11-22)

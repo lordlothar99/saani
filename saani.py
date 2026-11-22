@@ -20,9 +20,19 @@ if sys.version_info < (3, 11):
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 if __name__ == "__main__" and sys.argv[1:2] == ["guard"]:
-    # The hook runs before every tool call: load the guard alone, nothing else (argparse and the other modules cost more than the guard).
+    # The hook runs before every tool call. No auto run registered at all (~/.saani/auto holds no entry) and not a `saani auto on` call:
+    # present mode, nothing to print, before any import. Else load the guard alone (argparse and the other modules cost more).
+    _raw = sys.stdin.buffer.read()
+    try:
+        _some = any(n.endswith(".json") for n in os.listdir(os.path.join(os.path.expanduser("~"), ".saani", "auto")))
+    except FileNotFoundError:
+        _some = False
+    except OSError:
+        _some = True
+    if not _some and b"auto" not in _raw:
+        sys.exit(0)
     from saani import guard
-    sys.exit(guard.main())
+    sys.exit(guard.main(_raw))
 
 import argparse  # noqa: E402
 
