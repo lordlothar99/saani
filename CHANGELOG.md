@@ -13,6 +13,11 @@
 - `saani comment <n> <kind>`: a status comment in the shape of `.github/COMMENT_KINDS.md` and its label change. `saani start` posts `Started` (`--no-comment` skips it), `saani land` posts `On dev` through it, `saani ci pr` posts `In PR` and `saani ci merged` posts `On main`, each once per pull request and issue.
 - `saani merge [PR] [--deploy] [--dry-run]` (`/saani:merge`, owner-typed only): merges the green integration -> production pull request with a merge commit, refusing unless it is mergeable and its CI is green on the exact head, then relabels and removes the finished auto runs (`saani ci merged`). `--deploy` hands over to the deployer (issue #5); until it exists, it exits 2 after the merge.
 - The map draws the plugin's agents (`saani:coder`, `saani:reviewer`...) with the look of their role, and counts their runs on the role's row.
+- An auto run has two parts: `/saani:auto` asks its questions in the owner's session, then prints the command for the away part, a
+  headless session (`claude -p "/saani:auto run <id> --folder <path>" --permission-mode auto --permission-prompts none`) where no
+  permission prompt can wait for an answer. `/saani:auto run <id> --folder <path>` is the away part.
+- The map: the release pull request is a harvester at the Refinery (its CI on its lights), a zone's sign opens a panel with one prompt for
+  all its issues, a Tweaks menu, and the "Auto mode" filter.
 
 ## 0.3.0 (2026-11-22)
 - Plugin 0.3.0: the board is the Map (`/map`, `saani map`), the map shows the GitHub issue Type, switching project is a sand storm, long run becomes `auto` and `saani new` becomes `saani start`.

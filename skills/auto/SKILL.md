@@ -6,7 +6,21 @@ description: Run a Saani auto run (the Architect works for hours alone on the op
 # /saani:auto: a Saani auto run
 
 **Arguments:** `$ARGUMENTS`. Empty: a full run. `off`: the section "off" below. Issue numbers (with or without `#`, separated by
-spaces or commas): only those issues.
+spaces or commas): only those issues. `run <id> --folder <path>` (then issue numbers, if any): the away part of a run whose questions are
+already answered, in a headless session (section "The two parts" below): skip "Before the run" but its step 4, then do the run.
+
+## The two parts
+A run has a present part and an away part. **Present**, in the owner's session: the folder, the questions, the id ("Before the run",
+steps 1 to 3). **Away**, in a headless Claude Code session the owner starts from a terminal, in the project's folder (where saani.toml is):
+
+    claude -p "/saani:auto run <id> --folder <run folder> [issue numbers]" --permission-mode auto --permission-prompts none
+
+`--permission-prompts none` turns every permission prompt into a refusal Claude reads, so nothing waits for a human; `--permission-mode
+auto` lets Claude Code's classifier decide what the guard does not (the guard decides every call of a run that is on; the classifier
+covers the moments it cannot, a hook that times out). An interactive session can still stop on a prompt (Claude Code falls back to
+asking after repeated classifier blocks, a background subagent's prompt waits), so the away part runs headless. Give the owner that exact
+command, filled in (the id, the absolute run folder, the issue numbers of the arguments), as the last thing of the present part, and
+stop. Only if the owner says they stay at the keyboard, go on in this session: step 4, then the run.
 
 The project's own rules (its CLAUDE.md, its saani.toml) win where they differ from this checklist.
 
@@ -19,12 +33,13 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (`saani auto pick`). For
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those.
-3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed.
-4. **Last thing before the run: switch it on.** Once the questions are answered, run `saani auto on --id <id> --folder <run folder>`
+3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then hand over (section "The two parts").
+4. **The away part's first step: switch it on.** In the headless session, the run's id and folder come from the arguments. Once the questions are answered, run `saani auto on --id <id> --folder <run folder>`
    (`--deploy` only if the owner said, in their own words, that the run may deploy), alone: nothing chained to it, or the guard does not
    register the session. The id and the folder are those of step 1 and 3. On success it prints, as its last line, `saani auto: on <id>
    folder=<path>`, and the guard registers the session from it; from then on the guard decides every tool call (no more questions), and
-   `saani auto status` shows the run, its refusals and its limits. If the line is missing, the run is not on: say so and stop. The guard
+   `saani auto status` shows the run, its refusals and its limits. If the line is missing, the run is not on: say so and stop (headless,
+   `saani auto on` is refused when neither the project's allow rules, `Bash(saani *)`, nor the classifier let it through). The guard
    refuses `saani auto`, `saani auto on` and `saani auto off` inside the run: the run never re-arms or switches itself off.
 
 ## The run
@@ -64,7 +79,8 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 5. **Report, then stop.** `saani auto report --pr <N> --post` writes `build/saani-auto-<id>.md` in the main checkout and comments it on the
    pull request; with nothing landed there is no pull request: `saani auto report` alone writes the file, and you say so in the chat.
    It holds the start, end, duration, why the run stopped (a limit, or "finished the list"), the id and the folder's name, the issues landed, the issues left with a question or blocked, the
-   refusals by reason, the cost, the timeline and the next step. Add to the chat what only you know: a table of what is pending (issue |
+   refusals by reason, the cost, the timeline and the next step. Add to the chat (headless: your last message, which the owner's
+   terminal prints) what only you know: a table of what is pending (issue |
    question with context | options with pros and cons), and which issues waited for overlapping files (best effort: only the paths an issue names between backticks are compared, so an issue that names none never waits). Then stop: the run is over, and the guard still confines this session. Tell the owner to end it from a terminal with `saani auto off --run <id>` (it also lapses after 12 hours). The report ends
    with `/saani:merge <N>` (or `/saani:merge <N> --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.

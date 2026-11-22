@@ -258,6 +258,17 @@ stale one. Two issues whose likely files overlap (the paths the issue body names
 worktrees changed and the other picked issues) are not run side by side: the later one waits, and `pick` says "overlaps #m (path)". The
 check is best effort and narrow: only paths named between backticks count (a folder such as `docs/` does not; a bare `saani.toml` is the root file only), and there is no fallback on title words, so an issue that names no paths never waits on overlap. The slots are sized from the machine, not from the memory the running issues already use; a conflict at landing goes back to the coder of that issue. `saani kpis` gives the cost per issue, role and model.
 
+**Two parts: present, then away.** `/saani:auto` in the owner's session makes the run's folder, asks the questions and gives the
+id, then prints the command for the away part, which the owner starts from a terminal in the project's folder:
+`claude -p "/saani:auto run <id> --folder <run folder>" --permission-mode auto --permission-prompts none`. That headless session runs
+`saani auto on` (so the guard registers *its* session) and does the run. Why headless: the guard decides every call of a run that is on,
+but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after repeated blocks by its
+auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none` every such prompt is a
+refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's classifier decide
+the calls the guard cannot (a hook that timed out) instead of refusing them. Neither can be set by the project: `defaultMode: "auto"` in a
+project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode. The owner who stays at the
+keyboard can say so and the run goes on in the same session.
+
 **The run's record and its stop rules.** `saani auto on` is the last step before the work (after the owner's questions); `saani auto off --run <id>` the owner's, from a terminal, after the report. The stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied into the run's record at `on`:
 
 | Rule | Limit | Measured by |

@@ -100,6 +100,8 @@ cd ../webshop-wt/42-*
 saani land            # lock → merge dev → rebuild → tier-1 tests → push → clean up
 ```
 Or let Claude take the whole backlog while you're away: in Claude Code, `/saani:auto` (or `/saani:auto 12 15` for selected issues).
+It asks its questions first, then gives you the command that runs the rest headless (`claude -p ... --permission-mode auto
+--permission-prompts none`), so nothing waits for an approval while you're gone.
 
 ## Commands
 Each command has two forms. In a **terminal**, run it from your project's folder (with the alias from step 1, or as `python -I path/to/saani.py`).
