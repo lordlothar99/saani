@@ -118,6 +118,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani kpis [--baseline]` | `/saani:kpis --baseline` | issues landed per day, conflicts by file, test waits, compared with the previous window |
 | `saani progress run\|show\|watch` | `/saani:progress` | progress bar and time left for a background test run |
 | `saani check-msg <file>` | (none) | the commit-msg hook: git runs it, not you |
+| `saani guard` | (none) | the plugin's Claude Code hook: Claude Code runs it before each tool call, not you |
 
 Claude never runs `/saani:start`, `/saani:land` or `/saani:prune` on its own, because they change your repo: you type them, or ask for them.
 In an auto run (`/saani:auto`), Claude lands each issue itself, because you started the run for that.
@@ -128,7 +129,7 @@ In an auto run (`/saani:auto`), Claude lands each issue itself, because you star
 | `/saani:<command>`: a slash command for every `saani` command (see [Commands](#commands)) | available |
 | `/saani:auto`: an unattended run over the open issues, ending in one pull request and a report | available |
 | Worker subagents `saani:coder`, `saani:tester`, `saani:reviewer`, `saani:scribe`, `saani:researcher` (`agents/`), each on a model that fits the job; the pipeline from an issue to dev is in [docs/PLUGIN.md](docs/PLUGIN.md) | available, not yet tried in an auto run |
-| Claude Code hooks (guardrails for unattended runs) | planned |
+| Claude Code hooks: the guard, which runs an auto run without prompts and refuses what it must never do (push, merge, secrets, edits outside the worktrees); [docs/SAANI.md](docs/SAANI.md#the-guard) | available |
 
 Details: [docs/PLUGIN.md](docs/PLUGIN.md).
 

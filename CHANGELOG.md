@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- The guard: a Claude Code PreToolUse hook shipped by the plugin (`hooks/hooks.json`, `saani guard`). Off unless an auto run is on (a state
+  file in the shared git folder); then it allows the run's work without prompts and refuses, with a reason, pushes, merges, force flags,
+  secrets, edits outside the worktrees and edits to the guard itself, and counts the refusals.
 - The `saani` command: `start` (worktree per issue, hotfix from the prod tag), `land` (one landing at a time behind a lock, generated files
   rebuilt, tier 1 through the queue, retries when the integration branch moves), `status`, `prune`, `test` (one test queue for the PC),
   `check-msg` (the commit-msg hook), `ci` (GitHub Actions within the free minutes, the PC for the rest), `kpis`, `ui` (status page and

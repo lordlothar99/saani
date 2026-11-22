@@ -77,6 +77,7 @@ flowchart TB
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
+| `saani guard` | The plugin's Claude Code hook before every tool call (below, The guard): JSON on stdin, a decision on stdout during an auto run, nothing otherwise. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
 | `saani ui [--open] [--json]` | The local map and kanban page (below): one map for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
@@ -153,8 +154,57 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | Questions | allowed, one at a time, with a recommendation | none: a refused call is skipped and noted for the report |
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
 | Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
+| Permissions | Claude Code's own: it asks the owner | the guard (below): allow or refuse at once, never ask |
 
 The auto checklist is the plugin's skill (`skills/auto/SKILL.md`).
+
+## The guard
+A Claude Code PreToolUse hook shipped by the plugin (`hooks/hooks.json` runs `saani guard` through `bin/saani` before every tool call;
+`saani/guard.py`). It is off unless an auto run is on: the state file `saani-auto.json` in the repository's shared git folder
+(`git rev-parse --git-common-dir`, found by walking up to `.git` without running git), holding the run's `id`, `started`, `folder` and
+`deploy`. The auto run's switch writes and removes it (`turn_on`, `turn_off` in `saani/guard.py`; the command for it is planned).
+
+- **Present** (no state file): the guard prints nothing, so Claude Code's normal permissions apply. It reads no settings and starts no git.
+- **Auto** (state file there): every call is allowed or refused, never "ask", because nobody is there to answer. What is not on the list is
+  refused, with the reason and how to go on. An internal error is a refusal (`guard error: <type>`), never a crash.
+
+Each refusal adds a line to `saani-auto-refusals.jsonl` in the same git folder: time, run id, tool, short reason, and the refused command's
+first word only (never the command's text, never a file's contents). `refusals(cwd)` counts them, in total and by reason, for the run's
+stop rules.
+
+The rules in an auto run. "The run's places" are the worktrees folder (`[worktrees] folder`), the run's folder (from the state file)
+and the system temp folder.
+
+| Tool | Allowed | Refused |
+|---|---|---|
+| Read, Glob, Grep | anywhere | secrets |
+| Edit, Write, MultiEdit, NotebookEdit | inside the run's places | the main checkout, home, anywhere else; secrets; the guard's own files anywhere (`saani/guard.py`, `saani.toml`, `.claude/settings*.json`, `hooks/hooks.json` and a checkout's top `hooks/` folder, the auto run's files in the git folder) |
+| Agent, Task, TodoWrite, ToolSearch, Skill, SendMessage, WebSearch, WebFetch, BashOutput, KillShell | always | |
+| AskUserQuestion | | always: nobody answers; the question goes in the report |
+| Any other tool (an MCP tool...) | | always |
+| Bash | when every part of the command is allowed (below) | the rest |
+
+Bash commands are split on `&&`, `||`, `;`, `|`, `&` and newlines, quotes read as bash reads them; a `cd` moves the folder the next parts
+are checked from. What the guard does not read is refused: `$(...)` and backticks (except the usual `"$(cat <<'EOF' ... EOF)"` commit
+message, whose body is plain text), variables, subshells and braces, here-documents, `A=b` before a command. Redirections into a file
+follow the Edit rule (`/dev/null` always allowed); reading one follows the secrets rule.
+
+| Command | Allowed | Refused |
+|---|---|---|
+| `saani` | `saani ...`, `python -I <path>/saani.py ...`; `saani test` only with the project's test commands | |
+| tests | the project's `[tests] tier1`, `full`, `check` (`{python}` is any Python), extra arguments allowed | any other `python` |
+| `cd` | into the run's places | anywhere else |
+| read-only | `ls`, `cat`, `head`, `tail`, `grep`, `wc`, `sort`, `find`, `echo`, `test`, `[`, `pwd`, `diff` | `find -delete/-exec/...`, `sort -o`, `grep -r`, `diff -r` (use the Grep tool) |
+| `git` | `status`, `diff`, `log`, `show`, `add`, `commit` (`--amend` too), `merge`, `fetch`, `rev-parse`, `ls-files`, `restore`; `switch`/`checkout` of a worker branch (`<type>/<n>-<words>`) or `-- <path>`; `rebase origin/<integration>` (and `--continue/--abort/--skip`); `worktree list`; `branch` listing; `stash`, `stash push/pop/list/show`; `-C` into the run's places | `push` (only `saani land` pushes, as its own process the hook never sees), `reset --hard`, `clean`, `branch -D`, `worktree remove` (`saani prune` does it), force flags, `--no-verify`, `-c` and options that run a program or write a file, anything else |
+| `gh` | `issue view/list`, `pr view/list/checks/diff`, `run view/list/watch`, `api` with GET only; `issue comment`, `issue create`, `issue edit` with labels only, `pr comment`, `pr edit`, `pr create` only with `--base <production> --head <integration>` | `pr merge`, `release`, `repo`, `secret`, `auth`, `api` with another method or fields, another repository (`-R`), anything else |
+| `curl`, `wget` | GET to localhost (`wget` to stdout only) | another host, another method, data, uploads, output files |
+| `rm` | inside the worktrees folder or temp | elsewhere, a worktree itself or the worktrees folder, a folder holding the guard's files |
+| anything else | | `sudo`, every other command |
+
+**Secrets**, refused to every tool and inside commands: `.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
+`id_ed25519*` (and the other ssh key names), anything under `.ssh/`, `credentials*`, `.netrc`, `.npmrc`, `.pypirc`, gh's `hosts.yml`, and a
+file with "secret" or "token" in its name (in a shell command, a word with "token" that is not a file, like a branch name, is not one).
+Paths are compared after `..` is resolved, with `/` and `\`, case-insensitively on Windows, and Git Bash's `/c/...` read as `C:/...`.
 
 Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
 (Auto, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
