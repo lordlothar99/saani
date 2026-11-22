@@ -127,7 +127,7 @@ In a long run (`/saani:longrun`), Claude lands each issue itself, because you st
 |---|---|
 | `/saani:<command>`: a slash command for every `saani` command (see [Commands](#commands)) | available |
 | `/saani:longrun`: an unattended run over the open issues, ending in one pull request and a report | available |
-| Worker subagents (Coder, Tester, Reviewer, Scribe, Researcher), each on a model that fits the job | planned |
+| Worker subagents `saani:coder`, `saani:tester`, `saani:reviewer`, `saani:scribe`, `saani:researcher` (`agents/`), each on a model that fits the job; the pipeline from an issue to dev is in [docs/PLUGIN.md](docs/PLUGIN.md) | available, not yet tried in a long run |
 | Claude Code hooks (guardrails for unattended runs) | planned |
 
 Details: [docs/PLUGIN.md](docs/PLUGIN.md).

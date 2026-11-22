@@ -97,3 +97,20 @@ def test_the_license_is_the_same_everywhere():
     plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert plugin["license"] == "AGPL-3.0-only"
     assert "AGPL-3.0-only" in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_every_worker_agent_is_named_like_its_file_and_has_tools_and_a_model():
+    """agents/ holds only agent files; each is named like its file (used as saani:<role>), with a description, tools and a model."""
+    folder = ROOT / "agents"
+    files = sorted(folder.iterdir())
+    assert {p.stem for p in files} >= {"coder", "tester", "reviewer", "scribe", "researcher"}
+    for agent in files:
+        assert agent.suffix == ".md", agent
+        text = agent.read_text(encoding="utf-8")
+        head = text.split("---")[1]
+        assert re.search(rf"^name: {agent.stem}$", head, re.M), agent
+        assert re.search(r"^description: .{20,}", head, re.M), agent
+        assert re.search(r"^tools: \S+", head, re.M), agent
+        assert re.search(r"^model: (sonnet|opus|haiku)$", head, re.M), agent
+    reviewer = (folder / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
+    assert not re.search(r"\b(Edit|Write)\b", re.search(r"^tools: .*$", reviewer, re.M).group(0)), "the reviewer is read-only"

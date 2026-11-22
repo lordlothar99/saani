@@ -1,7 +1,7 @@
 # The Saani plugin for Claude Code
 
 What a Claude Code session needs to work the Saani way in any project: a slash command for each `saani` command and the long-run skill now;
-the worker agents and hooks later.
+the worker agents now, hooks later.
 
 | Part | State |
 |---|---|
@@ -9,9 +9,12 @@ the worker agents and hooks later.
 | `bin/saani`, `bin/saani.cmd` | the `saani` command inside Claude Code: `bin/` is on the PATH of Claude's shell while the plugin is enabled, and the launchers run `saani.py` from the plugin's own copy (bash: the first Python 3.11+; Windows: `python`). `.gitattributes` keeps `bin/saani` in LF, or bash fails on Windows checkouts |
 | `skills/longrun/SKILL.md` | `/saani:longrun`, `/saani:longrun 12 15`, `/saani:longrun off`: the checklist of a long run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani longrun`) |
 | Claude Code hooks | none yet (they will live in `hooks/hooks.json`). The **git** commit-msg hook is not part of the plugin: it is [.githooks/commit-msg](../.githooks/commit-msg), and needs `SAANI_HOME` because git runs it outside Claude Code |
-| Worker agents | planned, not written yet (no `agents/` folder until they exist, so Claude Code loads nothing half-made) |
+| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` and `deployer` wait for their issues |
 
-## Planned worker roles
+## Worker roles
+Five are written (`agents/`); the models are a first choice, to be changed by a trial on real issues, never by a price list. A role's model is
+the `model:` line of its file: Anthropic models only for now (`sonnet`, `haiku`, `opus`), so a cheaper or other-provider model, or another
+harness, is a one-line change after the cost per landing is measured (#8). A worker keeps the same limits whatever its model.
 | Role | Model (first guess, to be measured) | Job |
 |---|---|---|
 | Coder | Sonnet, Opus for hard issues | writes the change for one issue in its own worktree |
@@ -19,8 +22,28 @@ the worker agents and hooks later.
 | Reviewer | Opus | reviews the diff with fresh eyes, never the coder's reasoning |
 | Scribe | Haiku | issue comments, labels, commit trailers |
 | Researcher | Sonnet | reads docs, releases and code, brings back the answer |
-| Sentinel | Sonnet | server diagnostics with a read-only key |
-| Deployer | Sonnet | deploys production after the owner's tap, with a deploy-only key |
+| Sentinel (planned) | Sonnet | server diagnostics with a read-only key |
+| Deployer (planned) | Sonnet | deploys production after the owner's tap, with a deploy-only key |
+
+## The pipeline from an issue to dev
+The Architect (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.
+
+| Step | Who | What |
+|---|---|---|
+| 1 | Architect | `saani new <n>`; reads the issue; decides alone or delegated (below) |
+| 2 | `saani:coder` | the change in that worktree, tier 0, tier 1 through the queue, one commit with `refs #n` and the trailers |
+| 3 | `saani:reviewer` | the diff and the issue only, never the coder's reasoning; a list of findings |
+| 4 | `saani:coder` | fixes the findings that are real (the Architect decides which); a new commit |
+| 5 | Architect | `saani land --worktree <path>` (the checks, the lock, tier 1, the push to dev) |
+| 6 | `saani:scribe` | a comment on the issue only when `land` has not made it; labels from `saani.toml` |
+
+`saani:tester` drives any run of the tests that the Architect does not want in its own context (a full run), and `saani:researcher` answers a
+question before step 1 or 2. Only the Architect lands, pushes, closes or merges.
+
+**When the Architect works alone:** a change of a few lines in one or two files, a typo, a document sentence, a setting. A subagent costs a
+briefing and a report; below that size it costs more than it saves. **When it delegates:** the change spans many files or needs a long
+read; a failure log to read (Tester); a fresh review (Reviewer, always for a change to the guard, the landing or the CI); a question that
+needs reading many pages (Researcher). Parallel coders each get their own worktree.
 
 ## Install (checked against the Claude Code docs and `claude plugin validate`, 2026-11-22)
 This repository is both the marketplace and the plugin: `.claude-plugin/marketplace.json` lists one plugin whose source is `./`, the repo
