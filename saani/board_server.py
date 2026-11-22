@@ -36,7 +36,9 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 import urllib.parse
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -113,12 +115,12 @@ _home = None                             # the project `saani ui` was started in
 
 
 def registry_path():
-    return pathlib.Path(os.environ.get("SAANI_HOME") or pathlib.Path.home() / ".saani") / "projects.json"
+    return pathlib.Path(os.environ.get("SAANI_HOME") or pathlib.Path.home() / ".saani") / "projects.toml"
 
 
 def read_registry():
     try:
-        rows = json.loads(registry_path().read_text(encoding="utf-8"))
+        rows = tomllib.loads(registry_path().read_text(encoding="utf-8")).get("projects")
     except (OSError, ValueError):
         return []
     return [r for r in rows if isinstance(r, str)] if isinstance(rows, list) else []
@@ -127,7 +129,9 @@ def read_registry():
 def write_registry(folders):
     path = registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(folders, indent=1), encoding="utf-8")
+    lines = ["# The projects the Saani board offers in its selector (saani projects add / remove)", "projects = ["]
+    lines += [f" {json.dumps(f)}," for f in folders]
+    path.write_text("\n".join(lines + ["]", ""]), encoding="utf-8")
 
 
 def register(folder):
@@ -159,10 +163,20 @@ def projects():
     return list(found.values())
 
 
+def slug(repo):
+    """owner/name as one word for an address: acme-webshop."""
+    return repo.replace("/", "-")
+
+
+def find_project(key):
+    """The listed project whose owner/name or slug is `key`."""
+    return next((c for c in projects() if key in (c.repo, slug(c.repo))), None)
+
+
 def in_project(repo, fn):
-    """fn() with the settings of the project `repo` (owner/name; empty: the home project), or None when no such project is listed."""
+    """fn() with the settings of the project `repo` (owner/name or its slug; empty: the home project), or None when no such project is listed."""
     with _project_lock:
-        target = next((c for c in projects() if c.repo == repo), None) if repo else (_home or config.current())
+        target = find_project(repo) if repo else (_home or config.current())
         if target is None:
             return None
         previous = config.current()
@@ -703,6 +717,18 @@ def resources():
         return {"now": _resources["now"], "history": list(_resources["history"])}
 
 
+def waiting(c):
+    """How many open issues of project `c` wait for its owner (the answer or act label): that project's own issue list, cached 60 s."""
+    with _project_lock:
+        previous = config.current()
+        config.use(c)
+        try:
+            lab = c.labels
+            return len([i for i in cached("issues", 60, issues)["open"] if {lab["answer"], lab["act"]} & set(i["labels"])])
+        finally:
+            config.use(previous)
+
+
 def state():
     trees = safe(tasks, default=[])
     land = safe(landing)
@@ -718,7 +744,8 @@ def state():
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
-            "projects": [{"repo": c.repo, "name": c.name} for c in projects()],
+            "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
+                         for c in projects()],
             "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
@@ -775,25 +802,45 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def run_command(args):
-    global _home
-    if args.add:
+def projects_command(args):
+    """The list the board's selector reads (~/.saani/projects.toml): list, add FOLDER, remove OWNER/NAME."""
+    if args.what == "add":
         try:
-            folder = config.main_checkout(args.add)
+            folder = config.main_checkout(args.target) if args.target else config.main_checkout()
         except OSError:
             folder = None
         if folder is None or load_project(str(folder)) is None:
-            print(f"{args.add}: no git checkout with a {config.FILE} there")
+            print(f"{args.target or 'here'}: no git checkout with a {config.FILE} there")
             return 1
         register(folder)
         print(f"listed: {load_project(str(folder)).repo} ({folder})")
-        return 0
-    if args.remove:
+    elif args.what == "remove":
+        if not args.target:
+            print("remove needs owner/name")
+            return 1
         rows = read_registry()
-        keep = [f for f in rows if not (load_project(f) and load_project(f).repo == args.remove)]
+        keep = [f for f in rows if not (load_project(f) and args.target in (load_project(f).repo, slug(load_project(f).repo)))]
         write_registry(keep)
-        print(f"removed {args.remove}" if len(keep) < len(rows) else f"{args.remove} was not in the list")
-        return 0
+        print(f"removed {args.target}" if len(keep) < len(rows) else f"{args.target} was not in the list")
+    else:
+        for c in projects():
+            print(f"{c.repo}  {c.root}")
+        if not projects():
+            print("no project listed: run `saani projects add` in a project, or start `saani ui` in one")
+    return 0
+
+
+def already_running(port):
+    """True when a Saani board answers on this port (it is what holds it)."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=10) as r:
+            return "board" in json.loads(r.read())
+    except (OSError, ValueError):
+        return False
+
+
+def run_command(args):
+    global _home
     _home = cfg()
     if args.json:
         safe(sample_resources)
@@ -801,12 +848,20 @@ def run_command(args):
         return 0
     safe(lambda: register(_home.root))                   # the project it starts in is listed from now on, so any later board offers it
     port = args.port or cfg().board_port
-    threading.Thread(target=sampler, daemon=True).start()
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError:
+        if not already_running(port):
+            raise
+        print(f"Saani is already running: {url}#{slug(_home.repo)} (this project is in its selector)")
+        if args.open:
+            webbrowser.open(f"{url}#{slug(_home.repo)}")
+        return 0
+    threading.Thread(target=sampler, daemon=True).start()
     print(f"Saani: {url} (board) and {url}kanban (kanban), this PC only; Ctrl+C stops it")
     if args.open:
-        webbrowser.open(url)
+        webbrowser.open(f"{url}#{slug(_home.repo)}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -819,6 +874,8 @@ def add_parsers(sub):
     p.add_argument("--port", type=int)
     p.add_argument("--open", action="store_true", help="open the board in the browser")
     p.add_argument("--json", action="store_true", help="print the state once and exit")
-    p.add_argument("--add", metavar="FOLDER", help="list another project (a checkout with a saani.toml) in the board's selector, and exit")
-    p.add_argument("--remove", metavar="OWNER/NAME", help="take a project out of the selector, and exit")
     p.set_defaults(run=run_command)
+    p = sub.add_parser("projects", help="the projects the board offers in its selector: list, add [FOLDER], remove OWNER/NAME")
+    p.add_argument("what", nargs="?", choices=["list", "add", "remove"], default="list")
+    p.add_argument("target", nargs="?", help="add: the project's folder (default: here); remove: owner/name")
+    p.set_defaults(run=projects_command)

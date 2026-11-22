@@ -79,7 +79,8 @@ flowchart TB
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
-| `saani ui [--open] [--json] [--add FOLDER] [--remove OWNER/NAME]` | The local status page and the board (below), one address for every project listed in `~/.saani/projects.json` (the one it starts in is listed; the header has a selector). `saani board` is an alias. |
+| `saani ui [--open] [--json]` | The local status page and the board (below): one board for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
+| `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | The projects the board's selector offers, in `~/.saani/projects.toml`. |
 | `saani progress run\|show\|watch` | A progress bar with the remaining time for a test run in the background. |
 
 ## Landing, in detail
@@ -141,7 +142,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
   planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether a long run can take
   it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, long-run fit, the
   prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
-- Both pages have a top bar with the page switch (Board · Kanban) and a refresh, and read the same `/api/state`.
+- Both pages have a top bar with the page switch (Board · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
 - The board is one HTML file (`saani/board.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
   `mock-state.json` beside it. Its data: [board-data-contract.md](board-data-contract.md).
 

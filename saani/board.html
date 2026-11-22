@@ -1079,24 +1079,34 @@ function demoStep() {
   setData(d, false);
 }
 function demo(on) { clearInterval(demoTimer); demoTimer = on && !RM ? setInterval(demoStep, 7000) : null; $("#demo").textContent = "Demo traffic: " + (demoTimer ? "on" : "off"); $("#demo").classList.toggle("on", !!demoTimer); }
-// One page, one address: the project shown is the selector's (kept in this browser), asked of the server as ?project=owner/name
-let PROJECT = ""; try { PROJECT = localStorage.getItem("saani-project") || ""; } catch (_) {}
-const stateUrl = fresh => "/api/state" + (PROJECT || fresh ? "?" : "") + [PROJECT ? "project=" + encodeURIComponent(PROJECT) : "", fresh ? "fresh=1" : ""].filter(Boolean).join("&");
+// One page, one address: the project shown is the selector's, asked of the server as ?project=owner-name. It is in the page's address
+// (#acme-webshop: a bookmark opens it) and remembered in this browser, so the kanban page opens on the same one.
+const slugOf = repo => (repo || "").replace("/", "-");
+let PROJECT = ""; try { PROJECT = location.hash.slice(1) || localStorage.getItem("saani-project") || ""; } catch (_) {}
+const stateUrl = fresh => { const q = [PROJECT ? "project=" + encodeURIComponent(PROJECT) : "", fresh ? "fresh=1" : ""].filter(Boolean).join("&"); return "/api/state" + (q ? "?" + q : ""); };
+function pinProject() {
+  try { localStorage.setItem("saani-project", PROJECT); } catch (_) {}
+  if (PROJECT && location.hash.slice(1) !== PROJECT) history.replaceState(null, "", "#" + PROJECT);
+  for (const a of document.querySelectorAll("#pages a")) a.hash = PROJECT ? "#" + PROJECT : "";   // switching page keeps the project
+}
 function projects(list) {
-  const sel = $("#proj"), repos = (list || []).map(p => p.repo);
-  if (PROJECT && !repos.includes(PROJECT)) PROJECT = "";                    // a project taken out of the list: back to the first
-  sel.hidden = repos.length < 2;
-  if (sel.dataset.repos !== repos.join()) { sel.dataset.repos = repos.join(); sel.replaceChildren(...(list || []).map(p => el("option", {value: p.repo}, p.name))); }
-  sel.value = PROJECT || (DATA.project && DATA.project.repo) || repos[0] || "";
+  const sel = $("#proj"), slugs = (list || []).map(p => p.slug);
+  if (PROJECT && !slugs.includes(PROJECT)) PROJECT = "";                    // a project taken out of the list: back to the first
+  sel.hidden = slugs.length < 2;
+  const key = (list || []).map(p => p.slug + ":" + p.waiting).join();
+  if (sel.dataset.key !== key) { sel.dataset.key = key; sel.replaceChildren(...(list || []).map(p => el("option", {value: p.slug}, (p.waiting ? "● " : "") + p.name + (p.waiting ? " (" + p.waiting + " wait for you)" : "")))); }
+  sel.value = PROJECT || slugOf(DATA.project && DATA.project.repo) || slugs[0] || "";
+  if (PROJECT) pinProject();
 }
 async function load() {
-  try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
+  try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.status === 404 && PROJECT) { PROJECT = ""; history.replaceState(null, "", location.pathname); return load(); }   // a bookmark of a project no longer listed
+    if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
   try { const r = await fetch("mock-state.json", {cache: "no-store"}); setData(await r.json(), false); demo(true); }
   catch (_) { $("#src").textContent = "No data"; $("#clock").textContent = "Neither /api/state nor mock-state.json answered."; }
 }
 async function refresh() { try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {} setTimeout(refresh, 5000); }
-async function switchProject(repo) {
-  PROJECT = repo; try { localStorage.setItem("saani-project", repo); } catch (_) {}
+async function switchProject(key) {
+  PROJECT = key; pinProject();
   PREV = {}; FILTER.ms = ""; $("#ms").value = "";                            // another project's cards do not fly from the old one's places
   try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}
 }
@@ -1110,6 +1120,7 @@ $("#legend .x").addEventListener("click", () => { $("#legend").open = false; });
 $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip"); if (!b) return; FILTER.chip = FILTER.chip === b.dataset.chip ? "" : b.dataset.chip; render(); });
 $("#demo").addEventListener("click", () => demo(!demoTimer));
 $("#proj").addEventListener("change", e => switchProject(e.target.value));
+addEventListener("hashchange", () => { const k = location.hash.slice(1); if (k && k !== PROJECT) switchProject(k); });
 $("#refresh").addEventListener("click", async e => {
   const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…";
   try { const r = await fetch(stateUrl(true), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}

@@ -285,7 +285,7 @@ def test_the_page_is_read_from_its_html_file_at_every_request(tmp_path, monkeypa
 
 def test_a_refresh_button_asks_everything_again_and_the_pull_request_tasks_start_folded(monkeypatch):
     """a refresh button, and the tasks inside a pull request folded by default."""
-    assert 'id="refresh"' in fp.page() and "every 5 s" in fp.page() and 'fresh?"/api/state?fresh=1"' in fp.page()
+    assert 'id="refresh"' in fp.page() and "every 5 s" in fp.page() and 'stateUrl(fresh)' in fp.page() and '"fresh=1"' in fp.page()
     assert 'localStorage.getItem("saani.pr.kids")==="open"' in fp.page()               # folded unless the owner unfolded them
     monkeypatch.setattr(fp, "state", lambda: {"time": "now"})
     fp._cache["issues"] = (0, "old")
@@ -419,3 +419,97 @@ def test_the_board_is_the_default_page_and_the_kanban_has_its_own_address(monkey
     finally:
         server.shutdown()
     assert '$("#pages").hidden = !live' in fp.BOARD_FILE.read_text(encoding="utf-8")     # the artifact build has no server: no page switch
+
+
+def two_projects(monkeypatch, tmp_path):
+    from saani import config
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    home, other = config.Config(repo="acme/webshop", root=tmp_path / "webshop"), config.Config(repo="acme/web-api", root=tmp_path / "api")
+    monkeypatch.setattr(fp, "_loaded", {str(home.root): home, str(other.root): other})
+    monkeypatch.setattr(fp, "load_project", lambda folder: fp._loaded.get(folder))
+    monkeypatch.setattr(fp, "_home", home)
+    monkeypatch.setattr(config, "_current", home)
+    fp.register(other.root)
+    return home, other
+
+
+def test_the_projects_list_is_a_toml_file_read_and_written_by_saani(monkeypatch, tmp_path):
+    """~/.saani/projects.toml holds the checkouts' paths (Windows backslashes included); a missing or broken file is an empty list."""
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    assert fp.read_registry() == [] and fp.registry_path().name == "projects.toml"
+    bs = chr(92)
+    folders = [f"D:{bs}work{bs}webshop", "/work/api", f"D:{bs}wéb{bs}ünï"]
+    fp.write_registry(folders)
+    assert fp.read_registry() == folders
+    assert fp.registry_path().read_text(encoding="utf-8").startswith("# The projects the Saani board offers")
+    fp.registry_path().write_text("projects = [oops", encoding="utf-8")
+    assert fp.read_registry() == []
+
+
+def test_a_project_is_found_by_owner_name_or_by_its_slug_and_the_data_stays_apart(monkeypatch, tmp_path):
+    """acme-web-api is the address of acme/web-api; each project's issues are cached and counted on their own."""
+    home, other = two_projects(monkeypatch, tmp_path)
+    assert fp.slug("acme/web-api") == "acme-web-api"
+    assert fp.find_project("acme-web-api") is other and fp.find_project("acme/web-api") is other and fp.find_project("acme-none") is None
+    assert fp.in_project("acme-web-api", lambda: fp.cfg().repo) == "acme/web-api" and fp.in_project("", lambda: fp.cfg().repo) == "acme/webshop"
+    rows = {"acme/webshop": [{"number": 1, "labels": ["help wanted"]}, {"number": 2, "labels": []}],
+            "acme/web-api": [{"number": 9, "labels": ["in-dev"]}]}
+    monkeypatch.setattr(fp, "issues", lambda: {"open": rows[fp.cfg().repo]})
+    fp._cache.clear()
+    assert fp.waiting(home) == 1 and fp.waiting(other) == 0
+    assert fp.cached("issues", 60, fp.issues) == {"open": rows["acme/webshop"]}      # the current project's, not the last one counted
+    assert fp.cfg() is home
+
+
+def test_the_state_lists_every_project_with_its_slug_and_what_waits_for_the_owner(monkeypatch, tmp_path):
+    home, other = two_projects(monkeypatch, tmp_path)
+    for name in ("tasks", "agents", "defined_agents"):
+        monkeypatch.setattr(fp, name, lambda *a, **k: [])
+    for name in ("landing", "pull_request", "resources", "ci"):
+        monkeypatch.setattr(fp, name, lambda *a, **k: {})
+    monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
+    monkeypatch.setattr(fp, "issues", lambda: {"board": [], "open": [{"number": 1, "title": "t", "labels": ["owner-action"]}], "closed": []})
+    fp._cache.clear()
+    got = fp.state()["projects"]
+    assert [(p["repo"], p["slug"], p["waiting"]) for p in got] == [("acme/webshop", "acme-webshop", 1), ("acme/web-api", "acme-web-api", 1)]
+
+
+def test_a_second_board_finds_the_running_one(monkeypatch):
+    """`saani ui` on a taken port that a board answers on says so instead of failing; a port nothing answers on is not a board."""
+    monkeypatch.setattr(fp, "state", lambda: {"board": []})
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        assert fp.already_running(server.server_address[1])
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert not fp.already_running(server.server_address[1])
+
+
+def test_saani_projects_adds_lists_and_removes(monkeypatch, tmp_path, capsys):
+    import subprocess
+    from saani import config
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    folder = tmp_path / "shop"
+    folder.mkdir()
+    (folder / "saani.toml").write_text('[project]\nrepo = "acme/shop"\n', encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(folder)], check=True)
+    monkeypatch.setattr(fp, "_loaded", {})
+    monkeypatch.setattr(fp, "_home", None)
+    args = lambda what, target=None: type("A", (), {"what": what, "target": target})()
+    assert fp.projects_command(args("add", str(folder))) == 0
+    assert "listed: acme/shop" in capsys.readouterr().out
+    fp.projects_command(args("list"))
+    assert "acme/shop" in capsys.readouterr().out
+    assert fp.projects_command(args("add", str(tmp_path / "nothing"))) == 1
+    assert fp.projects_command(args("remove", "acme-shop")) == 0 and fp.read_registry() == []
+    assert fp.projects_command(args("remove")) == 1
+
+
+def test_both_pages_keep_the_project_in_their_address_and_show_the_waiting_dot():
+    for source in (fp.BOARD_FILE.read_text(encoding="utf-8"), fp.PAGE_FILE.read_text(encoding="utf-8")):
+        flat = source.replace(" ", "")
+        assert "location.hash.slice(1)" in source and "history.replaceState(null" in source
+        assert 'p.waiting?"●"' in flat.replace("●", "●") or "p.waiting?\"●" in flat
+        assert 'localStorage.setItem("saani-project"' in source and "status===404" in flat

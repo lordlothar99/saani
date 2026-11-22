@@ -155,7 +155,7 @@ pre{white-space:pre-wrap;margin:0;font:400 11.5px/1.5 var(--mono);color:var(--du
 <div class="wrap">
 <header>
  <div class="brand"><small>THE ARCHITECT'S WORKSHOP · THIS PC</small><h1>SAANI</h1><nav class="pages" aria-label="Pages"><a href="/">Board</a><a href="/kanban" aria-current="page">Kanban</a></nav></div>
- <div class="hud"><span class="pill" id="clock">--:--:--</span><span class="pill" id="lock">no task joining dev</span><span class="pill" id="counts"></span><button class="pill refresh" id="refresh" type="button" title="The page refreshes every 5 s. Behind it: the PC every 5 s, the pull request every 30 s, the issues every minute, where CI runs every 10 min. Click: ask GitHub and the PC again now.">↻ Refresh</button></div>
+ <div class="hud"><span class="pill" id="clock">--:--:--</span><span class="pill" id="lock">no task joining dev</span><span class="pill" id="counts"></span><select class="pill refresh" id="proj" aria-label="Project" hidden></select><button class="pill refresh" id="refresh" type="button" title="The page refreshes every 5 s. Behind it: the PC every 5 s, the pull request every 30 s, the issues every minute, where CI runs every 10 min. Click: ask GitHub and the PC again now.">↻ Refresh</button></div>
 </header>
 <div class="top">
  <div class="slab sessions"><h3>Architect sessions <i id="crew-n"></i></h3><div class="list" id="crew"></div></div>
@@ -273,7 +273,7 @@ function render(s){
  if(L.lock){lk.textContent="joining dev · "+L.lock.branch;lk.className="pill hot"}else{lk.textContent="no task joining dev";lk.className="pill"}
  const cols=s.board||[];const cnt=id=>(cols.find(c=>c.id===id)||{cards:[]}).cards.length;
  $("counts").textContent=`${cnt("you")} wait for you · ${cnt("building")+cnt("testing")} in work`;
- LABELS=(s.project&&s.project.labels)||{};lastCols=cols;drawBoard();drawPC(s.resources);
+ LABELS=(s.project&&s.project.labels)||{};projects(s.projects,s.project);lastCols=cols;drawBoard();drawPC(s.resources);
  const crew=Array.isArray(s.crew)?s.crew:[];$("crew-n").textContent=`Claude Code chats in this project's folders · ${crew.length} · ${crew.filter(a=>a.state==="working").length} working now`;
  $("crew").replaceChildren(...(crew.length?crew.map(a=>{const running=a.subagents.filter(x=>x.state!=="done");
   return el("div",{class:"unit "+a.state},el("b",{},el("span",{class:"dot"}),a.name),el("span",{class:"state"},a.state),
@@ -300,7 +300,20 @@ function dust(){const cv=$("dust");if(matchMedia("(prefers-reduced-motion: reduc
  const fit=()=>{cv.width=innerWidth;cv.height=innerHeight;ps=Array.from({length:Math.round(innerWidth/14)},()=>({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.4+.3,v:Math.random()*.5+.15,a:Math.random()*.35+.08}))};
  fit();addEventListener("resize",fit);(function step(){x.clearRect(0,0,cv.width,cv.height);for(const p of ps){p.x+=p.v;p.y+=Math.sin((p.x+p.r*100)/90)*.12;if(p.x>cv.width+4){p.x=-4;p.y=Math.random()*cv.height}
   x.beginPath();x.arc(p.x,p.y,p.r,0,6.283);x.fillStyle=`rgba(236,206,160,${p.a})`;x.fill()}requestAnimationFrame(step)})()}
-async function tick(fresh){try{const r=await fetch(fresh?"/api/state?fresh=1":"/api/state",{cache:"no-store"});render(await r.json());$("clock").className="pill"}catch(e){$("clock").textContent="page server not answering";$("clock").className="pill bad"}}
+const slugOf=r=>(r||"").replace("/","-");
+let PROJECT="";try{PROJECT=location.hash.slice(1)||localStorage.getItem("saani-project")||""}catch(e){}
+function stateUrl(fresh){const q=[PROJECT?"project="+encodeURIComponent(PROJECT):"",fresh?"fresh=1":""].filter(Boolean).join("&");return "/api/state"+(q?"?"+q:"")}
+function pinProject(){try{localStorage.setItem("saani-project",PROJECT)}catch(e){}
+ if(PROJECT&&location.hash.slice(1)!==PROJECT)history.replaceState(null,"","#"+PROJECT);
+ document.querySelectorAll(".pages a").forEach(a=>{a.hash=PROJECT?"#"+PROJECT:""})}
+function projects(list,cur){const sel=$("proj"),slugs=(list||[]).map(p=>p.slug);
+ if(PROJECT&&!slugs.includes(PROJECT))PROJECT="";
+ sel.hidden=slugs.length<2;const key=(list||[]).map(p=>p.slug+":"+p.waiting).join();
+ if(sel.dataset.key!==key){sel.dataset.key=key;sel.replaceChildren(...(list||[]).map(p=>el("option",{value:p.slug},(p.waiting?"● ":"")+p.name+(p.waiting?" ("+p.waiting+" wait for you)":""))))}
+ sel.value=PROJECT||slugOf(cur&&cur.repo)||slugs[0]||"";if(PROJECT)pinProject()}
+async function tick(fresh){try{const r=await fetch(stateUrl(fresh),{cache:"no-store"});if(r.status===404&&PROJECT){PROJECT="";history.replaceState(null,"",location.pathname);return tick(fresh)}render(await r.json());$("clock").className="pill"}catch(e){$("clock").textContent="page server not answering";$("clock").className="pill bad"}}
+$("proj").onchange=e=>{PROJECT=e.target.value;pinProject();tick()};
+addEventListener("hashchange",()=>{const k=location.hash.slice(1);if(k&&k!==PROJECT){PROJECT=k;pinProject();tick()}});
 $("refresh").onclick=async()=>{const b=$("refresh");if(b.classList.contains("busy"))return;b.classList.add("busy");b.textContent="↻ Refreshing…";await tick(true);b.classList.remove("busy");b.textContent="↻ Refresh"};
 try{query=sessionStorage.getItem("saani.q")||""}catch(e){}$("q").value=query;
 $("q").addEventListener("input",e=>{query=e.target.value;try{sessionStorage.setItem("saani.q",query)}catch(x){}drawBoard()});
