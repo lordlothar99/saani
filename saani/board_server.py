@@ -1,9 +1,10 @@
 """Saani at a glance: a local status page and the board (docs/SAANI.md). Standard library only; read-only (it starts, stops and writes
 nothing); pure functions first (tests/test_board_server.py).
 
-  saani board                  serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s; /board is the isometric board
-  saani board --open           the same, and open the board in the browser
-  saani board --json           print the state once and exit
+  saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s; /board is the isometric board
+  saani ui --open              the same, and open the board in the browser
+  saani ui --json              print the state once and exit
+  saani board ...              the same as saani ui (the command's former name, kept as an alias)
 
 The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
@@ -693,7 +694,7 @@ def run_command(args):
 
 
 def add_parsers(sub):
-    p = sub.add_parser("board", help="the local status page and the isometric board (this PC only)")
+    p = sub.add_parser("ui", aliases=["board"], help="the local status page and the isometric board (this PC only); board: alias of ui")
     p.add_argument("--port", type=int)
     p.add_argument("--open", action="store_true", help="open the board in the browser")
     p.add_argument("--json", action="store_true", help="print the state once and exit")

@@ -3,7 +3,7 @@
   new, land, status, prune, test, check-msg     worktrees, landings, the test queue, the commit-msg hook (saani/core.py)
   ci                                            hybrid CI: GitHub Actions within the free minutes, the PC for the rest (saani/ci.py)
   kpis                                          the numbers over a window of days (saani/kpis.py)
-  board                                         the local status page and the isometric board (saani/board_server.py)
+  ui (alias: board)                             the local status page and the isometric board (saani/board_server.py)
   progress                                      a progress bar for a test run in the background (saani/progress.py)
 
 The settings come from the project's saani.toml (docs/CONFIG.md). Standard library only, Python 3.11 or newer.

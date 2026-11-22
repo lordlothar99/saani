@@ -78,7 +78,7 @@ flowchart TB
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
-| `saani board [--open] [--json]` | The local status page and the board (below). |
+| `saani ui [--open] [--json]` | The local status page and the board (below). `saani board` is an alias. |
 | `saani progress run\|show\|watch` | A progress bar with the remaining time for a test run in the background. |
 
 ## Landing, in detail
@@ -129,7 +129,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 - Every decision goes to `build/saani-ci.json`.
 
 ## The status page and the board
-`saani board` serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
+`saani ui` (alias `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
 - **`/`, the status page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
   needs and a "Copy prompt" to paste to the Architect; the open pull request with its CI in three colours; the Claude Code sessions of the
   project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in); the
@@ -150,7 +150,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
 | Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
 
-The long-run checklist is the plugin's skill (`plugin/skills/longrun/SKILL.md`).
+The long-run checklist is the plugin's skill (`skills/longrun/SKILL.md`).
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),

@@ -1,6 +1,6 @@
 # The board: data contract
 
-The board (`saani/board.html`) reads one JSON object. Served by `saani board` at `/board`, it reads `/api/state` every 5 s. Published as an
+The board (`saani/board.html`) reads one JSON object. Served by `saani ui` at `/board`, it reads `/api/state` every 5 s. Published as an
 artifact, `/api/state` does not answer and it reads `mock-state.json` beside it (`saani/samples/board-sample.json`, a synthetic sample of an
 invented project, also served locally at `/mock-state.json`).
 
