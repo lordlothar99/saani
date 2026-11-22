@@ -36,6 +36,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -101,6 +102,74 @@ _resources = {"now": None, "history": collections.deque(maxlen=HISTORY_POINTS)}
 
 def cfg():
     return config.current()
+
+
+# ---------------------------------------------------------------- the projects the one board can show (a list in the user's home)
+
+_project_lock = threading.RLock()        # the settings are process-wide: one request at a time works inside one project
+_loaded = {}                             # project folder -> its settings
+_home = None                             # the project `saani ui` was started in: shown until the selector says otherwise
+
+
+def registry_path():
+    return pathlib.Path(os.environ.get("SAANI_HOME") or pathlib.Path.home() / ".saani") / "projects.json"
+
+
+def read_registry():
+    try:
+        rows = json.loads(registry_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, str)] if isinstance(rows, list) else []
+
+
+def write_registry(folders):
+    path = registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(folders, indent=1), encoding="utf-8")
+
+
+def register(folder):
+    """Add a project's main checkout to the list (once)."""
+    folder = str(pathlib.Path(folder))
+    rows = read_registry()
+    if folder not in rows:
+        write_registry(rows + [folder])
+    return folder
+
+
+def load_project(folder):
+    """The settings of a registered folder, or None when it is gone or has no saani.toml any more."""
+    if folder not in _loaded:
+        try:
+            _loaded[folder] = config.load(folder)
+        except (SystemExit, OSError):
+            return None
+    return _loaded[folder]
+
+
+def projects():
+    """[(settings)] of the registered projects that still load, the home project first; the same repo only once."""
+    found = {}
+    for folder in ([str(_home.root)] if _home else []) + read_registry():
+        c = load_project(folder)
+        if c and c.repo not in found:
+            found[c.repo] = c
+    return list(found.values())
+
+
+def in_project(repo, fn):
+    """fn() with the settings of the project `repo` (owner/name; empty: the home project), or None when no such project is listed."""
+    with _project_lock:
+        target = next((c for c in projects() if c.repo == repo), None) if repo else (_home or config.current())
+        if target is None:
+            return None
+        previous = config.current()
+        config.use(target)
+        try:
+            return fn()
+        finally:
+            config.use(previous)
 
 
 def needs():
@@ -422,6 +491,7 @@ def project_info():
 # ---------------------------------------------------------------- collectors (each one fails alone)
 
 def cached(key, seconds, fn):
+    key = (cfg().repo, key)                      # one project's answer is never another's
     with _lock:
         hit = _cache.get(key)
         if hit and time.time() - hit[0] < seconds:
@@ -626,6 +696,7 @@ def state():
     titles = {i["number"]: i["title"] for i in iss.get("open", []) + iss.get("closed", [])}
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
+            "projects": [{"repo": c.repo, "name": c.name} for c in projects()],
             "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open")),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
@@ -648,19 +719,27 @@ class Handler(BaseHTTPRequestHandler):
         if not host_allowed(self.headers.get("Host", ""), self.server.server_address[1]):
             self.send_error(403)
             return
-        path = self.path.split("?")[0]
+        path, _, query = self.path.partition("?")
+        params = urllib.parse.parse_qs(query)
+        repo = (params.get("project") or [""])[0]           # the selector's choice: owner/name; none: the project the server started in
         if path in ("/", "/index.html"):
-            body, kind = page().encode("utf-8"), "text/html; charset=utf-8"
+            text = in_project(repo, page)
+            body, kind = (text or "").encode("utf-8"), "text/html; charset=utf-8"
         elif path in ("/board", "/board/"):
             body, kind = board_page().encode("utf-8"), "text/html; charset=utf-8"
         elif path in ("/mock-state.json", "/board/mock-state.json"):
             body, kind = MOCK_FILE.read_bytes(), "application/json"
         elif path == "/api/state":
-            if "fresh=1" in self.path.partition("?")[2].split("&"):    # the Refresh button: GitHub and the rest asked again now
+            if "1" in params.get("fresh", []):               # the Refresh button: GitHub and the rest asked again now
                 with _lock:
                     _cache.clear()
-            body, kind = json.dumps(state()).encode("utf-8"), "application/json"
+            data = in_project(repo, state)
+            text = json.dumps(data) if data is not None else None
+            body, kind = (text or "").encode("utf-8"), "application/json"
         else:
+            self.send_error(404)
+            return
+        if not body:                                          # a project that is not in the list
             self.send_error(404)
             return
         self.send_response(200)
@@ -675,10 +754,30 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_command(args):
+    global _home
+    if args.add:
+        try:
+            folder = config.main_checkout(args.add)
+        except OSError:
+            folder = None
+        if folder is None or load_project(str(folder)) is None:
+            print(f"{args.add}: no git checkout with a {config.FILE} there")
+            return 1
+        register(folder)
+        print(f"listed: {load_project(str(folder)).repo} ({folder})")
+        return 0
+    if args.remove:
+        rows = read_registry()
+        keep = [f for f in rows if not (load_project(f) and load_project(f).repo == args.remove)]
+        write_registry(keep)
+        print(f"removed {args.remove}" if len(keep) < len(rows) else f"{args.remove} was not in the list")
+        return 0
+    _home = cfg()
     if args.json:
         safe(sample_resources)
         print(json.dumps(state(), indent=1))
         return 0
+    safe(lambda: register(_home.root))                   # the project it starts in is listed from now on, so any later board offers it
     port = args.port or cfg().board_port
     threading.Thread(target=sampler, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
@@ -698,4 +797,6 @@ def add_parsers(sub):
     p.add_argument("--port", type=int)
     p.add_argument("--open", action="store_true", help="open the board in the browser")
     p.add_argument("--json", action="store_true", help="print the state once and exit")
+    p.add_argument("--add", metavar="FOLDER", help="list another project (a checkout with a saani.toml) in the board's selector, and exit")
+    p.add_argument("--remove", metavar="OWNER/NAME", help="take a project out of the selector, and exit")
     p.set_defaults(run=run_command)

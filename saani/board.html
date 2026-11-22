@@ -30,6 +30,8 @@ body{background:var(--night);color:var(--bone);font:15px/1.5 var(--body);overflo
 .brand .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font:500 11px/1 var(--mono);color:var(--dust)}
 .brand .title-row{display:flex;align-items:center;gap:14px}
 .brand .title-row .btn{padding:6px 8px;font-size:10px}
+.brand .title-row select.btn{cursor:pointer;max-width:220px}
+.brand .title-row select.btn option{background:#140d08;color:var(--sand)}
 .badge{padding:5px 8px;border:1px solid var(--edge-hi);letter-spacing:.08em;text-transform:uppercase;font-size:10px}
 .badge.sample{color:var(--night);background:var(--amber);border-color:var(--amber)}
 .badge.live{color:var(--ok);border-color:var(--ok)}
@@ -173,7 +175,7 @@ a{color:var(--amber)}
  <radialGradient id="g-glow"><stop offset="0" stop-color="var(--amber)" stop-opacity=".55"/><stop offset="1" stop-color="var(--amber)" stop-opacity="0"/></radialGradient>
 </defs><g id="world"><g id="ground"></g><g id="things"></g><g id="air"></g></g></svg></div>
 
-<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
+<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
 
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
@@ -630,9 +632,13 @@ ROUTE.splice(0, ROUTE.length, ...ROUTE.map(TURN));
 let DATA = null, LIVE = false, PREV = {}, demoTimer = null;
 function normalize(d) {
   if (d.cards) return d;
-  const map = {you: "you", ready: "started", building: "building", testing: "testing", dev: "dev", main: "deploy", live: "done"};
+  // "Ready" (assigned, nothing blocks it) is the backlog's until an agent session works on it: the Workshops hold only work that is going on
+  const map = {you: "you", ready: "backlog", building: "building", testing: "testing", dev: "dev", main: "deploy", live: "done"};
   const cards = []; let pr = null;
-  for (const col of d.board || []) { for (const c of col.cards) cards.push({...c, step: map[col.id] || "backlog"}); if (col.pr) pr = col.pr; }
+  for (const col of d.board || []) {
+    for (const c of col.cards) cards.push({...c, step: col.id === "ready" && (c.agents || []).length ? "started" : map[col.id] || "backlog"});
+    if (col.pr) pr = col.pr;
+  }
   if (pr) for (const c of cards) if ((pr.inside || []).includes(c.number)) c.step = "pr";
   return {...d, cards, pr};
 }
@@ -1060,6 +1066,7 @@ function setData(d, live) {
   $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : (DATA.sample || {}).note || "Sample data";
   $("#clock").textContent = live ? "updated " + (DATA.time || "") : "snapshot " + ((DATA.sample || {}).taken || "");
   $("#demo").hidden = live;
+  projects(DATA.projects);
 }
 function demoStep() {
   // now and then an issue gets stuck in the backlog and waits for you: a long move, so it flies
@@ -1071,12 +1078,27 @@ function demoStep() {
   setData(d, false);
 }
 function demo(on) { clearInterval(demoTimer); demoTimer = on && !RM ? setInterval(demoStep, 7000) : null; $("#demo").textContent = "Demo traffic: " + (demoTimer ? "on" : "off"); $("#demo").classList.toggle("on", !!demoTimer); }
+// One page, one address: the project shown is the selector's (kept in this browser), asked of the server as ?project=owner/name
+let PROJECT = ""; try { PROJECT = localStorage.getItem("saani-project") || ""; } catch (_) {}
+const stateUrl = () => "/api/state" + (PROJECT ? "?project=" + encodeURIComponent(PROJECT) : "");
+function projects(list) {
+  const sel = $("#proj"), repos = (list || []).map(p => p.repo);
+  if (PROJECT && !repos.includes(PROJECT)) PROJECT = "";                    // a project taken out of the list: back to the first
+  sel.hidden = repos.length < 2;
+  if (sel.dataset.repos !== repos.join()) { sel.dataset.repos = repos.join(); sel.replaceChildren(...(list || []).map(p => el("option", {value: p.repo}, p.name))); }
+  sel.value = PROJECT || (DATA.project && DATA.project.repo) || repos[0] || "";
+}
 async function load() {
-  try { const r = await fetch("/api/state", {cache: "no-store"}); if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
+  try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
   try { const r = await fetch("mock-state.json", {cache: "no-store"}); setData(await r.json(), false); demo(true); }
   catch (_) { $("#src").textContent = "No data"; $("#clock").textContent = "Neither /api/state nor mock-state.json answered."; }
 }
-async function refresh() { try { const r = await fetch("/api/state", {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {} setTimeout(refresh, 5000); }
+async function refresh() { try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {} setTimeout(refresh, 5000); }
+async function switchProject(repo) {
+  PROJECT = repo; try { localStorage.setItem("saani-project", repo); } catch (_) {}
+  PREV = {}; FILTER.ms = ""; $("#ms").value = "";                            // another project's cards do not fly from the old one's places
+  try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}
+}
 
 // ------------------------------------------------------------------ wiring
 $("#q").addEventListener("input", e => { FILTER.q = e.target.value; applyFilter(); });
@@ -1086,6 +1108,7 @@ $("#lr").addEventListener("change", e => { FILTER.lr = e.target.value; applyFilt
 $("#legend .x").addEventListener("click", () => { $("#legend").open = false; });
 $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip"); if (!b) return; FILTER.chip = FILTER.chip === b.dataset.chip ? "" : b.dataset.chip; render(); });
 $("#demo").addEventListener("click", () => demo(!demoTimer));
+$("#proj").addEventListener("change", e => switchProject(e.target.value));
 drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 </script>
 

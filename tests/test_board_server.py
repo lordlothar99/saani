@@ -318,7 +318,42 @@ def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
         server.shutdown()
     source = fp.BOARD_FILE.read_text(encoding="utf-8")
     assert "<html" not in source and "<body" not in source and "<!doctype" not in source.lower()
-    assert 'fetch("/api/state"' in source and 'fetch("mock-state.json"' in source
+    assert '"/api/state"' in source and "fetch(stateUrl()" in source and 'fetch("mock-state.json"' in source
+
+
+def test_one_board_shows_the_listed_projects_and_the_selector_picks_one(monkeypatch, tmp_path):
+    """one address for every listed project: /api/state?project=owner/name answers for that project, the home one without it,
+    and an unlisted one is a 404; a project is listed once, whatever the folder, and one that no longer loads is left out."""
+    from saani import config
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    home, other = config.Config(repo="acme/webshop", root=tmp_path / "webshop"), config.Config(repo="acme/api", root=tmp_path / "api")
+    monkeypatch.setattr(fp, "_loaded", {str(home.root): home, str(other.root): other})
+    monkeypatch.setattr(fp, "_home", home)
+    monkeypatch.setattr(config, "_current", home)
+    assert fp.register(other.root) == str(other.root)
+    fp.register(other.root)
+    fp.register(tmp_path / "gone")
+    monkeypatch.setattr(fp, "load_project", lambda folder: fp._loaded.get(folder))
+    assert [c.repo for c in fp.projects()] == ["acme/webshop", "acme/api"]
+    monkeypatch.setattr(fp, "state", lambda: {"repo": fp.cfg().repo})
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}/api/state"
+    try:
+        assert json.loads(urllib.request.urlopen(base).read()) == {"repo": "acme/webshop"}
+        assert json.loads(urllib.request.urlopen(base + "?project=acme%2Fapi").read()) == {"repo": "acme/api"}
+        with pytest.raises(urllib.error.HTTPError) as err:
+            urllib.request.urlopen(base + "?project=acme%2Fnone")
+        assert err.value.code == 404
+    finally:
+        server.shutdown()
+    assert fp.cfg() is home                                   # the settings are put back after every request
+
+
+def test_a_ready_issue_with_no_agent_is_in_the_backlog_not_the_workshops():
+    """the board page puts a Ready card in the backlog until an agent works on it, then in the Workshops."""
+    source = fp.BOARD_FILE.read_text(encoding="utf-8")
+    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "backlog"' in source
 
 
 def test_the_sample_shows_every_zone_and_keeps_out_private_text():

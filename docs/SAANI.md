@@ -78,7 +78,7 @@ flowchart TB
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
-| `saani ui [--open] [--json]` | The local status page and the board (below). `saani board` is an alias. |
+| `saani ui [--open] [--json] [--add FOLDER] [--remove OWNER/NAME]` | The local status page and the board (below), one address for every project listed in `~/.saani/projects.json` (the one it starts in is listed; the header has a selector). `saani board` is an alias. |
 | `saani progress run\|show\|watch` | A progress bar with the remaining time for a test run in the background. |
 
 ## Landing, in detail
