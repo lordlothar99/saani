@@ -6,7 +6,7 @@ rest, decided job by job. Standard library only; pure functions first (tests/tes
   saani ci pr [--head B]   the CI of the open integration -> production pull request: on GitHub (workflow_dispatch of `[ci] workflow`)
                            or on the PC (`[tests] check` then `[tests] full` in a temporary worktree at the pull request's head, the full
                            run through the test queue); either way the result is the commit status `[ci] status_context`
-  saani ci merged <PR>     after a merge into production: the relabel ran on GitHub, or run `[ci] relabel` here
+  saani ci merged <PR>     after a merge into production: the relabel ran on GitHub, or `[ci] relabel`, or gh here; the finished long runs are removed
   saani ci place <job>     print github or pc for one job, and why
   --dry-run                print every write (dispatch, status, enable/disable) instead of doing it
 
@@ -24,6 +24,7 @@ import datetime
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -296,8 +297,13 @@ def cmd_pr(run, head=None, force_pc=False):
 
 
 def cmd_merged(run, number):
-    """The relabel after a merge: GitHub's workflow runs by itself when it is on (sync); otherwise, or when it was refused, here."""
+    """After a merge: the relabel (GitHub's workflow when it is on (sync); otherwise, or when it was refused, `[ci] relabel` or gh here) and the
+    removal of the long runs that are finished."""
     c = cfg()
+    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "state,mergedAt,title,body,commits") or {}
+    if pr.get("state") != "MERGED":
+        print(f"pull request #{number} is not merged: nothing to relabel")
+        return 1
     relabel = c.ci_jobs.get("relabel", {})
     states = {w["name"]: w["state"] for w in run.json("gh", "workflow", "list", "--repo", c.repo, "--all", "--json", "name,state") or []}
     if relabel.get("workflow") and states.get(relabel["workflow"]) == "active":
@@ -307,20 +313,58 @@ def cmd_merged(run, number):
         if ok:
             print(f"the relabel ran on GitHub (run {ok[0]['databaseId']}): nothing to do here")
             log({"job": "relabel", "pr": number, "place": "github", "result": "passed"})
+            core.remove_longruns(core.finished_longruns(before=merged_at(pr)), run.dry)
             return 0
-    if not c.relabel:
-        print(f"the relabel did not run on GitHub and no [ci] relabel command is set: swap {c.labels['in_dev']} for "
-              f"{c.labels['in_main']} by hand on the issues of #{number}")
-        return 1
-    print("the relabel did not run on GitHub: running it here", flush=True)
-    command = [*c.command("relabel"), str(number)]
-    if run.dry:
-        print("dry-run: " + " ".join(command))
-        return 0
-    token = run.read("gh", "auth", "token")
-    code = subprocess.run(command, cwd=c.root, env={**os.environ, "GH_TOKEN": token}).returncode
-    log({"job": "relabel", "pr": number, "place": "pc", "result": "passed" if code == 0 else "failed"})
+    if c.relabel:
+        print("the relabel did not run on GitHub: running it here", flush=True)
+        command = [*c.command("relabel"), str(number)]
+        if run.dry:
+            print("dry-run: " + " ".join(command))
+            code = 0
+        else:
+            token = run.read("gh", "auth", "token")
+            code = subprocess.run(command, cwd=c.root, env={**os.environ, "GH_TOKEN": token}).returncode
+            log({"job": "relabel", "pr": number, "place": "pc", "result": "passed" if code == 0 else "failed"})
+    else:
+        code = relabel_issues(run, number, pr)
+    core.remove_longruns(core.finished_longruns(before=merged_at(pr)), run.dry)
     return code
+
+
+def merged_at(pr):
+    """When the pull request merged, as a naive local time (a long run that began before it is over); None if unknown."""
+    try:
+        return datetime.datetime.fromisoformat(pr["mergedAt"].replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def issues_named(pr):
+    """The issue numbers (`#n`) a pull request names in its title, body and commits."""
+    texts = [pr.get("title") or "", pr.get("body") or ""]
+    for commit in pr.get("commits") or []:
+        texts += [commit.get("messageHeadline") or "", commit.get("messageBody") or ""]
+    return sorted({int(n) for n in re.findall(r"#(\d+)", "\n".join(texts))})
+
+
+def relabel_issues(run, number, pr):
+    """The relabel done here, with gh: each issue the pull request names that carries the in-dev label swaps it for in-main."""
+    c = cfg()
+    dev, main = c.labels["in_dev"], c.labels["in_main"]
+    failed = 0
+    for n in issues_named(pr):
+        info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels,state") or {}
+        if dev not in [x["name"] for x in info.get("labels", [])]:
+            continue
+        print(f"#{n}: {dev} -> {main}")
+        try:
+            run.write("gh", "issue", "edit", str(n), "--repo", c.repo, "--remove-label", dev, "--add-label", main)
+        except SystemExit as e:
+            print(e)
+            failed += 1
+    if not run.dry:
+        log({"job": "relabel", "pr": number, "place": "pc", "result": "failed" if failed else "passed"})
+    return 1 if failed else 0
 
 
 def run_command(args):

@@ -148,3 +148,39 @@ def test_saani_longrun_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path
         core.cmd_longrun(type("A", (), {"id": "2026-11-22_1500"})())
     with pytest.raises(SystemExit, match="letters, digits"):
         core.cmd_longrun(type("A", (), {"id": "a b"})())
+
+
+def test_finished_long_runs_are_removed_but_never_a_dirty_or_a_recent_one(tmp_path, monkeypatch):
+    """A long run's folder holds no commits, so a finished run is told by its age: older than `before` (or 12 hours), clean and merged (#28)."""
+    import datetime
+    import subprocess
+    import time
+    from saani import config
+
+    def sh(*cmd, cwd):
+        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
+    origin, main = tmp_path / "origin.git", tmp_path / "webshop"
+    sh("git", "init", "-q", "--bare", "-b", "dev", str(origin), cwd=tmp_path)
+    sh("git", "clone", "-q", str(origin), str(main), cwd=tmp_path)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
+    sh("git", "push", "-q", "origin", "HEAD:dev", "HEAD:main", cwd=main)
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    now = time.strftime("%Y-%m-%d_%H%M")
+    for stamp in ("2026-11-01_1000", "2026-11-01_1100", now):
+        core.cmd_longrun(type("A", (), {"id": stamp})())
+    wt = tmp_path / "webshop-wt"
+    (wt / "longrun-2026-11-01_1100" / "notes.txt").write_text("not committed", encoding="utf-8")        # a dirty one
+    found = core.finished_longruns(cwd=main)
+    assert [b for _, b in found] == ["longrun/2026-11-01_1000"]                                       # not the dirty one, not today's
+    assert [b for _, b in core.finished_longruns(before=datetime.datetime(2099, 1, 1), cwd=main)] == ["longrun/2026-11-01_1000", f"longrun/{now}"]
+    assert core.remove_longruns(found, cwd=main) == 1
+    assert not (wt / "longrun-2026-11-01_1000").exists()
+    assert "longrun/2026-11-01_1000" not in core.git("branch", "--format=%(refname:short)", cwd=main).splitlines()
+    assert (wt / "longrun-2026-11-01_1100").is_dir()
+
+
+def test_a_long_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):
+    import datetime
+    assert core.longrun_started("longrun/2026-11-22_1513") == datetime.datetime(2026, 11, 22, 15, 13)
+    assert core.longrun_started("longrun/nightly") is None
+    assert core.longrun_started("longrun/nightly", tmp_path) is not None

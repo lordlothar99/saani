@@ -12,3 +12,4 @@
   `bin/saani` puts the command on the PATH of Claude Code's shell, so nothing else needs setting up.
 - The worker subagents `saani:coder`, `saani:tester`, `saani:reviewer`, `saani:scribe` and `saani:researcher` (`agents/`), and the pipeline from an issue to dev.
 - A workflow that deletes the head branch of a pull request merged into the production branch, except `dev`, `main` and `master`.
+- `saani ci merged <PR>` relabels `in-dev` to `in-main` itself with `gh` when no workflow or `[ci] relabel` command does, and, like `saani prune`, removes the finished long runs (worktree and branch).

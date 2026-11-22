@@ -185,3 +185,53 @@ def test_a_missing_workflow_file_sends_the_pull_request_ci_to_the_pc_and_says_wh
 def test_pc_forces_the_pull_request_ci_onto_the_pc_whatever_the_budget_says(monkeypatch):
     code, statuses, logged = pr_run(monkeypatch, workflow=True, force_pc=True)
     assert code == 0 and logged[0]["place"] == "pc" and logged[0]["why"] == "forced with --pc"
+
+
+class FakeMergeGh:
+    """A stand-in for ci.Run: answers the gh reads from `answers` (by the command's words) and records the writes."""
+    def __init__(self, answers, dry=False):
+        self.answers, self.dry, self.written = answers, dry, []
+
+    def json(self, *cmd):
+        for words, answer in self.answers.items():
+            if all(w in cmd for w in words):
+                return answer
+        return None
+
+    def write(self, *cmd):
+        self.written.append(cmd)
+        return ""
+
+
+MERGED = {"state": "MERGED", "mergedAt": "2026-11-22T14:26:00Z", "title": "Release (refs #2, #12)", "body": "#15 and the pull request #26",
+          "commits": [{"messageHeadline": "Board (refs #27)", "messageBody": "Why: x\nUndo: y"}]}
+
+
+def test_the_issues_a_pull_request_names_come_from_its_title_body_and_commits():
+    assert fci.issues_named(MERGED) == [2, 12, 15, 26, 27]
+    assert fci.issues_named({}) == []
+
+
+def test_after_a_merge_the_issues_in_dev_swap_to_in_main_by_gh_when_no_relabel_command_is_set(jobs, monkeypatch, capsys):
+    from saani import core
+    cleaned = []
+    monkeypatch.setattr(core, "finished_longruns", lambda before=None, cwd=None: [(None, "longrun/2026-11-01_1000")])
+    monkeypatch.setattr(core, "remove_longruns", lambda found, dry=False, cwd=None: cleaned.append(found))
+    monkeypatch.setattr(fci, "log", lambda entry: None)
+    jobs.relabel = None
+    gh = FakeMergeGh({("pr", "view"): MERGED, ("workflow", "list"): [],
+                 ("issue", "view", "2"): {"labels": [{"name": "in-dev"}], "state": "OPEN"},
+                 ("issue", "view", "12"): {"labels": [{"name": "in-dev"}], "state": "OPEN"},
+                 ("issue", "view", "15"): {"labels": [{"name": "ui"}], "state": "OPEN"},      # not in dev: left alone
+                 ("issue", "view", "26"): {"labels": [], "state": "OPEN"}})
+    assert fci.cmd_merged(gh, 26) == 0
+    edited = sorted(int(w[3]) for w in gh.written if w[:3] == ("gh", "issue", "edit"))
+    assert edited == [2, 12] and all("--add-label" in w and "in-main" in w for w in gh.written)
+    assert cleaned == [[(None, "longrun/2026-11-01_1000")]]                                        # the finished long run goes too
+
+
+def test_a_pull_request_that_is_not_merged_relabels_nothing(jobs, capsys):
+    jobs.relabel = None
+    gh = FakeMergeGh({("pr", "view"): {"state": "OPEN"}, ("workflow", "list"): []})
+    assert fci.cmd_merged(gh, 30) == 1 and gh.written == []
+    assert "not merged" in capsys.readouterr().out

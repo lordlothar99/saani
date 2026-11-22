@@ -14,7 +14,7 @@ argument-hint: "[status|sync|pr|place <job>|merged <pr>] [--dry-run]"
 | `sync` | switches the small automatic workflows on or off by the minutes left |
 | `pr` | the CI of the open integration -> production pull request, on GitHub or on the PC; the result becomes a commit status (`--head <branch>` for a hotfix branch) |
 | `place <job>` | prints `github` or `pc` for one job, and why |
-| `merged <pr>` | after a merge into production: relabels the issues (on GitHub, or here if GitHub did not) |
+| `merged <pr>` | after a merge into production: relabels the issues (on GitHub, or here if GitHub did not) and removes the finished long runs |
 
 `--dry-run` prints every write (dispatch, status, workflow switch) instead of doing it.
 
