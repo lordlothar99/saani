@@ -27,12 +27,13 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
    - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel` less those in worktrees) and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
-     files already checked, `skipped` says why not). With issue numbers as arguments, take only those among the eligible ones.
+     files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
      background** so several issues progress at once. Model: sonnet; opus for an issue labelled or titled as hard or security. Brief it with
      the issue number, the worktree path and what the issue asks, not with file dumps.
-   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code; skip it only for a change of a few
-     lines you make alone, which needs no coder either), and `saani comment <n> review` when the review starts. Real findings go back to
+   - **Alone:** a change of a few lines in one or two files (a typo, a sentence, a setting) you make yourself in that worktree: no coder,
+     no reviewer, then land it.
+   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code), and `saani comment <n> review` when the review starts. Real findings go back to
      the same coder (you decide which are real); a new commit.
    - Then `saani land --worktree <path>` (posts On dev). Landings are one at a time, the lock does it. A conflict at landing goes back to
      the coder of that issue.
@@ -49,7 +50,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    in-dev issue); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
    most 3 attempts, then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
 5. **Report** in the chat and as a comment on the pull request: start, end, duration, id, folder; the issues done; a table of what is
-   pending (issue | question with context | options with pros and cons); what was refused, and which issues waited for overlapping files; the numbers (`saani kpis`). End with `/saani:merge` (or
+   pending (issue | question with context | options with pros and cons); what was refused, and which issues waited for overlapping files (best effort: only the paths an issue names between backticks are compared, so an issue that names none never waits); the numbers (`saani kpis`). End with `/saani:merge` (or
    `/saani:merge --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 

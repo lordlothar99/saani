@@ -32,10 +32,19 @@ def choose(issues, started=(), running=None, today="2026-11-22"):
     (0, 32, 9, 2), (0, 32, 3, 1), (0, 32, 0.5, 1),      # the free RAM decides, at least 1
     (0, 16, None, 3), (0, 8, None, 2),                  # RAM unknown: the cores alone
     (0, None, 32, 1),
+    (0, 12, 16, 3),                                     # the 12-core, 16 GB machine
+    (0, 12, 4, 1),
     (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 3), (3, 4, 2, 3),   # fixed, capped at 3, whatever the machine says
 ])
 def test_the_size_of_the_run(configured, cpus, gb, want):
     assert auto.parallel_size(configured, cpus, gb) == want
+
+
+def test_the_size_does_not_shrink_for_the_memory_running_issues_already_use():
+    # 12 cores, 16 GB in all: 3 issues running leave 4 GB free, and the size is still 3 (not 1)
+    assert auto.parallel_size(0, 12, 4, running=3) == 3
+    assert auto.parallel_size(0, 12, 4, running=0) == 1
+    assert auto.parallel_size(0, 12, 16, running=0) == 3
 
 
 def test_slots_are_the_size_less_the_running_issues_never_below_zero():
@@ -115,22 +124,101 @@ def test_the_order_is_milestone_by_version_then_bugs_then_number():
 def test_started_issues_come_from_folders_and_branches_local_or_remote():
     got = auto.started_issues(["12-fix-login", "auto-2026-11-22_0900", "notes"],
                               ["dev", "* task/7-thing", "origin/feat/8-other", "remotes/origin/bug/9-x", "auto/2026-11-22_0900", "wip/10-no"])
-    assert got == {12, 7, 8, 9}
+    assert got == ({12}, {7, 8, 9})
 
 
 # ---------------------------------------------------------------- overlap
 
 def test_paths_are_the_backticked_tokens_with_a_slash_or_an_extension():
     text = "Change `saani/core.py` and `docs/` and `saani.toml`; run `saani auto pick`, not `--json`, see `v1.0.0` and `https://x.y/z.md` and `#12`."
-    assert auto.issue_paths(text) == ["saani/core.py", "docs/", "saani.toml"]
+    assert auto.issue_paths(text) == ["saani/core.py", "saani.toml"]       # a folder (`docs/`) is ignored
 
 
-def test_paths_overlap_by_file_folder_or_bare_name():
+def test_paths_overlap_by_file_or_by_a_named_folder_and_a_bare_name_is_a_root_file():
     assert auto.paths_overlap("saani/core.py", "saani/core.py")
-    assert auto.paths_overlap("saani/", "saani/core.py")
-    assert auto.paths_overlap("core.py", "saani/core.py")
+    assert auto.paths_overlap("saani", "saani/core.py")
+    assert auto.paths_overlap("saani.toml", "saani.toml")
+    assert not auto.paths_overlap("saani.toml", "examples/saani.toml")
+    assert not auto.paths_overlap("core.py", "saani/core.py")
     assert not auto.paths_overlap("saani/core.py", "saani/config.py")
-    assert not auto.paths_overlap("docs/", "docs2/a.md")
+    assert not auto.paths_overlap("docs", "docs2/a.md")
+
+
+def test_an_issue_naming_no_path_never_waits_on_overlap():
+    got, why = choose([issue(1, text=body(extra="Fix the thing in the core.")), issue(2, text=body(extra="`saani.toml`"))],
+                      running={5: ["saani.toml", "examples/saani.toml"]})
+    assert got == [1] and why == {2: "overlaps #5 (saani.toml)"}
+    got, _ = choose([issue(3, text=body(extra="`saani.toml`"))], running={5: ["examples/saani.toml"]})
+    assert got == [3]
+
+
+def test_only_limits_the_choice_before_the_overlap_pass():
+    issues = [issue(1, text=body(extra="`a.py`")), issue(2, text=body(extra="`a.py`")), issue(3, text=body(extra="`a.py`"))]
+    eligible, skipped = auto.choose(issues, set(), {}, "2026-11-22", only={2, 3})
+    assert [e["number"] for e in eligible] == [2] and skipped == [{"number": 3, "reason": "overlaps #2 (a.py)"}]
+
+
+def test_blocked_by_names_only_the_open_blockers_and_a_branch_is_not_a_worktree():
+    got, why = choose([issue(1), issue(2, text=body(blocked="#1, #77")), issue(3), issue(4)], started={3})
+    assert why[2] == "blocked by #1" and why[3] == "already in a worktree"
+    eligible, skipped = auto.choose([issue(4)], set(), {}, "2026-11-22", branched={4})
+    assert eligible == [] and skipped == [{"number": 4, "reason": "has a worker branch"}]
+
+
+def test_named_milestones_sort_alphabetically_between_versions_and_none():
+    got, _ = choose([issue(1), issue(2, "Later"), issue(3, "Backlog"), issue(4, "v1.10.0"), issue(5, "v1.9.0")])
+    assert got == [5, 4, 3, 2, 1]
+
+
+def test_bugs_first_uses_the_type_whose_prefix_is_bug():
+    config.use(config.Config(repo="acme/webshop", types={"Task": "task", "Defect": "bug"}))
+    got, _ = choose([issue(1, type="Task"), issue(2, type="Defect")])
+    assert got == [2, 1]
+
+
+# ---------------------------------------------------------------- gh and git failing
+
+@pytest.mark.parametrize("failure", ["code", "missing", "timeout"])
+@pytest.mark.parametrize("which", ["issue", "api"])
+def test_a_gh_failure_stops_the_command_and_is_never_an_empty_list(monkeypatch, which, failure):
+    def fake_run(cmd, **kw):
+        if cmd[1] != which and not (which == "api" and cmd[1] == "api"):
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+        if failure == "missing":
+            raise FileNotFoundError("gh")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(cmd, 60)
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="HTTP 502 bad gateway")
+    monkeypatch.setattr(auto.subprocess, "run", fake_run)
+    with pytest.raises(SystemExit) as e:
+        auto.read_issues()
+    assert isinstance(e.value.code, str) and "saani auto pick" in e.value.code
+    if failure == "code":
+        assert "bad gateway" in e.value.code
+
+
+def test_the_types_come_from_the_api_and_issues_up_to_500_are_read(monkeypatch):
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        out = '[{"number": 4, "title": "t", "labels": [], "milestone": null, "body": ""}]' if cmd[1] == "issue" else "4\tBug\n"
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+    monkeypatch.setattr(auto.subprocess, "run", fake_run)
+    assert auto.read_issues()[0]["type"] == "Bug"
+    assert "500" in seen[0]
+
+
+def test_the_fetch_prunes_without_a_prompt_and_a_timeout_only_warns(monkeypatch, capsys):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(cmd=cmd, **kw)
+        raise subprocess.TimeoutExpired(cmd, 60)
+    monkeypatch.setattr(auto.subprocess, "run", fake_run)
+    auto.fetch()
+    assert "--prune" in seen["cmd"] and seen["timeout"] == 60 and seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert "may be out of date" in capsys.readouterr().err
 
 
 def test_an_issue_overlapping_a_running_one_is_left_with_the_path():
@@ -163,6 +251,7 @@ def test_the_files_a_worktree_changed_are_read_from_its_diff(tmp_path, monkeypat
 
 def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32):
     monkeypatch.setattr(auto, "read_issues", lambda: issues)
+    monkeypatch.setattr(auto, "fetch", lambda: None)
     monkeypatch.setattr(auto, "running_issues", lambda: dict(running or {}))
     monkeypatch.setattr(auto, "free_ram_gb", lambda: gb)
     monkeypatch.setattr(auto.os, "cpu_count", lambda: cpus)
@@ -211,9 +300,22 @@ def test_saani_auto_pick_prints_and_saani_auto_still_makes_the_worktree(monkeypa
             pathlib.Path(a[5]).mkdir(parents=True)          # git makes the folder
         return ""
     monkeypatch.setattr(core, "git", fake_git)
-    monkeypatch.setattr(auto, "pick", lambda: pytest.fail("saani auto alone must not pick"))
+    monkeypatch.setattr(auto, "pick", lambda **k: pytest.fail("saani auto alone must not pick"))
     assert run_saani(monkeypatch, ["auto", "--id", "2026-11-22_0900"]) is None
     assert any(a[:3] == ("worktree", "add", "--no-track") and "auto/2026-11-22_0900" in a for a in made)
+
+
+def test_pick_options_without_pick_and_id_with_pick_are_refused(monkeypatch):
+    for argv in (["auto", "--json"], ["auto", "--limit", "2"], ["auto", "--only", "3"], ["auto", "pick", "--id", "x"]):
+        with pytest.raises(SystemExit) as e:
+            run_saani(monkeypatch, argv)
+        assert isinstance(e.value.code, str) and "saani auto" in e.value.code
+
+
+def test_pick_only_reaches_the_choice(monkeypatch, capsys):
+    fake_world(monkeypatch, [issue(1), issue(2), issue(3)])
+    assert run_saani(monkeypatch, ["auto", "pick", "--json", "--only", "3", "1"]) == 0
+    assert [e["number"] for e in json.loads(capsys.readouterr().out)["eligible"]] == [1, 3]
 
 
 def test_an_unknown_action_is_refused():
