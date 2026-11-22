@@ -5,7 +5,7 @@ history. Tables and checkboxes over prose.
 
 | Heading | When | Content |
 |---|---|---|
-| `### ▶ Started` | `saani start` posts it | branch, worktree folder, the plan in three bullets |
+| `### ▶ Started` | `saani start` posts it | branch, worktree folder (`--no-comment` skips it) |
 | `### 🔎 In review` | a review begins | who reviews, what is checked |
 | `### ⚙ Progress` | a commit or a round | commit, what is done, what is left (checkboxes) |
 | `### ❓ Question` | `help wanted` added (`saani comment <n> question` adds it) | context, then a grid: options, pros and cons, recommendation |

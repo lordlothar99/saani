@@ -5,11 +5,11 @@ worker agents and the guard hook.
 
 | Part | State |
 |---|---|
-| `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:start`, `/saani:land`, `/saani:merge`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `start`, `land`, `merge` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
+| `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:start`, `/saani:land`, `/saani:merge`, `/saani:comment`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `start`, `land`, `merge` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
 | `bin/saani`, `bin/saani.cmd` | the `saani` command inside Claude Code: `bin/` is on the PATH of Claude's shell while the plugin is enabled, and the launchers run `saani.py` from the plugin's own copy (bash: `py -3`, else `python`, else `python3`, never the Windows Store stub, and one Python process only, since the guard hook runs through it before every tool call; saani.py refuses a Python older than 3.11; Windows: `python`). `.gitattributes` keeps `bin/saani` in LF, or bash fails on Windows checkouts |
 | `skills/auto/SKILL.md` | `/saani:auto`, `/saani:auto 12 15`, `/saani:auto off`: the checklist of an auto run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani auto`) |
 | `hooks/hooks.json` | the guard: a PreToolUse hook on every tool and a PostToolUse hook on Bash (`"${CLAUDE_PLUGIN_ROOT}/bin/saani" guard`; on Windows Claude Code runs hooks through Git Bash, so `bin/saani` runs it there too). Present mode (no auto run registered for the session): it prints nothing and Claude Code asks as usual. Once `saani auto on` has run in that session (the owner is asked for it as usual; the PostToolUse hook then registers the session from the line `saani auto: on <id> folder=<path>` the command prints), for the session and its subagents: it allows the run's work at once and refuses the rest with a reason, never asks, and logs each refusal. A 15 s timeout: if the hook cannot run, Claude Code's normal permissions apply. A guardrail, not a sandbox: the tests run the worktree's code. How it decides: [SAANI.md, The guard](SAANI.md#the-guard). The **git** commit-msg hook is not part of the plugin: it is [.githooks/commit-msg](../.githooks/commit-msg), and needs `SAANI_HOME` because git runs it outside Claude Code |
-| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` and `deployer` wait for their issues |
+| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`, `deployer`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` waits for its issue |
 
 ## Worker roles
 Five are written (`agents/`); the models are a first choice, to be changed by a trial on real issues, never by a price list. A role's model is
@@ -23,7 +23,7 @@ harness, is a one-line change after the cost per landing is measured (#8). A wor
 | Scribe | Haiku | issue comments, labels, commit trailers |
 | Researcher | Sonnet | reads docs, releases and code, brings back the answer |
 | Sentinel (planned) | Sonnet | server diagnostics with a read-only key |
-| Deployer (planned) | Sonnet | deploys production after the owner's tap, with a deploy-only key |
+| Deployer | Sonnet | runs `saani deploy --dry-run`, reports the risks (the issues and commits in the range), reads a deploy log and says what a failure means; never deploys, never touches keys: the main session, which sees the owner, runs `saani deploy` or `saani merge --deploy` after the owner asks and taps their SSH agent |
 
 ## The pipeline from an issue to dev
 The Architect (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.
@@ -44,6 +44,11 @@ question before step 1 or 2. Only the Architect lands, pushes, closes or merges.
 briefing and a report; below that size it costs more than it saves. **When it delegates:** the change spans many files or needs a long
 read; a failure log to read (Tester); a fresh review (Reviewer, always for a change to the guard, the landing or the CI); a question that
 needs reading many pages (Researcher). Parallel coders each get their own worktree.
+
+**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`, at most 3): the Architect asks `saani auto pick --json` for
+the free slots and the next eligible issues, starts each (`saani start`), runs its coder in the background, and reviews and lands as each
+coder finishes. Landings are one at a time (the lock); a slot that frees is filled at once by a new `saani auto pick`. Issues whose likely
+files overlap are not run side by side. See `skills/auto/SKILL.md`.
 
 ## Install (checked against the Claude Code docs and `claude plugin validate`, 2026-11-22)
 This repository is both the marketplace and the plugin: `.claude-plugin/marketplace.json` lists one plugin whose source is `./`, the repo

@@ -26,8 +26,8 @@ The status of each feature lives in its GitHub issue (epic: Saani v1), never in 
   each the whole machine: landings first, then tier 1, then full runs.
 - **The record of a change is its commit message**: `refs #n`, the trailers `Why:` and `Undo:`, then a comment on the issue. A commit on a
   worker's branch or on the integration branch without them is refused (the commit-msg hook, and `land` checks every commit).
-- **Narrow keys.** No worker holds a key that can do more than its one job (planned: Sentinel with read-only diagnostics, Deployer with a
-  deploy-only key behind the owner's tap). A passphrase is never pasted into a chat.
+- **Narrow keys.** No worker holds a key that can do more than its one job (Deployer: a deploy-only key behind the owner's tap, see "Deploy"; planned: Sentinel with
+  read-only diagnostics). A passphrase is never pasted into a chat.
 
 ## At a glance
 ```mermaid
@@ -74,12 +74,14 @@ flowchart TB
 | `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
 | `saani comment <n> <kind> [--text T] [--field K=V ...] [--dry-run]` | Posts a status comment on issue `n` and applies the kind's label change (Status comments, below). |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. |
+| `saani auto pick [--json] [--limit N] [--only N ...]` | The issues an auto run may take now, in the run's order (milestone: versions ascending, then other named milestones alphabetically, then none; then the Type whose `[issues] types` prefix is `bug`; then the number; up to 500 open issues are read; `--only` takes just those numbers, before the overlap check), read from one `gh issue list` and each issue's At a glance table: `Auto` yes or partly (no table: eligible, flagged), not blocked, no needs-the-owner row, none of the `answer`, `act`, `idea`, `in_dev` or `in_main` labels, not already in a worktree ("already in a worktree") or on a worker branch ("has a worker branch"), and a Type from `[issues] types`. The others are listed with their reason (`no Type`, `blocked by #n` (the still-open blockers), `overlaps #m (path)`...). A `gh` failure stops it with gh's message, never an empty list; options `--json`, `--limit` and `--only` need `pick`, `--id` does not go with it. It also says the free slots (`[auto] parallel` less the issues in worktrees). `--json`: `{slots, parallel, running, eligible, skipped}`. A script, no model, changes nothing. |
 | `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
-| `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs the deployer (planned, issue #5); until it exists the command stops after the merge and exits 2. `--dry-run` checks and prints, merges nothing. |
+| `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs `saani deploy` (below). `--dry-run` checks and prints, merges nothing. |
+| `saani deploy [--dry-run]` | The deployer (below): CI green on the production head (a merge of a green commit counts), no issue in production since the prod tag whose Deploy row says not to deploy ("⛔", "Do not deploy"), the `[deploy]` checks and dry run, the deploy with a timeout, its log, the prod tag moved, `✔ Deployed` and the close on each `in-main` issue of the range. `--dry-run` stops after the dry run and prints the command (the key as `<key>`). |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
-| `saani guard` | The plugin's Claude Code hook before every tool call (below, The guard): JSON on stdin, a decision on stdout during an auto run, nothing otherwise. |
+| `saani guard` | The plugin's Claude Code hook before every tool call and after every Bash call (below, The guard): JSON on stdin, a decision on stdout during an auto run, nothing otherwise. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). `ci pr` also posts `In PR` on the issues the pull request names, `ci merged` posts `On main` on those it relabels. |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
 | `saani ui [--open] [--json]` | The local map and kanban page (below): one map for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
@@ -155,7 +157,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | The owner | at the keyboard | asleep or out |
 | Questions | allowed, one at a time, with a recommendation | none: a refused call is skipped and noted for the report |
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
-| Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
+| Deploy | the owner runs it (the Deployer prepares, the owner approves and taps) | never: the owner's "merge and deploy" does |
 | Permissions | Claude Code's own: it asks the owner | the guard (below): allow or refuse at once, never ask |
 
 The auto checklist is the plugin's skill (`skills/auto/SKILL.md`). An auto run ends with one green integration -> production pull request and a report; the owner then says **merge** or **merge and deploy** (`/saani:merge`, `/saani:merge --deploy`), the only way that pull request is merged by Saani: the run itself never merges.
@@ -243,6 +245,15 @@ A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Start
 `📦 In PR`, `🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the auto fit, what is deployed, what the owner is
 asked, what blocks the issue); the map and the auto run read it through that one parser.
 
+### An auto run
+An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM, at most 3). Each
+issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`, the coder (in the background, so several issues
+progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a time (the lock). The Architect asks `saani auto pick
+--json` whenever a slot is free and takes the first eligible issue, so an issue that lands is replaced at once and the list is never a
+stale one. Two issues whose likely files overlap (the paths the issue body names between backticks, against the files the running
+worktrees changed and the other picked issues) are not run side by side: the later one waits, and `pick` says "overlaps #m (path)". The
+check is best effort and narrow: only paths named between backticks count (a folder such as `docs/` does not; a bare `saani.toml` is the root file only), and there is no fallback on title words, so an issue that names no paths never waits on overlap. The slots are sized from the machine, not from the memory the running issues already use; a conflict at landing goes back to the coder of that issue. `saani kpis` gives the cost per issue, role and model.
+
 ### Status comments
 `saani comment <n> <kind>` writes a comment in the shape of `.github/COMMENT_KINDS.md` (heading, `--field KEY=VALUE` as a one-row table, `--text`
 as the body), posts it with `gh issue comment`, then applies the kind's label change with `gh issue edit` (labels from `[issues] labels`).
@@ -251,6 +262,60 @@ Kinds: `started`, `review`, `blocked`, `question` (adds the `answer` label, `hel
 unless `--no-comment`), `ci pr` (`In PR`, after the CI status is set, on the named issues that carry `in_dev`) and `ci merged` (`On main`,
 on the named issues that carry `in_main` or `in_dev`, whoever did the relabel), the last two once per pull request and issue. A comment that gh
 refuses is a warning, never an undone step.
+
+## Deploy
+`saani deploy` (`saani merge --deploy` runs it after the merge; the `saani:deployer` agent runs only its `--dry-run`, reads the logs and
+explains a failure: the main session, which sees the owner, runs the real deploy). Settings: `[deploy]` in saani.toml (docs/CONFIG.md).
+Each step is printed, the first failure stops with what to do next:
+1. CI: the production head (after `git fetch`) has the `[ci] status_context` status `success` and no failed or pending check run. A merge
+   commit without a status of its own (what `saani merge` leaves) counts when its tree equals a parent's tree and that parent has them: the
+   tested content is what goes live. Anything else is refused: open a new integration -> production pull request and merge it.
+2. The issues: every `refs #n` (also `refs #1, #2 and #3`) in `git log <prod tag>..origin/<production>`, open or closed, is read. One whose
+   At a glance Deploy row starts with "⛔", "Do not deploy" or "Don't deploy" (any case) refuses the deploy and is listed. "None", "No" and
+   "—" mean there is nothing to deploy and never block (the issue templates offer `None / <what to deploy> / ⛔ Do not deploy: <why>`).
+   No prod tag yet: a first deploy, so the open issues labelled `in-main` are read for the marker, and none is commented or closed.
+3. The `[deploy] checks` (each exits 0, e.g. disk space), then the `dry_run` command (empty: skipped). `{sha}` in these commands is the
+   commit checked.
+4. Production is fetched again and must still be that commit (else nothing is deployed). Then the deploy, with `timeout_minutes`: its output
+   is shown as it comes (an SSH agent's request to confirm presence reaches the owner) and written to
+   `build/saani-deploy-<UTC>.log` of the main checkout. A success is exit 0 and, when `log_ok` is set, a match of that regex in the output
+   (an invalid regex is refused before anything runs). A timeout or a failure moves nothing. Use `{sha}` in `command` so the server
+   deploys exactly the commit that was checked, not whatever it fetches.
+5. After a success: the prod tag moved to the deployed commit and pushed (`git push origin refs/tags/<prod_tag> --force`: the only force
+   push Saani does, for the moving tag and nothing else), then `### ✔ Deployed` (commit, log file name; once per commit) on each issue of
+   the range labelled `in-main`, and those issues closed as completed.
+
+An auto run never deploys: the owner's "merge and deploy" (or "deploy") does.
+
+**The owner's approval** is that word plus the tap of the SSH agent that holds the deploy key: no phone notification. The key's path is
+`[deploy] key`; Saani passes it through (`{key}` in the commands, shown as `<key>` when printed) and never reads its content. Each command
+that uses `{key}` may ask for its own tap.
+
+**The owner's side, once** (a sketch, to verify for your setup; Saani does none of it):
+- **Never use a bare forced command** (`command="deploy-prod"` and nothing else) with these settings: a forced command ignores what the
+  client asked, so every check and the dry run would run the real deploy. Force a gate script instead, which allows only the exact values of
+  `$SSH_ORIGINAL_COMMAND` and refuses the rest. In `authorized_keys`:
+  `command="/usr/local/bin/saani-gate",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA...`
+  and the gate:
+  ```sh
+  #!/bin/sh
+  # /usr/local/bin/saani-gate: the only things this key may ask for
+  set -fu
+  set -- $SSH_ORIGINAL_COMMAND          # split on purpose: every word is checked below
+  is_sha() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{40}$'; }
+  case "$*" in
+    "check-disk") exec /opt/webshop/bin/check-disk ;;
+    "deploy-prod --dry-run "*) [ $# -eq 3 ] && is_sha "$3" && exec /opt/webshop/bin/deploy-prod --dry-run "$3" ;;
+    "deploy-prod "*)           [ $# -eq 2 ] && is_sha "$2" && exec /opt/webshop/bin/deploy-prod "$2" ;;
+  esac
+  echo "refused" >&2
+  exit 1
+  ```
+- Better, two keys: the deploy key allows only `deploy-prod <sha>`; a second key, for the checks and the dry run (`checks` and `dry_run`
+  name its path directly, not `{key}`), allows only `check-disk` and `deploy-prod --dry-run <sha>`. A mistake in a check then cannot deploy.
+- The deploy key held by an agent that asks at each use (for example a hardware key that needs a touch, or an agent with confirm-on-use):
+  check that your agent really asks every time, and whether the tap can come from the phone or only from the PC.
+- A passphrase is never pasted into a chat.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),

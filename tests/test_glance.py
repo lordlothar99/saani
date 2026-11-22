@@ -47,3 +47,13 @@ def test_blocked_while_a_named_issue_is_open_or_the_date_is_ahead():
     dated = glance.parse("## At a glance\n| Field | Value |\n|---|---|\n| Blocked by | 2026-12-01 |\n")
     assert glance.is_blocked(dated, set(), "2026-11-22") and not glance.is_blocked(dated, set(), "2026-12-02")
     assert not glance.is_blocked({}, {1})
+
+
+def test_deploy_blocked_only_by_the_marker():
+    def body(v):
+        return "## At a glance\n| Field | Value |\n|---|---|\n| Deploy | " + v + " |\n"
+    for v in ("⛔ Do not deploy: migration first", "Do not deploy yet", "Don't deploy", "don’t deploy"):
+        assert glance.deploy_blocked(body(v)), v
+    for v in ("None", "No", "—", "restart the server", "Nothing"):
+        assert glance.deploy_blocked(body(v)) is None, v
+    assert glance.deploy_blocked("no table") is None
