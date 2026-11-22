@@ -24,10 +24,11 @@ invented project, also served locally at `/mock-state.json`).
 | `number`, `title`, `state`, `labels`, `milestone` | as GitHub | the issue |
 | `step` | string | `inbox`, `backlog`, `you`, `started`, `building`, `testing`, `landing`, `dev`, `pr`, `deploy`, `close`, `checks`, `done` |
 | `need` | `answer` \| `act` \| null | waits for the owner: the glowing ring |
-| `longrun` | `{fit, why, source}` or absent | `fit` is `yes`, `partly` or `no`, from the issue's At a glance table; absent: the page estimates it from the labels and says so |
+| `longrun` | `{fit, why, source}` or absent | `fit` is `yes`, `partly` or `no`, `source` is `table`: read from the issue's At a glance table (`saani/glance.py`); absent: the page estimates it from the labels and says so |
 | `worktree`, `agents`, `runs`, `prompt` | as `/api/state` | the panel's "Now" grid and the default prompt |
-| `detail` | `{summary, criteria[{done, text}], history[{when, kind, text}], url}` or absent | the panel's Context, Acceptance criteria and History (not in `/api/state` yet) |
-| `anchor` | bool | a tracking issue (live checks): drawn as a tall pillar |
+| `detail` | `{summary, criteria[{done, text}], history[{when, kind, text}], url}` or absent | the panel's Context, Acceptance criteria and History: not in `/api/state`, served on demand at `/api/issue?n=<number>` when a panel opens |
+| `blocked`, `blocked_by` | bool, issue numbers | the Blocked by row of the At a glance table names an open issue that is not on dev yet, or a date not yet come |
+| `anchor` | bool | a tracking issue (an `(epic)`, the live checks): drawn as a tall pillar |
 | `staged` | bool | sample only: moved by hand to show a zone |
 
 ## The rest
@@ -35,5 +36,7 @@ invented project, also served locally at `/mock-state.json`).
 |---|---|
 | `pr` | the open integration -> production pull request: `number`, `url`, `ci.state` (`green`, `red`, `running`, `stale`, `none`: the Watchtower's beacon), `inside` (issue numbers) |
 | `roster[]` | every subagent kind: `name`, `kind` (`defined`, `planned`, `built-in`), `model`, `what`, `file`, `runs`, `running[{description, issue?}]` |
+| `milestones[]` | the milestone strip: `title`, `open`, `closed`, `checks` (the number of its open "Live checks ..." issue, or null), `ready` (everything closed, something done) |
+| `hygiene[]` | the tidy-up strip, only the kinds that are not empty: `{kind, issues[]}`; `kind` is `closed_labelled` (closed, still labelled in-dev / in-main), `no_milestone` (open, not an idea) or `landed_unlabelled` (named by commits on the integration branch, no in-dev / in-main) |
 | `crew[]` | the Architect sessions: `session`, `name` (folder name only), `branch`, `model`, `state`, `age_min`, `issue` |
 | `sample` | sample only: `taken`, `note`, `staged` |

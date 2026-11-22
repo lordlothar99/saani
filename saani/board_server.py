@@ -42,7 +42,7 @@ import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import config, core, progress
+from . import config, core, glance, progress
 
 HERE = pathlib.Path(__file__).resolve().parent
 SAANI_PY = HERE.parent / "saani.py"
@@ -406,6 +406,19 @@ def pr_row(raw, titles, last_run=None):
             "contents": pr_contents(commits, titles)}
 
 
+def lifecycle(issue, open_numbers, today=None):
+    """What the issue's At a glance table adds to its card: the long-run fit (marked as read from the table), whether an open issue or a
+    date still blocks it, and whether it is a tracking issue (an epic, the live checks) drawn as an anchor, not a task."""
+    g = issue.get("glance") or {}
+    out = {"blocked": glance.is_blocked(g, open_numbers, today or datetime.date.today().isoformat()),
+           "anchor": bool(re.search(r"\(epic\)|^live checks", issue.get("title", ""), re.I))}
+    fit = (g.get("long_run") or {}).get("fit")
+    if fit:
+        out["longrun"] = {"fit": fit, "why": g["long_run"].get("why", ""), "source": "table"}
+    out["blocked_by"] = (g.get("blocked_by") or {}).get("issues", [])
+    return out
+
+
 def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
     """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
     by_number = {}
@@ -421,13 +434,16 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=())
         if n:
             crew.setdefault(n, []).append(s)
     columns = {key: [] for key, _, _ in COLUMNS}
+    landed = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
+    open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not landed & set(i.get("labels") or [])}
     for n, issue in by_number.items():
         w = trees.get(n)
         col = column_for(issue, w, testing, closing)
         if not col:
             continue
         need = need_of(issue.get("labels"))
-        columns[col].append({**issue, "worktree": w, "agents": crew.get(n, []), "need": need, "prompt": prompt_for(n, col, need),
+        columns[col].append({**issue, **lifecycle(issue, open_numbers), "worktree": w, "agents": crew.get(n, []), "need": need,
+                             "prompt": prompt_for(n, col, need),
                              "runs": [r for r in runs if w and r.get("checkout") == w["folder"]]})
     order = lambda c: (milestone_key(c.get("milestone")), c["number"])
     carried = {g["issue"] for g in (pr or {}).get("contents", []) if g.get("issue")}
@@ -644,9 +660,10 @@ def tests():
 
 
 def gh_issues(*filters):
-    rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt", timeout=60)
+    rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt,body", timeout=60)
     return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"),
-             "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title")}
+             "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title"),
+             "glance": glance.parse(r.get("body"))}                  # the body itself stays here: the panel asks for it on demand
             for r in json.loads(rows or "[]")]
 
 
@@ -663,6 +680,66 @@ def issues():
     lab = c.labels
     flagged = [i for i in got["open"] if set(i["labels"]) & {lab["in_dev"], lab["in_main"], lab["answer"], lab["act"]}]
     return {"board": got.get("assigned", []) + flagged + got["closed"], "open": got["open"], "closed": got["closed"]}
+
+
+def milestones(rows, open_issues):
+    """The milestone strip: per open milestone its open and closed issues, its live-checks issue (an open issue titled "Live checks ..."
+    in it) and whether it is ready to release (everything closed, something done). `rows` is GitHub's milestone list."""
+    out = []
+    for m in rows:
+        if m.get("state") != "open":
+            continue
+        title = m["title"]
+        checks = next((i["number"] for i in open_issues if i.get("milestone") == title and i["title"].lower().startswith("live checks")), None)
+        out.append({"title": title, "open": m["open_issues"], "closed": m["closed_issues"], "checks": checks,
+                    "ready": m["open_issues"] == 0 and m["closed_issues"] > 0})
+    return sorted(out, key=lambda m: milestone_key(m["title"]))
+
+
+def hygiene(open_issues, closed_issues, landed, labels):
+    """What needs tidying: [{kind, issues}] without the empty ones. closed_labelled: closed but still labelled in-dev / in-main;
+    no_milestone: open (not an idea) with no milestone; landed_unlabelled: commits between production and the integration branch name
+    them, yet they carry neither in-dev nor in-main."""
+    life = {labels["in_dev"], labels["in_main"]}
+    found = {
+        "closed_labelled": [i["number"] for i in closed_issues if life & set(i["labels"])],
+        "no_milestone": [i["number"] for i in open_issues if not i.get("milestone") and labels["idea"] not in i["labels"]],
+        "landed_unlabelled": [i["number"] for i in open_issues if i["number"] in landed and not life & set(i["labels"])],
+    }
+    return [{"kind": k, "issues": sorted(v)} for k, v in found.items() if v]
+
+
+def landed_refs():
+    """Issue numbers that commits between production and the integration branch name (`refs #n`)."""
+    c = cfg()
+    raw = run("git", "log", f"origin/{c.production}..origin/{c.integration}", "--format=%B", timeout=60)
+    return {int(n) for n in re.findall(r"refs #(\d+)", raw)}
+
+
+def issue_detail(body, comments, url):
+    """The panel's Context, Acceptance criteria and History from an issue's Markdown and its comments."""
+    def section(name):
+        m = re.search(r"^##\s*" + name + r"\s*$(.*?)(?=^##\s|\Z)", body or "", re.M | re.S | re.I)
+        return m.group(1).strip() if m else ""
+    criteria = [{"done": m.group(1).lower() == "x", "text": m.group(2).strip()}
+                for m in re.finditer(r"^\s*[-*]\s*\[( |x|X)\]\s*(.+)$", section("Acceptance criteria"), re.M)]
+    history = []
+    for c in comments or []:
+        text = (c.get("body") or "").strip()
+        head = re.match(r"^#{1,4}\s*(.+)", text)
+        history.append({"when": (c.get("createdAt") or "")[:10], "kind": head.group(1).strip()[:40] if head else "Comment",
+                        "text": (text[head.end():].strip() if head else text)[:300]})
+    return {"summary": section("Context")[:1500], "criteria": criteria, "history": history, "url": url}
+
+
+def issue_page(number):
+    raw = run("gh", "issue", "view", str(number), "--repo", cfg().repo, "--json", "body,comments,url", timeout=60)
+    got = json.loads(raw) if raw else {}
+    return issue_detail(got.get("body"), got.get("comments"), got.get("url"))
+
+
+def milestone_rows():
+    return json.loads(run("gh", "api", f"repos/{cfg().repo}/milestones?state=all&per_page=50", timeout=60) or "[]")
 
 
 PR_FIELDS = "number,title,url,isDraft,headRefOid,statusCheckRollup,commits,changedFiles,additions,deletions,mergeable,createdAt,comments"
@@ -740,12 +817,16 @@ def state():
     testing = testing_issues(trees, tst["runs"], int(m.group(2)) if m else None)
     titles = {i["number"]: i["title"] for i in iss.get("open", []) + iss.get("closed", [])}
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
+    strips = safe(lambda: cached("strips", 120, lambda: {
+        "milestones": milestones(milestone_rows(), iss.get("open", [])),
+        "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}), default={"milestones": [], "hygiene": []})
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],
+            "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
             "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
@@ -778,6 +859,10 @@ class Handler(BaseHTTPRequestHandler):
             body, kind = board_page().encode("utf-8"), "text/html; charset=utf-8"
         elif path in ("/mock-state.json", "/board/mock-state.json"):
             body, kind = MOCK_FILE.read_bytes(), "application/json"
+        elif path == "/api/issue":                           # one issue's context, criteria and history, asked for when its panel opens
+            number = (params.get("n") or [""])[0]
+            data = in_project(repo, lambda: issue_page(int(number))) if number.isdigit() else None
+            body, kind = (json.dumps(data) if data is not None else "").encode("utf-8"), "application/json"
         elif path == "/api/state":
             if "1" in params.get("fresh", []):               # the Refresh button: GitHub and the rest asked again now
                 with _lock:

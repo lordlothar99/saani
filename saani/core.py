@@ -577,8 +577,29 @@ def cmd_land(args):
             print(f"removed: {cwd} and the local branch {branch}")
         else:
             print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
-    print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
+    if args.no_comment or not mark_on_dev(m.group(2), landing_comment(row)):
+        print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
     return 0
+
+
+def landing_comment(row):
+    """The issue comment of a landing (.github/COMMENT_KINDS.md, `On dev`): the commit, how long it took, where it goes next."""
+    c = cfg()
+    tests = "tier 1 green" if c.tier1 else "no tier 1 configured"
+    return chr(10).join(["### ✅ On dev", "| Commit | Tests | Next |", "|---|---|---|",
+                      f"| {row['head']} | {tests}, landed in {row['seconds']} s | goes to {c.production} with the next pull request |"])
+
+
+def mark_on_dev(number, text):
+    """Comment the landing on the issue and add its in-dev label. True when both worked; False (nothing said, the caller prints the
+    manual step) when gh is missing or refuses: a landing is never undone by its bookkeeping."""
+    c = cfg()
+    steps = [["gh", "issue", "comment", str(number), "--repo", c.repo, "--body", text],
+             ["gh", "issue", "edit", str(number), "--repo", c.repo, "--add-label", c.labels.get("in_dev", "in-dev")]]
+    try:
+        return all(subprocess.run(s, cwd=c.root, capture_output=True, text=True, stdin=subprocess.DEVNULL).returncode == 0 for s in steps)
+    except OSError:
+        return False
 
 
 # ---------------------------------------------------------------- saani prune
@@ -694,6 +715,7 @@ def add_parsers(sub):
     p.add_argument("--wait", type=float, default=60, help="minutes to wait for the landing lock")
     p.add_argument("--dry-run", action="store_true", help="check and print the plan, change nothing")
     p.add_argument("--worktree", help="land this worktree instead of the current folder's (a long run cannot change folder)")
+    p.add_argument("--no-comment", action="store_true", help="do not comment the landing on the issue or label it in-dev (print the step instead)")
     p.set_defaults(run=cmd_land)
     p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue")
     p.set_defaults(run=cmd_status)

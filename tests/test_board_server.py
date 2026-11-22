@@ -513,3 +513,83 @@ def test_both_pages_keep_the_project_in_their_address_and_show_the_waiting_dot()
         assert "location.hash.slice(1)" in source and "history.replaceState(null" in source
         assert 'p.waiting?"●"' in flat.replace("●", "●") or "p.waiting?\"●" in flat
         assert 'localStorage.setItem("saani-project"' in source and "status===404" in flat
+
+
+GLANCE = {"long_run": {"fit": "partly", "why": "the data model yes"}, "blocked_by": {"issues": [13], "date": None, "text": "#13"}}
+
+
+def test_a_card_carries_what_its_at_a_glance_table_says():
+    """the long-run fit read from the table (source: table), blocked while a named issue is open and not yet on dev, an epic is an anchor."""
+    issue = {"number": 14, "title": "Board data", "labels": [], "state": "OPEN", "glance": GLANCE}
+    assert fp.lifecycle(issue, {13, 14}) == {"blocked": True, "anchor": False, "blocked_by": [13],
+                                            "longrun": {"fit": "partly", "why": "the data model yes", "source": "table"}}
+    assert fp.lifecycle(issue, {14})["blocked"] is False
+    assert fp.lifecycle({"title": "Saani v1 (epic)"}, set())["anchor"] and fp.lifecycle({"title": "Live checks v0.1"}, set())["anchor"]
+    assert "longrun" not in fp.lifecycle({"title": "x"}, set())
+    blocker = {"number": 13, "title": "b", "labels": ["in-dev"], "state": "OPEN"}                 # landed on dev: it blocks no more
+    board = {c["id"]: c for c in fp.build_board([blocker, issue], [], set(), [], [])}
+    assert [(c["number"], c["blocked"]) for c in board["dev"]["cards"] + board["ready"]["cards"]] == [(13, False), (14, False)]
+
+
+def test_the_milestone_strip_counts_and_says_when_a_milestone_is_ready_to_release():
+    rows = [{"title": "v0.2.0", "state": "open", "open_issues": 0, "closed_issues": 4}, {"title": "v0.1.0", "state": "open", "open_issues": 2, "closed_issues": 1},
+            {"title": "v0.0.9", "state": "closed", "open_issues": 0, "closed_issues": 9}, {"title": "v1.0.0", "state": "open", "open_issues": 0, "closed_issues": 0}]
+    got = fp.milestones(rows, [{"number": 30, "title": "Live checks v0.1.0", "milestone": "v0.1.0"}])
+    assert [m["title"] for m in got] == ["v0.1.0", "v0.2.0", "v1.0.0"]
+    assert got[0] == {"title": "v0.1.0", "open": 2, "closed": 1, "checks": 30, "ready": False}
+    assert got[1]["ready"] and not got[2]["ready"]                                                 # nothing done yet is not ready
+
+
+def test_the_hygiene_strip_lists_only_what_needs_tidying():
+    lab = {"in_dev": "in-dev", "in_main": "in-main", "idea": "idea"}
+    open_ = [{"number": 1, "labels": [], "milestone": None}, {"number": 2, "labels": ["idea"], "milestone": None},
+             {"number": 3, "labels": [], "milestone": "v1"}, {"number": 4, "labels": ["in-dev"], "milestone": "v1"}]
+    closed = [{"number": 7, "labels": ["in-main"]}, {"number": 8, "labels": []}]
+    assert fp.hygiene(open_, closed, {3, 4}, lab) == [{"kind": "closed_labelled", "issues": [7]}, {"kind": "no_milestone", "issues": [1]},
+                                                       {"kind": "landed_unlabelled", "issues": [3]}]
+    assert fp.hygiene([], [], set(), lab) == []
+
+
+def test_an_issues_context_criteria_and_history_are_read_from_its_markdown():
+    body = "## Context\n- why\n\n## Acceptance criteria\n- [x] one\n- [ ] two **bold**\n\n## Scope\n- [ ] not a criterion\n"
+    comments = [{"createdAt": "2026-11-22T10:00:00Z", "body": "### ✅ On dev\n| Commit |\n|---|"}, {"createdAt": "2026-11-23T10:00:00Z", "body": "just words"}]
+    got = fp.issue_detail(body, comments, "https://github.com/acme/webshop/issues/9")
+    assert got["summary"] == "- why" and got["url"].endswith("/9")
+    assert got["criteria"] == [{"done": True, "text": "one"}, {"done": False, "text": "two **bold**"}]
+    assert got["history"] == [{"when": "2026-11-22", "kind": "✅ On dev", "text": "| Commit |\n|---|"}, {"when": "2026-11-23", "kind": "Comment", "text": "just words"}]
+    assert fp.issue_detail(None, None, None) == {"summary": "", "criteria": [], "history": [], "url": None}
+
+
+def test_the_issue_detail_is_served_on_demand_and_the_board_asks_for_it(monkeypatch):
+    monkeypatch.setattr(fp, "issue_page", lambda n: {"summary": f"about {n}", "criteria": [], "history": [], "url": None})
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        assert json.loads(urllib.request.urlopen(base + "/api/issue?n=14").read())["summary"] == "about 14"
+        for bad in ("/api/issue", "/api/issue?n=x"):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + bad)
+            assert e.value.code == 404
+    finally:
+        server.shutdown()
+    page = fp.BOARD_FILE.read_text(encoding="utf-8")
+    assert '"/api/issue?n="' in page and "DETAILS[c.number]" in page and "DATA.milestones" in page and "DATA.hygiene" in page
+
+
+def test_landing_comments_the_issue_and_labels_it_and_says_so_when_gh_refuses(monkeypatch):
+    """the On dev comment (commit, tests, what next) and the in-dev label; a refusal leaves the manual step, never an undone landing."""
+    from saani import core
+    calls = []
+    monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 0})())
+    text = core.landing_comment({"head": "abc1234", "seconds": 18})
+    assert text.splitlines()[0] == "### ✅ On dev" and "abc1234" in text and "18 s" in text and "with the next pull request" in text
+    assert core.mark_on_dev("14", text) is True
+    assert calls[0][:4] == ["gh", "issue", "comment", "14"] and calls[1][:4] == ["gh", "issue", "edit", "14"] and calls[1][-2:] == ["--add-label", "in-dev"]
+    monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 1})())
+    assert core.mark_on_dev("14", text) is False
+
+    def missing(cmd, **k):
+        raise FileNotFoundError("gh")
+    monkeypatch.setattr(core.subprocess, "run", missing)
+    assert core.mark_on_dev("14", text) is False
