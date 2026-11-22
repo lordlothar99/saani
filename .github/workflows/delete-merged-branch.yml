@@ -1,0 +1,26 @@
+# Deletes the head branch of a pull request merged into production (main), except the long-lived ones.
+# Replaces GitHub's "Automatically delete head branches", which would also delete `dev` after every
+# dev -> main pull request. `saani prune` covers what is left (docs/SAANI.md).
+name: delete-merged-branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(fromJSON('["main", "master", "dev"]'), github.event.pull_request.head.ref)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the head branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/${BRANCH}"
