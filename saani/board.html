@@ -28,6 +28,8 @@ body{background:var(--night);color:var(--bone);font:15px/1.5 var(--body);overflo
 .brand small{display:block;font:500 10px/1 var(--mono);letter-spacing:.4em;color:var(--sand);opacity:.85}
 .brand h1{margin:8px 0 6px;font:400 19px/1 var(--display);letter-spacing:.36em;text-transform:uppercase}
 .brand .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font:500 11px/1 var(--mono);color:var(--dust)}
+.brand .title-row{display:flex;align-items:center;gap:14px}
+.brand .title-row .btn{padding:6px 8px;font-size:10px}
 .badge{padding:5px 8px;border:1px solid var(--edge-hi);letter-spacing:.08em;text-transform:uppercase;font-size:10px}
 .badge.sample{color:var(--night);background:var(--amber);border-color:var(--amber)}
 .badge.live{color:var(--ok);border-color:var(--ok)}
@@ -140,6 +142,15 @@ a{color:var(--amber)}
 .smoke{transform-box:fill-box;transform-origin:center;animation:smoke 3.3s ease-out infinite;opacity:0}
 @keyframes smoke{0%{transform:translate(0,0) scale(.6);opacity:.55}100%{transform:translate(14px,-46px) scale(2.4);opacity:0}}
 @media (prefers-reduced-motion:reduce){.ring,.spark,.swirl,.wing,.bob,.halo,.beacon,.smoke{animation:none}}
+.moving .hud{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--slab-hi)}
+.dust{animation:dust .5s ease-out infinite}
+.cargo .lbl{font:500 10px var(--mono);fill:var(--bone)}
+@keyframes dust{from{opacity:.35;transform:translateX(0)}to{opacity:0;transform:translateX(-10px)}}
+.moving #map *{animation-play-state:paused!important}
+#decoimg{display:none}
+#map{-webkit-user-select:none;user-select:none}
+.moving #ground.cached #deco{display:none}
+.moving #ground.cached #decoimg{display:inline}
 @media (max-width:760px){
  .brand{padding:9px 12px}.brand h1{font-size:14px}
  .summary{top:auto;bottom:calc(70px + env(safe-area-inset-bottom,0px));max-width:200px}
@@ -162,13 +173,12 @@ a{color:var(--amber)}
  <radialGradient id="g-glow"><stop offset="0" stop-color="var(--amber)" stop-opacity=".55"/><stop offset="1" stop-color="var(--amber)" stop-opacity="0"/></radialGradient>
 </defs><g id="world"><g id="ground"></g><g id="things"></g><g id="air"></g></g></svg></div>
 
-<div class="hud brand"><small>Software factory</small><h1>Saani</h1><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
+<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
 
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
  <select id="ms" aria-label="Milestone"><option value="">All milestones</option></select>
  <select id="lr" aria-label="Long run"><option value="">Long run: any</option><option value="yes">Long run: yes</option><option value="partly">Long run: partly</option><option value="no">Long run: no</option></select>
- <button id="demo" class="btn" type="button" hidden>Demo traffic: on</button>
 </div>
 
 <div class="hud summary" id="summary" aria-label="At a glance"></div>
@@ -239,6 +249,18 @@ function flyerSVG(scale = 1) {   // an original winged flyer: a capsule body wit
     `<ellipse class="wing" cx="${-11 * s}" cy="${4 * s}" rx="${11 * s}" ry="${3 * s}" fill="${C.ridge}" opacity=".45" style="animation-delay:.08s"/><ellipse class="wing" cx="${11 * s}" cy="${4 * s}" rx="${11 * s}" ry="${3 * s}" fill="${C.ridge}" opacity=".45" style="animation-delay:.08s"/>` +
     `<path d="M${-6 * s} ${-8 * s}Q0 ${-14 * s} ${6 * s} ${-8 * s}L${5 * s} ${10 * s}Q0 ${13 * s} ${-5 * s} ${10 * s}Z" fill="${shade(C.rock, 1.35)}" stroke="${C["rock-lo"]}" stroke-width=".8"/>` +
     `<ellipse cx="0" cy="${-6 * s}" rx="${3.2 * s}" ry="${2.4 * s}" fill="${C.water}" opacity=".8"/></g>`;
+}
+function haulerSVG() {            // an original desert hauler: an armoured cab on a short flatbed with six balloon wheels, for short hops
+  const body = shade(C.rock, 1.18), dark = shade(C.rock, .55), mid = shade(C.rock, .82);
+  return `<g><ellipse cx="0" cy="3" rx="34" ry="7" fill="#000" opacity=".2"/>` +
+    `<circle class="dust" cx="-44" cy="-3" r="7" fill="${C.sand}" opacity=".3"/><circle class="dust" cx="-55" cy="-7" r="5" fill="${C.sand}" opacity=".18" style="animation-delay:.25s"/>` +
+    `<rect x="-31" y="-12" width="62" height="7" rx="1.5" fill="${dark}"/>` +
+    `<polygon points="-31,-17 6,-17 6,-12 -31,-12" fill="${mid}"/><polygon points="-31,-17 -28,-21 -26,-17" fill="${dark}"/>` +
+    `<polygon points="8,-12 8,-28 18,-31 32,-20 32,-12" fill="${body}" stroke="${dark}" stroke-width=".8"/>` +
+    `<polygon points="17,-28.5 28,-20 26,-18 16,-25" fill="#1a110b"/>` +
+    `<line x1="11" y1="-25" x2="11" y2="-14" stroke="${dark}" stroke-width="1"/><line x1="14" y1="-27" x2="14" y2="-14" stroke="${dark}" stroke-width="1"/>` +
+    `<rect x="9" y="-38" width="3" height="10" fill="${dark}"/><rect x="8" y="-39" width="5" height="2" fill="${dark}"/>` +
+    [-23, -9, 23].map(x => `<circle cx="${x}" cy="-4" r="6.5" fill="#2a1a10"/><circle cx="${x}" cy="-4" r="2.4" fill="${mid}"/>`).join("") + `</g>`;
 }
 function crawlerSVG() {           // an original sand crawler: a long hull on tracks
   return `<g><ellipse cx="0" cy="8" rx="30" ry="9" fill="#000" opacity=".18"/>` +
@@ -338,21 +360,29 @@ function arch(x, y, span, h) {
 // ------------------------------------------------------------------ the zones: one per step, laid out as a pipeline from START (left) to END (right)
 // Flow runs along x (screen: left and up to right and down); branches spread along y. The road graph (EDGES) shows every move an issue can make.
 const ZONES = [
-  {id: "gate",    stage: "Start",           name: "The Gate",          cx: 2.5, cy: 20, r: 4, hint: "Where issues enter: a new issue on GitHub."},
-  {id: "inbox",   stage: "Inbox",           name: "Wayfarers' Tents",  cx: 11,  cy: 20, hint: "New issues waiting for triage: Type, milestone, labels."},
-  {id: "backlog", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 20, hint: "Open and not started: in a milestone, nobody on it yet."},
-  {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 6,  hint: "Waits for your answer or your action. Work comes here from the backlog or from the workshops, and goes back."},
-  {id: "works",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 20, hint: "Started or being built in its own worktree."},
-  {id: "camp",    stage: "Camp",            name: "The Hollow",        cx: 46,  cy: 35, hint: "Where workers rest when they are not on a task."},
-  {id: "proving", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 20, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
-  {id: "depot",   stage: "Integrated",          name: "Caravan Depot",     cx: 70,  cy: 20, hint: "Merged on the integration branch, waiting for the next pull request into production."},
-  {id: "tower",   stage: "Release PR",      name: "The Watchtower",    cx: 82,  cy: 20, hint: "Carried by the open integration into production pull request. The beacon is its CI; red goes back to dev."},
-  {id: "pad",     stage: "To deploy",       name: "Launch Pad",        cx: 95,  cy: 9,  hint: "Released with something to deploy: goes live with the next deploy."},
-  {id: "archive", stage: "To close",        name: "The Archive",       cx: 95,  cy: 32, hint: "Released with nothing to deploy (tooling, docs, tests): close it."},
+  {id: "inbox",   stage: "Inbox",           name: "Wayfarers' Tents",  cx: 11,  cy: 15, hint: "New issues waiting for triage: Type, milestone, labels."},
+  {id: "backlog", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 24, hint: "Open and not started: in a milestone, nobody on it yet."},
+  {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 7,  hint: "Waits for your answer or your action. Work comes here from the backlog or from the workshops, and goes back."},
+  {id: "works",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 17, hint: "Started or being built in its own worktree."},
+  {id: "camp",    stage: "Camp",            name: "The Hollow",        cx: 47,  cy: 36, hint: "Where workers rest when they are not on a task."},
+  {id: "proving", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
+  {id: "depot",   stage: "Integrated",          name: "Caravan Depot",     cx: 70,  cy: 17, hint: "Merged on {int}, waiting for the next release pull request into {prod}."},
+  {id: "tower",   stage: "Release PR",      name: "The Watchtower",    cx: 82,  cy: 25, hint: "Carried by the open release pull request ({int} → {prod}). The beacon is its CI; red goes back to {int}."},
+  {id: "pad",     stage: "To deploy",       name: "Launch Pad",        cx: 95,  cy: 14,  hint: "Released with something to deploy: goes live with the next deploy."},
+  {id: "archive", stage: "To close",        name: "The Archive",       cx: 100, cy: 34, hint: "Released with nothing to deploy (tooling, docs, tests): close it."},
   {id: "outpost", stage: "Live checks",     name: "Far Outpost",       cx: 107, cy: 9,  hint: "Deployed: the checklist of the live system waits for you."},
-  {id: "citadel", stage: "End · Done",      name: "The Citadel",       cx: 116, cy: 22, r: 7, hint: "Closed: deployed and verified, closed after merge, or not planned. Last 7 days."},
+  {id: "citadel", stage: "End · Done",      name: "The Citadel",       cx: 116, cy: 23, r: 7, hint: "Closed: deployed and verified, closed after merge, or not planned. Last 7 days."},
 ];
-const BOARD_W = 45, BOARD_D = 150;                       // after the turn below: x across the flow, y along it
+// The owner, 2026-11-22: a wider landscape (length about 1.8 times the width), areas sized by how many issues they usually hold,
+// more room between Council Rock and the Workshops. Each zone: [flow, across, size]; size is the half-side of its sand patch.
+const PLACE = {
+  inbox: [10, 14, 5], backlog: [26, 32, 8], you: [34, 60, 6.5], works: [46, 16, 5.5], camp: [68, 5, 5],
+  proving: [60, 36, 4.8], depot: [72, 58, 5], tower: [86, 38, 5], pad: [99, 18, 4.5], outpost: [114, 10, 4.5], archive: [99, 60, 4.8], citadel: [114, 40, 8.5],
+};
+ZONES.forEach(z => { const p = PLACE[z.id]; if (p) [z.cx, z.cy, z.s] = p; });
+const SIZE = z => z.s || z.r || 5.6;                     // the sand patch
+const NATIVE = z => z.r || 5.6;                          // the size its buildings were drawn for
+const BOARD_W = 70, BOARD_D = 126;                       // after the turn below: x across the flow, y along it
 const ZONE = Object.fromEntries(ZONES.map(z => [z.id, z]));
 const STEP_ZONE = {inbox: "inbox", backlog: "backlog", you: "you", started: "works", building: "works", testing: "proving", landing: "proving",
                    dev: "depot", pr: "tower", deploy: "pad", close: "archive", checks: "outpost", done: "citadel"};
@@ -374,30 +404,26 @@ function typeOf(c) {
 const typeInfo = c => TYPE[typeOf(c)] || TYPE_NONE;
 // every move an issue can make: main road, branches, the way back, and the side tracks
 const EDGES = [
-  {k: "main", pts: [[2.5, 20], [11, 20], [28, 20], [46, 20], [58, 20], [70, 20], [82, 20]]},
-  {k: "main", pts: [[82, 20], [88.5, 20], [88.5, 9], [95, 9], [107, 9], [107, 22], [116, 22]], label: "deploy", at: 1},
-  {k: "main", pts: [[82, 20], [88.5, 20], [88.5, 32], [95, 32], [113, 32], [113, 27]], label: "nothing to deploy", at: 2},
-  {k: "you", pts: [[28, 20], [28, 6], [37, 6]], label: "needs you", at: 1},
-  {k: "you", pts: [[37, 6], [46, 6], [46, 20]], label: "answered", at: 1},
-  {k: "back", pts: [[58, 14.2], [52, 14.2], [46, 14.2]], label: "tests failed", at: 1},
-  {k: "back", pts: [[82, 14.2], [76, 14.2], [70, 14.2]], label: "CI red", at: 1},
-  {k: "hot", pts: [[46, 26.6], [64, 26.6], [82, 26.6]], label: "hotfix", at: 1},
-  {k: "side", pts: [[28, 25], [28, 43], [70, 43], [118, 43], [118, 29.5]], label: "closed, not planned", at: 2},
-  {k: "camp", pts: [[46, 25], [46, 30]]},
+  // The owner, 2026-11-22: a natural, scattered layout; the road winds from zone to zone. After the Watchtower it forks: something to
+  // deploy goes Launch Pad > Far Outpost > Citadel, nothing to deploy goes Archive > Citadel. Pad and Archive are alternatives, not steps.
+  {k: "main", pts: [[4, 12], [10, 14], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [80, 48], [86, 38]]},
+  {k: "main", pts: [[86, 38], [92, 28], [99, 18], [107, 13], [114, 10], [116, 24], [114, 40]], label: "deploy", at: 0},
+  {k: "main", pts: [[86, 38], [92, 50], [99, 60], [106, 54], [110, 47]], label: "nothing to deploy", at: 0},
+  // The owner, 2026-11-22: no trails for the moves to and from Council Rock, the way back (tests failed, CI red) or the hotfix: they are static and add noise.
+  {k: "side", pts: [[30, 38], [34, 69], [90, 69], [118, 69], [120, 49]], label: "closed, not planned", at: 1},
+  {k: "camp", pts: [[50, 14], [63, 8]]},
+  {k: "trail", pts: [[28, 38], [31, 50], [34, 55]]},
+  {k: "trail", pts: [[37, 55], [43, 40], [46, 22]]},
+  {k: "trail", pts: [[102, 21], [108, 31], [111, 37]]},
 ];
 
 function buildZone(z) {
-  const {cx, cy} = z, r = z.r || 5.6; let s = "";
-  if (z.id !== "gate") s += `<polygon points="${P([iso(cx - r, cy - r), iso(cx + r, cy - r), iso(cx + r, cy + r), iso(cx - r, cy + r)])}" fill="#7d5636" opacity=".22"/>` +
+  const {cx, cy} = z, r = SIZE(z); let s = "";
+  s += `<polygon points="${P([iso(cx - r, cy - r), iso(cx + r, cy - r), iso(cx + r, cy + r), iso(cx - r, cy + r)])}" fill="#7d5636" opacity=".22"/>` +
        `<polygon points="${P([iso(cx - r, cy - r), iso(cx + r, cy - r), iso(cx + r, cy + r), iso(cx - r, cy + r)])}" fill="none" stroke="${C.ridge}" stroke-opacity=".3" stroke-width="1.2" stroke-dasharray="7 5"/>`;
   const B = []; const add = (depth, svg) => B.push([depth, svg]);
   seed = 100 + cx * 7 + cy;
   switch (z.id) {
-    case "gate": {
-      const [px, py] = iso(cx - 2, cy - 2.4);
-      add(0, `<ellipse cx="${px}" cy="${py}" rx="58" ry="26" fill="#3c6f7a"/><ellipse cx="${px - 10}" cy="${py - 6}" rx="26" ry="9" fill="#7fb8cc" opacity=".45"/>`);
-      add(1, palm(cx - 3.6, cy - 3.4, 2.4)); add(1.2, palm(cx + 2.8, cy - 3.2, 2)); add(1.4, palm(cx - 3.4, cy - .6, 1.8));
-      add(2, arch(cx, cy - 1.2, 3.4, 2.4)); add(3, lamp(cx - 2.6, cy + 1.4)); add(3, lamp(cx + 2.6, cy + 1.4)); break; }
     case "inbox":
       add(0, stripedTent(cx - 5, cy - 5, 2.6, 2.6, 2.1, "#c9a77a")); add(1, stripedTent(cx - 1.8, cy - 5.4, 3.2, 2.8, 2.6, "#b7895a")); add(2, stripedTent(cx + 2, cy - 4.8, 2.6, 2.6, 2, "#d3b48a"));
       add(3, brazier(cx - .2, cy - 1.6)); add(3, crates(cx + 4, cy - 2, 4)); add(3, banner(cx - 5.2, cy - 1.8, 2, C.water)); add(3.5, barrels(cx - 4.6, cy - 1.4, 3)); break;
@@ -461,12 +487,14 @@ function buildZone(z) {
       for (const [ax, h] of [[cx - 3.4, 1.4], [cx + 1.6, 1.6]]) { const a = iso(ax, cy - 2), b = iso(ax + 1, cy - 2); add(1.5, `<path d="M${a[0]} ${a[1]}L${a[0]} ${a[1] - h * TH * .6}Q${(a[0] + b[0]) / 2} ${a[1] - h * TH} ${b[0]} ${b[1] - h * TH * .6}L${b[0]} ${b[1]}Z" fill="#1c110a"/><path d="M${a[0] + 4} ${a[1]}Q${(a[0] + b[0]) / 2} ${a[1] - 10} ${b[0] - 4} ${b[1]}" fill="${LIT}" opacity=".35"/>`); }
       add(2, brazier(cx, cy - .6)); add(2.5, stripedTent(cx + 3, cy - 1.4, 1.8, 1.8, 1.4, "#b7895a")); break;
   }
-  B.sort((a, b) => a[0] - b[0]); s += B.map(b => b[1]).join("");
+  // buildings keep their drawn size in a big patch (grown by half the difference) and shrink to fit a small one
+  const q = r / NATIVE(z), k = q < 1 ? q : 1 + (q - 1) * .5, [X0, Y0] = iso(cx, cy);
+  B.sort((a, b) => a[0] - b[0]); s += `<g transform="translate(${X0.toFixed(1)},${Y0.toFixed(1)}) scale(${k.toFixed(3)}) translate(${(-X0).toFixed(1)},${(-Y0).toFixed(1)})">` + B.map(b => b[1]).join("") + "</g>";
   return s;
 }
 function plaque(z, count) {
   // a sign on a post above the zone's back corner: it stands over its own zone, never between two
-  const r = z.r || 5.6, [x, y] = iso(z.cx - r, z.cy - r);
+  const r = SIZE(z), [x, y] = iso(z.cx - r, z.cy - r);
   const w = Math.max(z.name.length * 11.5 + (count != null ? 56 : 24), 150), top = y - 78;
   return `<line x1="${x}" y1="${y}" x2="${x}" y2="${top + 40}" stroke="${C.ridge}" stroke-opacity=".55" stroke-width="1.5"/><circle cx="${x}" cy="${y}" r="3" fill="${C.ridge}" opacity=".7"/>` +
          `<g class="plaque" data-zone="${z.id}" tabindex="0" transform="translate(${x - w / 2},${top})"><rect width="${w}" height="40" fill="rgba(20,13,8,.85)" stroke="${C.ridge}" stroke-opacity=".45"/>` +
@@ -474,17 +502,47 @@ function plaque(z, count) {
 }
 
 // ------------------------------------------------------------------ the ground: board, dunes, roads with their direction, zones (drawn once)
+function smooth(pts) {
+  // a Catmull-Rom curve through the road's points, sampled every ~8 px, so the roads bend instead of turning at corners
+  if (pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const n = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 8));
+    for (let k = 1; k <= n; k++) { const t = k / n, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1].map(j => .5 * (2 * p1[j] + (p2[j] - p0[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (3 * p1[j] - p0[j] - 3 * p2[j] + p3[j]) * t3))); }
+  }
+  return out;
+}
 function chevrons(pts, every, color) {
-  let s = "";
+  // evenly spaced along the whole road, each turned to the road's direction at that point
+  let s = "", next = every / 2, acc = 0;
   for (let i = 0; i < pts.length - 1; i++) {
     const a = pts[i], b = pts[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
-    for (let t = every / 2; t < L; t += every) { const x = a[0] + (b[0] - a[0]) * t / L, y = a[1] + (b[1] - a[1]) * t / L; s += `<path d="M-6 -5L2 0L-6 5" transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${ang.toFixed(1)})" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`; }
+    while (L > 0 && next <= acc + L) { const t = (next - acc) / L, x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; s += `<path d="M-6 -5L2 0L-6 5" transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${ang.toFixed(1)})" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`; next += every; }
+    acc += L;
   }
   return s;
 }
 function edgeLabel(pts, i, text, color) {
   const a = pts[i], b = pts[i + 1] || a, m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   return `<text x="${m[0]}" y="${m[1] - 12}" text-anchor="middle" class="edgetxt" fill="${color}">${esc(text)}</text>`;
+}
+let DECO = null;
+function cacheDeco() {
+  // rasterise the sand texture once (at most ~12 megapixels) into a PNG; until it is ready, or if the browser refuses, the vectors stay
+  if (!DECO) return;
+  const res = Math.min(.5, Math.sqrt(14e6 / (DECO.w * DECO.h))), cw = Math.round(DECO.w * res), ch = Math.round(DECO.h * res);
+  const style = `<style>.edgetxt{font:500 11px ui-monospace,Consolas,monospace;letter-spacing:.08em;paint-order:stroke;stroke:rgba(20,13,8,.75);stroke-width:4px}.signtxt{font:400 10px sans-serif;letter-spacing:.3em;fill:${C.amber}}.smoke{opacity:0}</style>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${DECO.x} ${DECO.y} ${DECO.w} ${DECO.h}" width="${cw}" height="${ch}" preserveAspectRatio="none">${style}${DECO.svg}</svg>`;
+  const im = new Image();
+  im.onload = () => {
+    try {
+      const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch; cv.getContext("2d").drawImage(im, 0, 0, cw, ch);
+      const el = $("#decoimg"); if (!el) return; el.setAttribute("href", cv.toDataURL("image/png")); $("#ground").classList.add("cached");
+    } catch (e) { /* a tainted canvas: keep the vectors */ }
+  };
+  im.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
 function drawGround() {
   const g = [], W = BOARD_W, D = BOARD_D;
@@ -493,45 +551,71 @@ function drawGround() {
   const M = 320, mid = iso(W / 2, D / 2);
   g.push(`<defs><radialGradient id="g-desert" gradientUnits="userSpaceOnUse" cx="${mid[0]}" cy="${mid[1]}" r="${(D + 110) * TW / 2}"><stop offset="0" stop-color="${C.sand}"/><stop offset=".5" stop-color="${C["sand-lo"]}"/><stop offset="1" stop-color="#6e4628"/></radialGradient></defs>`);
   g.push(`<polygon points="${P([iso(-M, -M), iso(W + M, -M), iso(W + M, D + M), iso(-M, D + M)])}" fill="url(#g-desert)"/>`);
+  // The owner, 2026-11-22: no visible board edge. Light sand where the buildings stand, fading through an oval (drawn in board
+  // coordinates, so it follows the board's shape on screen) into the desert; widened on the left so the Hollow has sand around it.
+  const LX = W / 2 - 5, LY = D / 2, AX = W / 2 + 24, AY = D / 2 + 42, LIGHT = "#dfbb88";
+  g.push(`<defs><radialGradient id="g-light" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(${TW / 2},${TH / 2},${-TW / 2},${TH / 2},0,0) translate(${LX},${LY}) scale(${AX},${AY})">` +
+         `<stop offset="0" stop-color="${LIGHT}"/><stop offset=".64" stop-color="${LIGHT}"/><stop offset=".84" stop-color="${C.sand}" stop-opacity=".85"/><stop offset="1" stop-color="${C.sand}" stop-opacity="0"/></radialGradient></defs>`);
+  g.push(`<polygon points="${P([iso(LX - AX, LY - AY), iso(LX + AX, LY - AY), iso(LX + AX, LY + AY), iso(LX - AX, LY + AY)])}" fill="url(#g-light)"/>`);
+  const decoStart = g.length;                            // from here to the roads: ripples, dunes and rocks, also cached as a bitmap below
   seed = 7;
   const near = (x, y, pad) => x > -pad && x < W + pad && y > -pad && y < D + pad;
-  const crest = (x, y, L, k, sw, op) => { const a = iso(x - L, y + L * .3), b = iso(x + L, y - L * .3), m = iso(x, y, k), d = `M${a[0].toFixed(1)} ${a[1].toFixed(1)}Q${m[0].toFixed(1)} ${m[1].toFixed(1)} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`;
-    return `<path d="${d}" fill="none" stroke="${C.hollow}" stroke-opacity="${(op * .65).toFixed(2)}" stroke-width="${sw * 2.5}" transform="translate(2,${sw * 2})"/><path d="${d}" fill="none" stroke="${C.ridge}" stroke-opacity="${op}" stroke-width="${sw}"/>`; };
-  for (let i = 0; i < 420; i++) { const x = -150 + rnd() * (W + 300), y = -150 + rnd() * (D + 300); if (!near(x, y, 16)) g.push(crest(x, y, 6 + rnd() * 9, 1.5 + rnd() * 2, 3, .3)); }
-  for (let i = 0; i < 1500; i++) { const x = -38 + rnd() * (W + 76), y = -38 + rnd() * (D + 76); if (!near(x, y, 4)) g.push(crest(x, y, 1.2 + rnd() * 3, .5 + rnd() * .9, 2, .5)); }
-  for (let i = 0; i < 80; i++) { const x = -30 + rnd() * (W + 60), y = -30 + rnd() * (D + 60); if (!near(x, y, 5)) g.push(rock(x, y, .6 + rnd() * 1.6, .3 + rnd() * 1)); }
-  // the board lies flush with the desert: no rim, no faces
-  g.push(`<polygon points="${P([c0, c1, c2, c3])}" fill="url(#g-sand)"/>`);
+  // ripples are gathered into one shadow path and one lit path per style (a handful of SVG elements instead of thousands), so panning stays smooth
+  let RIP = {};
+  const crest = (x, y, L, k, sw, op) => { const a = iso(x - L, y + L * .3), b = iso(x + L, y - L * .3), m = iso(x, y, k);
+    (RIP[sw + "|" + op] ||= {sw, op, d: []}).d.push(`M${a[0].toFixed(1)} ${a[1].toFixed(1)}Q${m[0].toFixed(1)} ${m[1].toFixed(1)} ${b[0].toFixed(1)} ${b[1].toFixed(1)}`); return ""; };
+  const flushRipples = () => { for (const {sw, op, d} of Object.values(RIP)) { const all = d.join("");
+    g.push(`<path d="${all}" fill="none" stroke="${C.hollow}" stroke-opacity="${(op * .65).toFixed(2)}" stroke-width="${sw * 2.5}" transform="translate(2,${sw * 2})"/><path d="${all}" fill="none" stroke="${C.ridge}" stroke-opacity="${op}" stroke-width="${sw}"/>`); } RIP = {}; };
+  for (let i = 0; i < 200; i++) { const x = -40 + rnd() * (W + 80), y = -40 + rnd() * (D + 80); if (!near(x, y, 10)) g.push(crest(x, y, 6 + rnd() * 9, 1.5 + rnd() * 2, 3, .3)); }
+  for (let i = 0; i < 1500; i++) { const x = -38 + rnd() * (W + 76), y = -38 + rnd() * (D + 76); if (!near(x, y, 0)) g.push(crest(x, y, 1.2 + rnd() * 3, .5 + rnd() * .9, 2, .5)); }
+  flushRipples();
+  for (let i = 0; i < 80; i++) { const x = -30 + rnd() * (W + 60), y = -30 + rnd() * (D + 60); if (!near(x, y, 1)) g.push(rock(x, y, .6 + rnd() * 1.6, .3 + rnd() * 1)); }
   seed = 11;
-  const nearZone = (x, y) => ZONES.some(z => Math.abs(x - z.cx) < (z.r || 5.6) + 2 && Math.abs(y - z.cy) < (z.r || 5.6) + 2);
+  const nearZone = (x, y) => ZONES.some(z => Math.abs(x - z.cx) < SIZE(z) + 2 && Math.abs(y - z.cy) < SIZE(z) + 2);
   const onRoad = (x, y) => EDGES.some(e => e.pts.some((p, i) => { const q = e.pts[i + 1]; if (!q) return false; return x >= Math.min(p[0], q[0]) - 1.5 && x <= Math.max(p[0], q[0]) + 1.5 && y >= Math.min(p[1], q[1]) - 1.5 && y <= Math.max(p[1], q[1]) + 1.5; }));
-  for (let i = 0; i < 520; i++) {
+  for (let i = 0, n = Math.round(520 * W * D / (45 * 126)); i < n; i++) {
     const x = 1.5 + rnd() * (W - 3), y = 1.5 + rnd() * (D - 3);
     if (nearZone(x, y) || onRoad(x, y)) continue;
-    const L = 1.2 + rnd() * 3, k = .5 + rnd() * .9;
-    const a = iso(x - L, y + L * .3), b = iso(x + L, y - L * .3), m = iso(x, y, k);
-    g.push(`<path d="M${a[0]} ${a[1]}Q${m[0]} ${m[1]} ${b[0]} ${b[1]}" fill="none" stroke="${C.hollow}" stroke-opacity=".35" stroke-width="5" transform="translate(2,4)"/><path d="M${a[0]} ${a[1]}Q${m[0]} ${m[1]} ${b[0]} ${b[1]}" fill="none" stroke="${C.ridge}" stroke-opacity=".55" stroke-width="2"/>`);
+    crest(x, y, 1.2 + rnd() * 3, .5 + rnd() * .9, 2, .55);
   }
-  for (let i = 0; i < 46; i++) { const x = 2 + rnd() * (W - 4), y = 2 + rnd() * (D - 4); if (!nearZone(x, y) && !onRoad(x, y)) g.push(rock(x, y, .6 + rnd() * 1.3, .3 + rnd() * .8)); }
+  flushRipples();
+  for (let i = 0, n = Math.round(46 * W * D / (45 * 126)); i < n; i++) { const x = 2 + rnd() * (W - 4), y = 2 + rnd() * (D - 4); if (!nearZone(x, y) && !onRoad(x, y)) g.push(rock(x, y, .6 + rnd() * 1.3, .3 + rnd() * .8)); }
   // roads: the main road and its branches wide, with chevrons for the direction; the way back, the hotfix and the side tracks as marked trails
-  const STYLE = {main: {w: 18, c: C.hollow, o: .6, dash: "", chev: C.ridge}, you: {w: 4, c: C.ember, o: .85, dash: "10 7"}, back: {w: 4, c: C.alert, o: .85, dash: "10 7"},
-                 hot: {w: 4, c: C.amber, o: .9, dash: "3 6"}, side: {w: 3, c: C.faint, o: .8, dash: "4 8"}, camp: {w: 8, c: C.hollow, o: .45, dash: ""}};
+  // The owner, 2026-11-22: tracks in the sand rather than roads: two wheel ruts on a faintly packed band, chevrons kept light.
+  // Plain trails (no arrows, no labels) for the other usual moves: to and from Council Rock, and Launch Pad straight to the Citadel.
+  const STYLE = {main: {ruts: true, gap: 10, w: 2.4, o: .42, chev: C.ridge, chevO: .5}, trail: {ruts: true, gap: 8, w: 1.9, o: .34},
+                 camp: {ruts: true, gap: 7, w: 1.6, o: .28}, side: {w: 3, c: C.faint, o: .8, dash: "4 8"}};
+  const offsetPts = (pts, d) => pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1; return [p[0] - dy / L * d, p[1] + dx / L * d]; });
+  const toD = q => "M" + q.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join("L");
+  const ruts = (pts, st) => {
+    let s = `<path d="${toD(pts)}" fill="none" stroke="${C.hollow}" stroke-opacity=".09" stroke-width="${st.gap + 5}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    for (const k of [-1, 1]) { const d = toD(offsetPts(pts, k * st.gap / 2));
+      s += `<path d="${d}" fill="none" stroke="${C.hollow}" stroke-opacity="${st.o}" stroke-width="${st.w + 1}" stroke-linejoin="round" stroke-linecap="round"/>` +
+           `<path d="${d}" fill="none" stroke="${C.ridge}" stroke-opacity="${(st.o * 1.4).toFixed(2)}" stroke-width="${(st.w * .55).toFixed(2)}" stroke-linejoin="round" stroke-linecap="round" transform="translate(0,1.6)"/>`; }
+    return s;
+  };
   for (const e of EDGES) {
-    const st = STYLE[e.k], pts = e.pts.map(p => iso(p[0], p[1])), d = "M" + pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join("L");
-    g.push(`<path d="${d}" fill="none" stroke="${st.c}" stroke-opacity="${st.o}" stroke-width="${st.w}" stroke-dasharray="${st.dash}" stroke-linejoin="round" stroke-linecap="round"${e.k === "main" || e.k === "camp" ? "" : ` marker-end="url(#arr-${e.k})"`}/>`);
-    if (e.k === "main") { g.push(`<path d="${d}" fill="none" stroke="#5a3b22" stroke-opacity=".35" stroke-width="2" stroke-dasharray="1 0" stroke-linejoin="round" transform="translate(0,5)"/>`); g.push(chevrons(pts, 120, C.ridge)); }
-    else if (e.k !== "camp") g.push(chevrons(pts, 160, st.c));
-    if (e.label) g.push(edgeLabel(pts, e.at || 0, e.label, e.k === "main" ? C.bone : st.c));
+    const st = STYLE[e.k], raw = e.pts.map(p => iso(p[0], p[1])), pts = smooth(raw);
+    if (st.ruts) { g.push(ruts(pts, st)); if (st.chev) g.push(`<g opacity="${st.chevO}">${chevrons(pts, 300, st.chev)}</g>`); }
+    else { g.push(`<path d="${toD(pts)}" fill="none" stroke="${st.c}" stroke-opacity="${st.o}" stroke-width="${st.w}" stroke-dasharray="${st.dash}" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arr-${e.k})"/>`); g.push(chevrons(pts, 320, st.c)); }
+    if (e.label) g.push(edgeLabel(raw, e.at || 0, e.label, e.k === "main" ? C.bone : st.c || C.dust));
   }
   for (const z of ZONES) g.push(buildZone(z));
+  // the ground (sand texture, roads, buildings) is the heaviest thing to repaint: it stays as vectors at rest (crisp at any zoom) and is
+  // swapped for a cached bitmap of itself while the view moves, so dragging and zooming mostly draw one image
+  const deco = g.splice(decoStart).join("");
+  { const a = iso(-42, D + 42), b = iso(W + 42, -42), c = iso(-42, -42), d = iso(W + 42, D + 42);
+    DECO = {x: a[0] - 60, y: c[1] - 160, w: b[0] - a[0] + 120, h: d[1] - c[1] + 220, svg: deco}; }
+  g.push(`<g id="deco">${deco}</g><image id="decoimg" x="${DECO.x.toFixed(0)}" y="${DECO.y.toFixed(0)}" width="${DECO.w.toFixed(0)}" height="${DECO.h.toFixed(0)}" preserveAspectRatio="none"/>`);
   $("#ground").innerHTML = g.join("");
+  cacheDeco();
 }
-const ROUTE = [[2.5, 20], [11, 20], [28, 20], [46, 20], [58, 20], [70, 20], [82, 20], [88.5, 20], [88.5, 9], [95, 9], [107, 9], [107, 22], [116, 22]];
+const ROUTE = [[4, 12], [10, 14], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [80, 48], [86, 38], [92, 28], [99, 18], [107, 13], [114, 10], [116, 24], [114, 40]];
 // The layout above is written as (flow, across). The owner, 2026-11-22: START at the bottom left, END at the top right. On screen that
 // is the -y direction, so each point turns: x = across, y = BOARD_D - flow.
 // The owner, 2026-11-22: the milestones written in front of a zone must not reach the next building, so consecutive zones on the
 // main road sit 17 apart, like the Tents and the Granary. STRETCH maps the flow written above onto the spaced-out flow.
-const STRETCH = [[0, 0], [11, 11], [28, 28], [46, 45], [58, 62], [70, 79], [82, 96], [95, 113], [107, 130], [116, 141]];
+const STRETCH = [[0, 0], [1, 1]];                        // identity: the places above are written in board flow already
 function stretch(f) {
   let i = 1; while (i < STRETCH.length - 1 && f > STRETCH[i][0]) i++;
   const [a, A] = STRETCH[i - 1], [b, B] = STRETCH[i];
@@ -571,6 +655,11 @@ function folderFor(c) {                                 // the folders come from
 }
 const INT = () => (DATA && DATA.project && DATA.project.integration) || "dev";
 const PROD = () => (DATA && DATA.project && DATA.project.production) || "main";
+// a zone's hint names the project's real branches when the state gives them (project.integration, project.production), else generic words
+function hintOf(z) {
+  const p = (DATA && DATA.project) || {};
+  return z.hint.replace(/\{int\}/g, p.integration || "the integration branch").replace(/\{prod\}/g, p.production || "production");
+}
 function promptFor(c) {
   const n = c.number, pr = DATA.pr;
   switch (c.step) {
@@ -600,7 +689,7 @@ function layout() {
     const z = ZONE[zid], by = {};
     for (const c of list) (by[c.milestone || ""] ||= []).push(c);
     const groups = Object.entries(by).sort((a, b) => msKey(a[0]) - msKey(b[0])).map(([ms, cs]) => ({ms, cs: cs.sort((a, b) => a.number - b.number), w: 1}));
-    const total = Math.min(zid === "citadel" ? 10 : 9, Math.floor((2 * (z.r || 5.6) + 1 - (groups.length - 1) * GAP) / SLOT));
+    const total = Math.min(SIZE(z) >= 7 ? 13 : 9, Math.floor((2 * SIZE(z) + 1 - (groups.length - 1) * GAP) / SLOT));
     for (let free = total - groups.length; free > 0; free--) {
       const g = groups.filter(g => g.w < g.cs.length).sort((a, b) => Math.ceil(b.cs.length / b.w) - Math.ceil(a.cs.length / a.w))[0];
       if (!g) break; g.w++;
@@ -608,7 +697,7 @@ function layout() {
     const width = groups.reduce((s, g) => s + g.w * SLOT, 0) + (groups.length - 1) * GAP;
     let x = z.cx - width / 2;
     // the strips sit at the bottom-left (front) edge of the area, clear of the building: every strip ends on the same front row
-    const front = z.cy + (z.r || 5.6) - .6;
+    const front = z.cy + SIZE(z) - .6;
     for (const g of groups) {
       const rows = Math.ceil(g.cs.length / g.w), y0 = front - (rows - 1) * SLOT;
       // the milestone is written in the open sand just in front of its strip, where no block covers it
@@ -634,14 +723,7 @@ function blockSVG(c) {
   if (c.need) out += `<ellipse class="ring" cx="0" cy="0" rx="26" ry="13" fill="none" stroke="${C.ember}" stroke-width="2.5"/>`;
   out += `<g class="cube"><polygon points="${P([B0, C0, Cc, B])}" fill="${r}"/><polygon points="${P([D0, C0, Cc, D])}" fill="${l}"/><polygon points="${P([A, B, Cc, D])}" fill="${t}"/></g>`;
   if (c.need) out += `<polygon points="${P([A, B, Cc, D])}" fill="${C.ember}" opacity=".35"/>`;
-  const fit = longrun(c);
-  if (fit) {                                               // the pennant: a pole on the back corner, its cloth in the sign's colour and shape
-    const [px, py] = iso(s / 2, -s / 2, h), col = FIT[fit.fit].color();
-    out += `<line x1="${px}" y1="${py}" x2="${px}" y2="${py - 20}" stroke="${C.wood}" stroke-width="1.4"/>`;
-    out += fit.fit === "yes" ? `<polygon points="${px},${py - 20} ${px + 11},${py - 16} ${px},${py - 12}" fill="${col}"/>`
-         : fit.fit === "partly" ? `<polygon points="${px},${py - 20} ${px + 11},${py - 16} ${px},${py - 12}" fill="none" stroke="${col}" stroke-width="1.4"/><polygon points="${px},${py - 20} ${px + 5.5},${py - 18} ${px + 5.5},${py - 14} ${px},${py - 12}" fill="${col}"/>`
-         : `<rect x="${px}" y="${py - 20}" width="9" height="8" fill="${col}"/>`;
-  }
+  // The owner, 2026-11-22: no long-run pennants on the blocks; the long-run fit stays in the filter, the summary and the issue panel.
   if (c.step === "building") { const [sx, sy] = iso(0, 0, h + .2); out += `<circle class="spark" cx="${sx}" cy="${sy}" r="3" fill="${C.amber}"/><circle class="spark" cx="${sx + 6}" cy="${sy - 4}" r="2" fill="${C.ember}" style="animation-delay:.4s"/>`; }
   if (c.step === "testing" || (c.runs || []).some(r => r.live)) out += `<ellipse class="swirl" cx="0" cy="${-h * TH / 2}" rx="24" ry="13" fill="none" stroke="${C.ridge}" stroke-width="1.5" stroke-dasharray="4 7"/>`;
   const [lx, ly] = iso(0, 0, h); const label = String(c.number), w = label.length * 6.4 + 8;
@@ -701,7 +783,7 @@ function render() {
     if (it.kind === "b") html += `<g class="blk" data-n="${it.c.number}" tabindex="0" role="button" aria-label="Issue ${it.c.number}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${blockSVG(it.c)}</g>`;
     else html += `<g class="wkr" data-w="${esc(it.w.id)}" tabindex="0" role="button" aria-label="${esc(it.w.name)}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${workerSVG(it.w)}</g>`;
   }
-  for (const z of ZONES) html += plaque(z, ["camp", "gate"].includes(z.id) ? null : (byZone[z.id] || []).length);
+  for (const z of ZONES) html += plaque(z, z.id === "camp" ? null : (byZone[z.id] || []).length);
   $("#things").innerHTML = html;
   const b = $("#beacon"); if (b) b.setAttribute("fill", {green: C.ok, red: C.alert}[(DATA.pr && DATA.pr.ci || {}).state] || (DATA.pr ? C.amber : C.faint));
   summary(byZone, ws); filters(); applyFilter();
@@ -749,23 +831,26 @@ function legend() {
     [sw(`<g transform="translate(-21,0)">${cube(TYPE.bug.color)}</g>` + `<g transform="translate(-7,0)">${cube(TYPE.task.color)}</g>` + `<g transform="translate(7,0)">${cube(TYPE.feature.color)}</g>` + `<g transform="translate(21,0)">${cube(TYPE_NONE.color)}</g>`, 58), "A block is an issue; its top is its type: bug, task, feature, no type"],
     [sw(`<text x="0" y="-2" text-anchor="middle" transform="matrix(1,.5,-1,.5,0,0)" class="ms-cut">v1.0</text>`, 44), "Written in the sand: the milestone of the blocks in front of it"],
     [sw(`<ellipse cx="0" cy="-2" rx="13" ry="6" fill="none" stroke="${C.ember}" stroke-width="2"/>`), "Glowing ring: it needs you"],
-    [sw(`<line x1="-4" y1="4" x2="-4" y2="-14" stroke="${C.wood}" stroke-width="1.4"/><polygon points="-4,-14 7,-10 -4,-6" fill="${C.water}"/>`), "Blue pennant: a long run can take it"],
-    [sw(`<line x1="-4" y1="4" x2="-4" y2="-14" stroke="${C.wood}" stroke-width="1.4"/><polygon points="-4,-14 7,-10 -4,-6" fill="none" stroke="${C.amber}" stroke-width="1.3"/><polygon points="-4,-14 1.5,-12 1.5,-8 -4,-6" fill="${C.amber}"/>`), "Half pennant: a long run does part of it"],
-    [sw(`<line x1="-4" y1="4" x2="-4" y2="-14" stroke="${C.wood}" stroke-width="1.4"/><rect x="-4" y="-14" width="9" height="8" fill="${C.alert}"/>`), "Red banner: not for a long run"],
     [sw(`<circle cx="-3" cy="-4" r="3" fill="${C.amber}"/><circle cx="4" cy="-8" r="2" fill="${C.ember}"/>`), "Sparks: being built"],
     [sw(`<ellipse cx="0" cy="-4" rx="13" ry="6" fill="none" stroke="${C.ridge}" stroke-width="1.5" stroke-dasharray="4 5"/>`), "Dust swirl: tests running"],
     [sw(`<g transform="translate(0,6) scale(.6)">${workerSVG({role: "Coder", kind: "defined", state: "idle"})}</g>`), "A figure is a worker; click it for its status"],
-    [sw(`<line x1="-14" y1="-4" x2="14" y2="-4" stroke="${C.hollow}" stroke-width="9" opacity=".7"/><path d="M-4 -8L2 -4L-4 0" fill="none" stroke="${C.ridge}" stroke-width="2"/>`), "Road with chevrons: the way forward, START to END"],
-    [sw(`<line x1="-14" y1="-4" x2="8" y2="-4" stroke="${C.ember}" stroke-width="3" stroke-dasharray="6 4"/><path d="M8 -8L14 -4L8 0z" fill="${C.ember}"/>`), "To and from you: needs you, answered"],
-    [sw(`<line x1="-14" y1="-4" x2="8" y2="-4" stroke="${C.alert}" stroke-width="3" stroke-dasharray="6 4"/><path d="M8 -8L14 -4L8 0z" fill="${C.alert}"/>`), "The way back: tests failed, CI red"],
-    [sw(`<line x1="-14" y1="-4" x2="8" y2="-4" stroke="${C.amber}" stroke-width="3" stroke-dasharray="2 4"/><path d="M8 -8L14 -4L8 0z" fill="${C.amber}"/>`), "Hotfix: straight to the release"],
+    [sw(`<line x1="-14" y1="-7" x2="14" y2="-7" stroke="${C.hollow}" stroke-width="2.4" opacity=".6"/><line x1="-14" y1="-1" x2="14" y2="-1" stroke="${C.hollow}" stroke-width="2.4" opacity=".6"/><path d="M-4 -8L2 -4L-4 0" fill="none" stroke="${C.ridge}" stroke-width="2"/>`), "Tracks in the sand: the usual way of an issue; chevrons on the main track"],
+    [sw(`<g transform="translate(-2,4) scale(.42)">${haulerSVG()}</g>`, 40), "Hauler: carries an issue a short way"],
+    [sw(`<g transform="translate(0,-2) scale(.42)">${flyerSVG(1)}</g>`, 40), "Flyer: carries an issue a long way"],
   ];
   $("#legend-list").innerHTML = items.map(i => `<li>${i[0]}<span>${esc(i[1])}</span></li>`).join("");
 }
 
 // ------------------------------------------------------------------ pan and zoom
 const VIEW = {s: 1, tx: 0, ty: 0, touched: false};
-function applyView() { $("#world").setAttribute("transform", `translate(${VIEW.tx.toFixed(1)},${VIEW.ty.toFixed(1)}) scale(${VIEW.s.toFixed(4)})`); $("#pct").textContent = Math.round(VIEW.s * 100) + "%"; }
+// pan and zoom write the transform at most once per frame; while the view moves, the HUD drops its backdrop blur and the board pauses
+// its little animations, so the browser only has to repaint the map
+let viewRaf = 0, movingTimer = 0;
+function applyView() {
+  document.body.classList.add("moving"); clearTimeout(movingTimer); movingTimer = setTimeout(() => document.body.classList.remove("moving"), 180);
+  if (viewRaf) return;
+  viewRaf = requestAnimationFrame(() => { viewRaf = 0; $("#world").setAttribute("transform", `translate(${VIEW.tx.toFixed(1)},${VIEW.ty.toFixed(1)}) scale(${VIEW.s.toFixed(4)})`); $("#pct").textContent = Math.round(VIEW.s * 100) + "%"; });
+}
 function bounds() { const a = iso(0, 0), b = iso(BOARD_W, 0), c = iso(BOARD_W, BOARD_D), d = iso(0, BOARD_D); return {x0: d[0] - 40, x1: b[0] + 40, y0: a[1] - 160, y1: c[1] + 1.6 * TH + 60}; }
 function fit() {
   const r = $("#map").getBoundingClientRect(), b = bounds();
@@ -820,7 +905,7 @@ $("#map").addEventListener("pointerover", e => {
   const b = e.target.closest(".blk"), w = e.target.closest(".wkr"), z = e.target.closest(".plaque");
   if (b) { const c = DATA.cards.find(x => x.number == b.dataset.n); tip.innerHTML = `<span class="n">#${c.number}</span><span class="t">${esc(c.title)}</span><span class="s">${esc(typeInfo(c).word)} · ${esc(STEP_LABEL[c.step] || c.step)} · ${esc(c.milestone || "no milestone")}${c.need ? " · needs you" : ""}</span>`; }
   else if (w) { const k = WORKERS[w.dataset.w]; tip.innerHTML = `<span class="n">${esc(k.name)}${k.folder ? " · " + esc(k.folder) : ""}</span><span class="t">${esc(stateWord(k))}</span><span class="s">${esc(k.model || (k.kind === "planned" ? "not hired yet" : "model not recorded"))}</span>`; }
-  else if (z) { const zz = ZONE[z.dataset.zone]; tip.innerHTML = `<span class="n">${esc(zz.name)}</span><span class="t">${esc(zz.stage)}</span><span class="s">${esc(zz.hint)}</span>`; }
+  else if (z) { const zz = ZONE[z.dataset.zone]; tip.innerHTML = `<span class="n">${esc(zz.name)}</span><span class="t">${esc(zz.stage)}</span><span class="s">${esc(hintOf(zz))}</span>`; }
   else return hideTip();
   tip.hidden = false; moveTip(e);
 });
@@ -931,11 +1016,15 @@ function clickAt(e) {
 // ------------------------------------------------------------------ the air: transport flights and ambient traffic
 const air = $("#air"); const flights = [];
 function fly(n, from, to) {
+  // a short hop goes by hauler along the ground; a long one by flyer through the air
   const c = DATA.cards.find(x => x.number === n); if (!c || RM) return;
-  const g = document.createElementNS(NS, "g"); g.innerHTML = `<g class="cargo">${blockSVG({...c, need: null})}</g><g transform="translate(0,-44)">${flyerSVG(1)}</g><line x1="0" y1="-30" x2="0" y2="-14" stroke="${C.wood}" stroke-width="1"/>`;
+  const dist = Math.hypot(to[0] - from[0], to[1] - from[1]), a = iso(...from), b = iso(...to), truck = dist < 27;
+  const g = document.createElementNS(NS, "g");
+  if (truck) { const dir = b[0] >= a[0] ? 1 : -1; g.innerHTML = `<g transform="scale(${1.35 * dir},1.35)">${haulerSVG()}</g><g class="cargo" transform="translate(${-16 * dir},-23) scale(.95)">${blockSVG({...c, need: null})}</g>`; }
+  else g.innerHTML = `<g class="cargo">${blockSVG({...c, need: null})}</g><g transform="translate(0,-44)">${flyerSVG(1)}</g><line x1="0" y1="-30" x2="0" y2="-14" stroke="${C.wood}" stroke-width="1"/>`;
   air.append(g);
   const blk = document.querySelector(`.blk[data-n="${n}"]`); if (blk) blk.style.visibility = "hidden";
-  flights.push({g, a: iso(...from), b: iso(...to), t0: performance.now(), dur: 2600 + Math.hypot(to[0] - from[0], to[1] - from[1]) * 40, n});
+  flights.push({g, a, b, t0: performance.now(), dur: truck ? 1800 + dist * 110 : 2600 + dist * 40, n, truck});
 }
 let crawlerG = null, patrolG = null;
 function ambient() {
@@ -944,13 +1033,14 @@ function ambient() {
   patrolG = document.createElementNS(NS, "g"); patrolG.innerHTML = flyerSVG(.8); patrolG.setAttribute("opacity", ".85"); air.append(patrolG);
 }
 const SEG = []; let ROUTE_LEN = 0;
-function routeIndex() { SEG.length = 0; ROUTE_LEN = 0; for (let i = 0; i < ROUTE.length - 1; i++) { const a = iso(...ROUTE[i]), b = iso(...ROUTE[i + 1]); const L = Math.hypot(b[0] - a[0], b[1] - a[1]); SEG.push({a, b, L, at: ROUTE_LEN}); ROUTE_LEN += L; } }
+function routeIndex() { SEG.length = 0; ROUTE_LEN = 0; const R = smooth(ROUTE.map(p => iso(...p))); for (let i = 0; i < R.length - 1; i++) { const a = R[i], b = R[i + 1]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L > 0) { SEG.push({a, b, L, at: ROUTE_LEN}); ROUTE_LEN += L; } } }
 function along(dist) { dist = ((dist % (2 * ROUTE_LEN)) + 2 * ROUTE_LEN) % (2 * ROUTE_LEN); const back = dist > ROUTE_LEN; if (back) dist = 2 * ROUTE_LEN - dist;
   const s = SEG.find(x => dist <= x.at + x.L) || SEG[SEG.length - 1]; const k = (dist - s.at) / s.L; return {x: s.a[0] + (s.b[0] - s.a[0]) * k, y: s.a[1] + (s.b[1] - s.a[1]) * k, dir: Math.sign((s.b[0] - s.a[0]) * (back ? -1 : 1)) || 1}; }
 function tick(now) {
   for (let i = flights.length - 1; i >= 0; i--) {
     const f = flights[i], t = Math.min(1, (now - f.t0) / f.dur), e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    const x = f.a[0] + (f.b[0] - f.a[0]) * e, y = f.a[1] + (f.b[1] - f.a[1]) * e - Math.sin(Math.PI * t) * 140 - (t < .1 ? t * 10 : t > .9 ? (1 - t) * 10 : 1) * 18;
+    const x = f.a[0] + (f.b[0] - f.a[0]) * e, y = f.truck ? f.a[1] + (f.b[1] - f.a[1]) * e - Math.abs(Math.sin(now / 70)) * 1.2
+                                                        : f.a[1] + (f.b[1] - f.a[1]) * e - Math.sin(Math.PI * t) * 140 - (t < .1 ? t * 10 : t > .9 ? (1 - t) * 10 : 1) * 18;
     f.g.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
     if (t >= 1) { f.g.remove(); flights.splice(i, 1); const blk = document.querySelector(`.blk[data-n="${f.n}"]`); if (blk) blk.style.visibility = ""; }
   }
@@ -972,6 +1062,9 @@ function setData(d, live) {
   $("#demo").hidden = live;
 }
 function demoStep() {
+  // now and then an issue gets stuck in the backlog and waits for you: a long move, so it flies
+  const stuck = DATA.cards.filter(c => c.step === "backlog");
+  if (stuck.length && Math.random() < .3) { const c = stuck[Math.floor(Math.random() * stuck.length)]; setData({...DATA, cards: DATA.cards.map(x => x.number === c.number ? {...x, step: "you", need: "answer", staged: true} : x)}, false); return; }
   const movable = DATA.cards.filter(c => NEXT[c.step]); if (!movable.length) return;
   const c = movable[Math.floor(Math.random() * movable.length)];
   const d = {...DATA, cards: DATA.cards.map(x => x.number === c.number ? {...x, step: NEXT[x.step], need: null, staged: true} : x)};
@@ -995,4 +1088,5 @@ $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip
 $("#demo").addEventListener("click", () => demo(!demoTimer));
 drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 </script>
+
 
