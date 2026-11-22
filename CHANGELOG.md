@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `saani auto pick [--json] [--limit N]`: the issues an auto run may take now, in order, from the At a glance tables, with the free slots and why the others are left (blocked, no Type, already in a worktree, overlapping files). `[auto] parallel` sizes the run (`0`: from the cores and free RAM, at most 3). The auto skill drives the pipeline for several issues at once: coder, reviewer, land, the next issue picked as soon as one lands.
 - `saani comment <n> <kind>`: a status comment in the shape of `.github/COMMENT_KINDS.md` and its label change. `saani start` posts `Started` (`--no-comment` skips it), `saani land` posts `On dev` through it, `saani ci pr` posts `In PR` and `saani ci merged` posts `On main`, each once per pull request and issue.
 
 ## 0.3.0 (2026-11-22)

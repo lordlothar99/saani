@@ -15,7 +15,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    `auto-<YYYY-MM-DD_HHMM>` beside the other worktrees, on the branch `auto/<YYYY-MM-DD_HHMM>` from the integration branch) and say
    its folder. Run every command of the run from that folder (the session cannot change folder: `cd` in each call), and
    `saani start <n>` for each issue from there as usual. `[board] folders` `auto` is not needed.
-2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (below). For
+2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (`saani auto pick`). For
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed.
@@ -23,22 +23,33 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that.
-1. **Which issues: as many as possible.** Milestone order (lowest version first), then issues with no milestone; inside one, bugs first.
-   The issue's **At a glance** table says what to expect (`.github/ISSUE_TEMPLATE/`; read like `saani/glance.py` does): `Auto ⛔ No` is not
-   taken, `🟡 Partly` only for the part the table names, and `Blocked by` an issue still open or a date not yet come is not taken. Excluded, real blockers only: the server or a live check, the owner's answer (`[labels] answer`), the owner's action (`[labels] act`), a key or account only the
-   owner has. A partly blocked issue: do the repo's part, comment the rest. An unclear one: comment the pending decision (context, options,
-   a recommendation) and move on. Never change an issue's milestone. **The next issue is searched again after each one, never taken from a
-   list made at the start**, so an issue created, relabelled or answered during the run is seen.
-2. **Per issue.** `saani start <n>`; implement; tier 0 while coding, then `saani land` (tier 1 runs there); commit `refs #n` with the
-   trailers; comment the commit on the issue; add the in-dev label. If the change alters what a document describes, update that document in the
-   same commit.
+1. **The pipeline, several issues at once.** You are the Architect: you brief, decide and land; the coder and the reviewer do the reading
+   and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
+   - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel` less those in worktrees) and the `eligible`
+     issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
+     files already checked, `skipped` says why not). With issue numbers as arguments, take only those among the eligible ones.
+   - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
+     background** so several issues progress at once. Model: sonnet; opus for an issue labelled or titled as hard or security. Brief it with
+     the issue number, the worktree path and what the issue asks, not with file dumps.
+   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code; skip it only for a change of a few
+     lines you make alone, which needs no coder either), and `saani comment <n> review` when the review starts. Real findings go back to
+     the same coder (you decide which are real); a new commit.
+   - Then `saani land --worktree <path>` (posts On dev). Landings are one at a time, the lock does it. A conflict at landing goes back to
+     the coder of that issue.
+   - An issue that is blocked or needs the owner: `saani comment <n> blocked` or `question` with the context and a recommendation, and
+     move on. A partly blocked issue: the repo's part, comment the rest. Never change an issue's milestone.
+   - **As soon as one issue lands, pick again.** `saani auto pick --json` is run again whenever a slot frees, never from a list made at the
+     start, so an issue created, relabelled or answered during the run is seen. The loop ends when nothing is running and nothing is eligible.
+   If the change alters what a document describes, the coder updates that document in the same commit (`refs #n`, the trailers).
+2. **Cost.** Keep your own context small: briefs and verdicts, not file dumps; the routine roles run on the cheaper models; read a
+   result's summary, not its transcript. `saani kpis` at the end gives the cost per issue, role and model.
 3. **Review and clean** once the list is exhausted: tests, then code, then docs, in small commits, each landed. The documentation review is
    never skipped.
 4. **End.** The full run (`[tests] full`); open the ONE integration -> production pull request (milestone set, `refs #n` for every
    in-dev issue); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
    most 3 attempts, then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
 5. **Report** in the chat and as a comment on the pull request: start, end, duration, id, folder; the issues done; a table of what is
-   pending (issue | question with context | options with pros and cons); what was refused; the numbers (`saani kpis`). End with `/saani:merge` (or
+   pending (issue | question with context | options with pros and cons); what was refused, and which issues waited for overlapping files; the numbers (`saani kpis`). End with `/saani:merge` (or
    `/saani:merge --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 

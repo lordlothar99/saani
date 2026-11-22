@@ -40,6 +40,7 @@ class Config:
     session_match: str = ""                      # the map lists Claude Code sessions whose project folder name contains this
     deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
     board_port: int = 8771
+    parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory, capped at 3
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
     ci_reserve_minutes: int = 50
@@ -91,7 +92,7 @@ def from_toml(data, root):
             ("deploy", "paths"): "deploy_paths", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
-            ("ci", "relabel"): "relabel", ("hints",): "hints"}
+            ("auto", "parallel"): "parallel", ("ci", "relabel"): "relabel", ("hints",): "hints"}
     for table, values in data.items():
         if table == "hints":
             flat["hints"] = dict(values)
@@ -108,6 +109,9 @@ def from_toml(data, root):
             flat[key] = tuple(flat[key])
     if "labels" in flat:
         flat["labels"] = {**Config().labels, **flat["labels"]}
+    par = flat.get("parallel", 0)
+    if not isinstance(par, int) or isinstance(par, bool) or par < 0:
+        raise SystemExit(f"{FILE}: [auto] parallel must be a whole number, 0 or more")
     cfg = Config(**flat, root=pathlib.Path(root))
     if "/" not in cfg.repo:
         raise SystemExit(f"{FILE}: [project] repo must be owner/name")

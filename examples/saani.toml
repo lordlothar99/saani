@@ -40,6 +40,9 @@ folders = { work = "C:/work/webshop", deploy = "C:/work/webshop-main", auto = "C
 session_match = "webshop"        # Claude Code sessions whose project folder name contains this are listed
 port = 8771
 
+[auto]
+parallel = 0                      # issues an auto run keeps in flight: 0 = sized from the cores and free RAM, else n (at most 3)
+
 [ci]
 workflow = "ci.yml"              # the GitHub Actions workflow `saani ci pr` starts (workflow_dispatch)
 free_minutes = 2000              # GitHub Free, private repositories, per month, the whole account
