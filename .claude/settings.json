@@ -49,7 +49,6 @@
       "Bash(gh pr *)",
       "Bash(gh run *)",
       "Bash(gh label *)",
-      "Bash(gh api repos/NousResearch/*)",
       "Bash(gh release list*)",
       
       "Bash(python scripts/*)",
