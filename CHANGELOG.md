@@ -10,3 +10,5 @@
 - A Claude Code plugin skeleton: the long-run skill; this repository is also a plugin marketplace.
 - A slash command for every `saani` command (`/saani:ui`, `/saani:new`, `/saani:land`...). The whole repository is the plugin, and its
   `bin/saani` puts the command on the PATH of Claude Code's shell, so nothing else needs setting up.
+- The worker subagents `saani:coder`, `saani:tester`, `saani:reviewer`, `saani:scribe` and `saani:researcher` (`agents/`), and the pipeline from an issue to dev.
+- A workflow that deletes the head branch of a pull request merged into the production branch, except `dev`, `main` and `master`.
