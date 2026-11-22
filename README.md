@@ -91,6 +91,17 @@ claude plugin update saani@saani          # then /reload-plugins in an open Clau
 ```
 `claude plugin list` shows the installed version; `claude plugin uninstall saani@saani` removes it.
 
+**Fewer approvals in Claude Code.** In your project's `.claude/settings.json`, allow the `saani` command, and put the worktrees folder in
+the session's working directories (it sits beside the project, so without it every `cd` there, the agents' included, asks you). The
+folder's path is your machine's, so it goes in the untracked `.claude/settings.local.json` (or your `~/.claude/settings.json`):
+```json
+{"permissions": {"allow": ["Bash(saani *)"]}}
+```
+```json
+{"permissions": {"additionalDirectories": ["C:/Users/<you>/projects/webshop-wt"]}}
+```
+`saani status` warns, with the exact line, when the worktrees folder is not covered.
+
 **5. Work an issue.** In Claude Code: `/saani:start 42`, ask Claude to code it, then `/saani:land`. Or the same in a terminal:
 ```bash
 cd ~/projects/webshop

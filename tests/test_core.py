@@ -187,3 +187,61 @@ def test_an_auto_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):
     assert core.auto_started("longrun/2026-11-22_1513") == datetime.datetime(2026, 11, 22, 15, 13)      # the old name
     assert core.auto_started("auto/nightly") is None
     assert core.auto_started("auto/nightly", tmp_path) is not None
+
+
+# ---------------------------------------------------------------- the worktrees folder and Claude Code's working directories (#46)
+
+def _settings(path, dirs):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(__import__("json").dumps({"permissions": {"allow": ["Bash(saani *)"], "additionalDirectories": dirs}}), encoding="utf-8")
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    from saani import config
+    main = tmp_path / "webshop"
+    main.mkdir()
+    (tmp_path / "webshop-wt").mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "user-claude"))
+    return config.Config(repo="acme/webshop", root=main)
+
+
+def test_status_warns_when_the_worktrees_folder_is_outside_every_working_directory(project):
+    line = core.worktrees_warning(project)
+    wt = str((project.root.parent / "webshop-wt").resolve()).replace("\\", "/")
+    assert line.startswith(f"warning: worktrees folder {wt} is not in permissions.additionalDirectories")
+    assert f'"additionalDirectories": ["{wt}"]' in line and ".claude/settings.local.json" in line
+
+
+@pytest.mark.parametrize("where", ["project", "local", "user"])
+def test_an_entry_in_any_of_the_three_settings_files_covers_it(project, where, tmp_path):
+    file = {"project": project.root / ".claude" / "settings.json", "local": project.root / ".claude" / "settings.local.json",
+            "user": tmp_path / "user-claude" / "settings.json"}[where]
+    _settings(file, [str(tmp_path / "webshop-wt")])
+    assert core.worktrees_warning(project) is None
+
+
+def test_relative_parent_forward_slash_and_case_entries_cover_it(project, tmp_path):
+    _settings(project.root / ".claude" / "settings.json", ["../webshop-wt"])            # relative: from the main checkout
+    assert core.worktrees_warning(project) is None
+    _settings(project.root / ".claude" / "settings.json", [str(tmp_path).replace("\\", "/")])    # a parent folder, written with /
+    assert core.worktrees_warning(project) is None
+    if core.os.name == "nt":
+        _settings(project.root / ".claude" / "settings.json", [str(tmp_path / "WEBSHOP-WT").upper()])
+        assert core.worktrees_warning(project) is None
+
+
+def test_other_folders_broken_files_and_lookalike_names_do_not_cover_it(project, tmp_path):
+    _settings(project.root / ".claude" / "settings.json", [str(tmp_path / "webshop-w"), "../docs", 42, ""])
+    (project.root / ".claude" / "settings.local.json").write_text("{not json", encoding="utf-8")
+    assert core.worktrees_warning(project) is not None
+
+
+def test_a_worktrees_folder_inside_the_main_checkout_needs_nothing(project):
+    project.worktree_folder = "wt"
+    assert core.worktrees_warning(project) is None
+
+
+def test_status_never_writes_the_settings(project):
+    core.worktrees_warning(project)
+    assert not (project.root / ".claude").exists()

@@ -115,3 +115,14 @@ def test_every_worker_agent_is_named_like_its_file_and_has_tools_and_a_model():
         assert re.search(r"^model: (sonnet|opus|haiku)$", head, re.M), agent
     reviewer = (folder / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
     assert not re.search(r"\b(Edit|Write)\b", re.search(r"^tools: .*$", reviewer, re.M).group(0)), "the reviewer is read-only"
+
+
+def test_the_agents_that_run_commands_keep_to_commands_an_allowlist_can_cover():
+    """#46: the coder, the tester and the reviewer read with the file tools and run one plain command per Bash call, never inline code,
+    so a project's allow rules cover what they run and nothing asks the owner."""
+    for role in ("coder", "tester", "reviewer"):
+        text = " ".join((ROOT / "agents" / f"{role}.md").read_text(encoding="utf-8").split())
+        assert "Read files with Read, Grep and Glob" in text, role
+        assert "One plain command per Bash call; the only chaining is `cd <worktree> && <command>`" in text, role
+        for banned in ("`python -`", "`python -c`", "heredoc scripts", "shell loops", "`base64`", "`awk`"):
+            assert banned in text, (role, banned)

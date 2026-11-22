@@ -16,6 +16,10 @@
 - An auto run has two parts: `/saani:auto` asks its questions in the owner's session, then prints the command for the away part, a
   headless session (`claude -p "/saani:auto run <id> --folder <path>" --permission-mode auto --permission-prompts none`) where no
   permission prompt can wait for an answer. `/saani:auto run <id> --folder <path>` is the away part.
+- Fewer approvals (issue #46): `saani status` warns, with the line to add, when the worktrees folder is not in Claude Code's
+  `permissions.additionalDirectories` (every `cd` into a worktree, the agents' included, otherwise asks the owner); the `saani:coder`,
+  `saani:tester` and `saani:reviewer` agents read with the file tools and run one plain command per Bash call, never inline code; the
+  auto skill checks the folder before a run; the README's setup lists both settings.
 - The map: the release pull request is a harvester at the Refinery (its CI on its lights), a zone's sign opens a panel with one prompt for
   all its issues, a Tweaks menu, and the "Auto mode" filter.
 

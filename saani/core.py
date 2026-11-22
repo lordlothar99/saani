@@ -727,7 +727,58 @@ def cmd_prune(args):
 
 # ---------------------------------------------------------------- status and the commit-msg hook
 
+def claude_settings_files(root):
+    """The Claude Code settings files that can widen a session of the project: its shared and its local settings, and the user's."""
+    home = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
+    return [root / ".claude" / "settings.json", root / ".claude" / "settings.local.json", home / "settings.json"]
+
+
+def _abs(entry, base):
+    """An additionalDirectories entry as an absolute path. Git Bash's `/c/...` is read as `C:/...` on Windows. A relative entry is taken
+    from the main checkout (Claude Code does not document the base, so the warning asks for an absolute path)."""
+    if os.name == "nt" and re.match(r"^/[A-Za-z](/|$)", entry):
+        entry = entry[1].upper() + ":" + (entry[2:] or "/")
+    p = pathlib.Path(entry)
+    return p if p.is_absolute() else base / p
+
+
+def _within(path, folder):
+    """True when `path` is `folder` or below it; case-insensitive on Windows, `/` and `\\` alike."""
+    p, f = (os.path.normcase(os.path.abspath(str(x))) for x in (path, folder))
+    return p == f or p.startswith(f.rstrip(os.sep) + os.sep)
+
+
+def additional_directories(root, files=None):
+    """The `permissions.additionalDirectories` of the project's Claude Code settings (all files merged), as absolute paths. Read only:
+    the settings are the owner's, Saani never writes them. A file that is missing or not valid JSON adds nothing."""
+    out = []
+    for path in claude_settings_files(root) if files is None else files:
+        try:
+            data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        perms = data.get("permissions") if isinstance(data, dict) else None
+        dirs = perms.get("additionalDirectories") if isinstance(perms, dict) else None
+        out += [_abs(d.strip(), root) for d in dirs or [] if isinstance(d, str) and d.strip()] if isinstance(dirs, list) else []
+    return out
+
+
+def worktrees_warning(c, files=None):
+    """A line for `saani status` when the workers' worktrees folder is outside every working directory of a Claude Code session of the
+    project: each `cd` there, the coders' included, then asks the owner. None when the folder is inside the main checkout or under an
+    `additionalDirectories` entry."""
+    wt = c.wt_dir
+    if _within(wt, c.root) or any(_within(wt, d) for d in additional_directories(c.root, files)):
+        return None
+    shown = str(wt.resolve() if wt.exists() else wt).replace("\\", "/")
+    return (f"warning: worktrees folder {shown} is not in permissions.additionalDirectories: every cd there (the agents' included) asks "
+            f'the owner. Add it in .claude/settings.local.json: {{"permissions": {{"additionalDirectories": ["{shown}"]}}}}')
+
+
 def cmd_status(args):
+    warning = worktrees_warning(cfg())
+    if warning:
+        print(warning)
     held = read_lock(lock_path())
     print("landing lock: " + ("free" if held is None else f"held by {held.get('branch')} since {held.get('started')}"))
     for path, branch in worktrees():
