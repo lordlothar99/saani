@@ -29,10 +29,11 @@ def test_every_skill_has_a_name_and_a_description():
 
 
 def test_every_command_has_a_skill_that_runs_it_the_same_way():
-    """One /saani:<command> skill per subcommand of saani (check-msg is the git hook), each with the same "Running saani" section."""
+    """One /saani:<command> skill per subcommand of saani (check-msg is the git hook, guard the Claude Code hook), each with the same
+    "Running saani" section."""
     out = subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "--help"], capture_output=True, text=True, encoding="utf-8").stdout
     aliases = {a.strip() for found in re.findall(r"^\s+[a-z-]+ \(([a-z, -]+)\)", out, re.M) for a in found.split(",")}
-    commands = set(re.search(r"\{([a-z,-]+)\}", out).group(1).split(",")) - {"check-msg"} - aliases
+    commands = set(re.search(r"\{([a-z,-]+)\}", out).group(1).split(",")) - {"check-msg", "guard"} - aliases
     skills = ROOT / "skills"
     assert commands <= {p.name for p in skills.iterdir() if (p / "SKILL.md").is_file()}
     sections = {c: (skills / c / "SKILL.md").read_text(encoding="utf-8").split("## Running saani", 1) for c in commands}
