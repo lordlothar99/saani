@@ -75,6 +75,7 @@ flowchart TB
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. |
 | `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
+| `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs the deployer (planned, issue #5); until it exists the command stops after the merge and exits 2. `--dry-run` checks and prints, merges nothing. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
@@ -154,7 +155,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
 | Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
 
-The auto checklist is the plugin's skill (`skills/auto/SKILL.md`).
+The auto checklist is the plugin's skill (`skills/auto/SKILL.md`). An auto run ends with one green integration -> production pull request and a report; the owner then says **merge** or **merge and deploy** (`/saani:merge`, `/saani:merge --deploy`), the only way that pull request is merged by Saani: the run itself never merges.
 
 Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
 (Auto, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.

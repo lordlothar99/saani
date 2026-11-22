@@ -112,6 +112,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |
+| `saani merge [PR] [--deploy] [--dry-run]` | `/saani:merge`, `/saani:merge --deploy` | merge the green dev -> main pull request an auto run left (merge commit; refused unless mergeable and its CI is green on the exact head), relabel, remove the finished auto runs; `--deploy` then hands over to the deployer (not built yet: exit 2 after the merge). Saying "merge" or "merge and deploy" in a session means this |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |
 | `saani ci status\|sync\|pr\|merged\|place` | `/saani:ci pr` | hybrid CI: GitHub Actions within the free minutes, the PC for the rest |
@@ -119,7 +120,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani progress run\|show\|watch` | `/saani:progress` | progress bar and time left for a background test run |
 | `saani check-msg <file>` | (none) | the commit-msg hook: git runs it, not you |
 
-Claude never runs `/saani:start`, `/saani:land` or `/saani:prune` on its own, because they change your repo: you type them, or ask for them.
+Claude never runs `/saani:start`, `/saani:land`, `/saani:merge` or `/saani:prune` on its own, because they change your repo: you type them, or ask for them.
 In an auto run (`/saani:auto`), Claude lands each issue itself, because you started the run for that.
 
 ## The plugin
