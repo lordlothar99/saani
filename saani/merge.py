@@ -2,7 +2,7 @@
 
 Merges the green integration -> production pull request with a merge commit (never squash or rebase: the trailers stay; the head branch is
 never deleted: it is the integration branch), then does what `saani ci merged <PR>` does (relabel, remove the finished auto runs). With
-`--deploy` it then hands over to the deployer (`saani.deploy.run`, issue #5); without one it stops after the merge and exits 2.
+`--deploy` it then runs the deployer (`saani.deploy.run`); without one it stops after the merge and exits 2.
 Standard library only; the checks are pure functions (tests/test_merge.py).
 """
 import importlib
@@ -32,6 +32,12 @@ def find_pr(run, number=None):
     return prs[0]["number"]
 
 
+def ci_state(status):
+    """The `[ci] status_context` state ("success", "pending", "failure"...) in a commit's combined status, or None when it has none."""
+    mine = [s for s in (status or {}).get("statuses", []) if s.get("context") == cfg().ci_status_context]
+    return mine[0].get("state") if mine else None
+
+
 def refusal(pr, status, checks):
     """Why this pull request must not be merged, or None when it may. `pr`: gh pr view; `status`: the commit's combined status;
     `checks`: its check runs."""
@@ -48,8 +54,7 @@ def refusal(pr, status, checks):
         return (f"pull request #{n} is not mergeable ({pr.get('mergeable')}, {pr.get('mergeStateStatus')}): "
                 f"merge {c.production} into {c.integration} (saani land does it), then run saani ci pr")
     sha = (pr.get("headRefOid") or "")[:7]
-    mine = [s for s in (status or {}).get("statuses", []) if s.get("context") == c.ci_status_context]
-    state = mine[0].get("state") if mine else None
+    state = ci_state(status)
     if state is None:
         return f"no {c.ci_status_context} status on {sha}, the head of #{n}: run saani ci pr"
     if state == "pending":
@@ -66,7 +71,7 @@ def refusal(pr, status, checks):
 
 
 def deployer():
-    """`saani.deploy.run`, or None while the deployer (issue #5) is not built."""
+    """`saani.deploy.run`, or None when the module is missing."""
     try:
         return importlib.import_module("saani.deploy").run
     except (ImportError, AttributeError):
@@ -122,6 +127,6 @@ def merge_it(args):
 def add_parsers(sub):
     p = sub.add_parser("merge", help="merge the green integration -> production pull request, then relabel and clean up")
     p.add_argument("pr", nargs="?", type=int, help="the pull request number (default: the open integration -> production one)")
-    p.add_argument("--deploy", action="store_true", help="then deploy (the deployer, issue #5)")
+    p.add_argument("--deploy", action="store_true", help="then deploy (saani deploy)")
     p.add_argument("--dry-run", action="store_true", help="all the checks, print what would happen, merge nothing")
     p.set_defaults(run=run_command)

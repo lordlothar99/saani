@@ -39,6 +39,12 @@ class Config:
     folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / auto: the folders named in the map's prompts
     session_match: str = ""                      # the map lists Claude Code sessions whose project folder name contains this
     deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
+    deploy_command: list = dataclasses.field(default_factory=list)    # the deploy (`saani deploy`); {key} and {python} expanded
+    deploy_dry_run: list = dataclasses.field(default_factory=list)    # the same with a dry-run flag; empty: skipped
+    deploy_checks: list = dataclasses.field(default_factory=list)     # command lists run before the deploy; each must exit 0
+    deploy_log_ok: str = ""                      # a regex the deploy's output must match to count as a success
+    deploy_key: str = ""                         # the PATH of the deploy key, never its content: only passed through
+    deploy_timeout_minutes: float = 30
     board_port: int = 8771
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
@@ -88,7 +94,9 @@ def from_toml(data, root):
             ("tests", "tier1"): "tier1", ("tests", "full"): "full", ("tests", "check"): "check", ("tests", "timing_reports"): "timing_reports",
             ("land", "generated"): "generated", ("land", "rebuild"): "rebuild", ("land", "frozen"): "frozen",
             ("land", "lock_stale_hours"): "lock_stale_hours", ("land", "push_attempts"): "push_attempts",
-            ("deploy", "paths"): "deploy_paths", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
+            ("deploy", "paths"): "deploy_paths", ("deploy", "command"): "deploy_command", ("deploy", "dry_run"): "deploy_dry_run",
+            ("deploy", "checks"): "deploy_checks", ("deploy", "log_ok"): "deploy_log_ok", ("deploy", "key"): "deploy_key",
+            ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
             ("ci", "relabel"): "relabel", ("hints",): "hints"}

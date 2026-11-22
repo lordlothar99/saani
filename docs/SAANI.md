@@ -26,8 +26,8 @@ The status of each feature lives in its GitHub issue (epic: Saani v1), never in 
   each the whole machine: landings first, then tier 1, then full runs.
 - **The record of a change is its commit message**: `refs #n`, the trailers `Why:` and `Undo:`, then a comment on the issue. A commit on a
   worker's branch or on the integration branch without them is refused (the commit-msg hook, and `land` checks every commit).
-- **Narrow keys.** No worker holds a key that can do more than its one job (planned: Sentinel with read-only diagnostics, Deployer with a
-  deploy-only key behind the owner's tap). A passphrase is never pasted into a chat.
+- **Narrow keys.** No worker holds a key that can do more than its one job (Deployer: a deploy-only key behind the owner's tap, see "Deploy"; planned: Sentinel with
+  read-only diagnostics). A passphrase is never pasted into a chat.
 
 ## At a glance
 ```mermaid
@@ -75,7 +75,8 @@ flowchart TB
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. |
 | `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
-| `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs the deployer (planned, issue #5); until it exists the command stops after the merge and exits 2. `--dry-run` checks and prints, merges nothing. |
+| `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs `saani deploy` (below). `--dry-run` checks and prints, merges nothing. |
+| `saani deploy [--dry-run]` | The deployer (below): CI green on the production head, no issue in production since the prod tag whose Deploy row says not to deploy, the `[deploy]` checks and dry run, the deploy with a timeout, its log, the prod tag moved, `✔ Deployed` and the close on each `in-main` issue of the range. `--dry-run` stops after the dry run and prints the command (the key as `<key>`). |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
@@ -153,7 +154,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 | The owner | at the keyboard | asleep or out |
 | Questions | allowed, one at a time, with a recommendation | none: a refused call is skipped and noted for the report |
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
-| Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
+| Deploy | the owner runs it (the Deployer prepares, the owner approves and taps) | only if the owner started the run so |
 
 The auto checklist is the plugin's skill (`skills/auto/SKILL.md`). An auto run ends with one green integration -> production pull request and a report; the owner then says **merge** or **merge and deploy** (`/saani:merge`, `/saani:merge --deploy`), the only way that pull request is merged by Saani: the run itself never merges.
 
@@ -162,6 +163,31 @@ Issues and comments have one shape. A new issue starts from the template of its 
 A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
 `🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the auto fit, what is deployed, what the owner is
 asked, what blocks the issue); the map and the auto run read it through that one parser.
+
+## Deploy
+`saani deploy` (the `saani:deployer` agent runs it and reads the log; `saani merge --deploy` runs it after the merge). Settings: `[deploy]`
+in saani.toml (docs/CONFIG.md). Each step is printed, the first failure stops with what to do next:
+1. CI: the production head (after `git fetch`) has the `[ci] status_context` status `success`.
+2. The issues: every `refs #n` in `git log <prod tag>..origin/<production>`, open or closed, is read; one whose At a glance Deploy row starts
+   with "No", "⛔" or "Do not" refuses the deploy and is listed ("None" is not a no: it means nothing to deploy). No prod tag yet: a first
+   deploy, no issue is touched.
+3. The `[deploy] checks` (each exits 0, e.g. disk space), then the `dry_run` command (empty: skipped).
+4. The deploy, with `timeout_minutes`; its output is kept in `build/saani-deploy-<UTC>.log` of the main checkout. A success is exit 0 and,
+   when `log_ok` is set, a match of that regex in the output. A timeout or a failure moves nothing.
+5. After a success: the prod tag moved to the deployed commit and pushed (`git push origin refs/tags/<prod_tag> --force`: the only force
+   push Saani does, for the moving tag and nothing else), then `### ✔ Deployed` (commit, log file name) on each issue of the range
+   labelled `in-main`, and those issues closed as completed.
+
+**The owner's approval** is their "merge and deploy" (or "deploy") plus the tap of the SSH agent that holds the deploy key: no phone
+notification. The key's path is `[deploy] key`; Saani passes it through (`{key}` in the commands, shown as `<key>` when printed) and never
+reads its content.
+
+**The owner's side, once** (to verify for your setup; Saani does none of it):
+- a key made only for the deploy, restricted on the server in `authorized_keys`: `command="<the deploy command>",no-pty,no-port-forwarding,
+  no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA...`, so it can run that one command and nothing else;
+- the key held by an agent that asks at each use (for example a hardware key that needs a touch, or an agent with confirm-on-use): check
+  that your agent really asks every time, and whether the tap can come from the phone or only from the PC;
+- a passphrase is never pasted into a chat.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),

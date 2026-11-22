@@ -24,7 +24,13 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `frozen` | `{}` | `path = "mark"`: once the mark is in the first 2,000 characters of that file on the integration branch, no branch may change it |
 | | `lock_stale_hours` | `2` | a landing lock older than this is taken over |
 | | `push_attempts` | `3` | how many times a landing merges again when the integration branch moved under it |
-| `[deploy]` | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
+| `[deploy]` | `command` | `[]` | the deploy, a command list, e.g. `["ssh", "-i", "{key}", "deploy@host", "deploy-prod"]`; `{key}` and `{python}` are expanded. Empty: `saani deploy` refuses |
+| | `dry_run` | `[]` | the same with a dry-run flag; empty: skipped |
+| | `checks` | `[]` | command lists run before the deploy (e.g. disk space); each must exit 0 |
+| | `log_ok` | `""` | a regex the deploy's output must match to count as a success (with exit 0) |
+| | `key` | `""` | the path of the deploy key, never its content: only passed through as `{key}` (printed as `<key>`) |
+| | `timeout_minutes` | `30` | the deploy is stopped after this long |
+| | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
 | `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`) |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |

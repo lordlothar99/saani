@@ -9,7 +9,7 @@ the worker agents now, hooks later.
 | `bin/saani`, `bin/saani.cmd` | the `saani` command inside Claude Code: `bin/` is on the PATH of Claude's shell while the plugin is enabled, and the launchers run `saani.py` from the plugin's own copy (bash: the first Python 3.11+; Windows: `python`). `.gitattributes` keeps `bin/saani` in LF, or bash fails on Windows checkouts |
 | `skills/auto/SKILL.md` | `/saani:auto`, `/saani:auto 12 15`, `/saani:auto off`: the checklist of an auto run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani auto`) |
 | Claude Code hooks | none yet (they will live in `hooks/hooks.json`). The **git** commit-msg hook is not part of the plugin: it is [.githooks/commit-msg](../.githooks/commit-msg), and needs `SAANI_HOME` because git runs it outside Claude Code |
-| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` and `deployer` wait for their issues |
+| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`, `deployer`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` waits for its issue |
 
 ## Worker roles
 Five are written (`agents/`); the models are a first choice, to be changed by a trial on real issues, never by a price list. A role's model is
@@ -23,7 +23,7 @@ harness, is a one-line change after the cost per landing is measured (#8). A wor
 | Scribe | Haiku | issue comments, labels, commit trailers |
 | Researcher | Sonnet | reads docs, releases and code, brings back the answer |
 | Sentinel (planned) | Sonnet | server diagnostics with a read-only key |
-| Deployer (planned) | Sonnet | deploys production after the owner's tap, with a deploy-only key |
+| Deployer | Sonnet | runs `saani deploy` (dry run first, risks reported, the log read); deploys only when the owner asked, after their tap, with a deploy-only key it never touches |
 
 ## The pipeline from an issue to dev
 The Architect (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.
