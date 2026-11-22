@@ -26,9 +26,14 @@
 - `[board] folders` accepts only `work`, `deploy` and `auto` (issue #47): another key is refused, and the old `longrun` is refused
   with its new name, so a renamed folder is never silently ignored.
 - Fewer approvals (issue #46): `saani status` warns, with the line to add, when the worktrees folder is not in Claude Code's
-  `permissions.additionalDirectories` (every `cd` into a worktree, the agents' included, otherwise asks the owner); the `saani:coder`,
-  `saani:tester` and `saani:reviewer` agents read with the file tools and run one plain command per Bash call, never inline code; the
-  auto skill checks the folder before a run; the README's setup lists both settings.
+  `permissions.additionalDirectories` (a command that writes in a worktree, the agents' included, otherwise asks the owner), and gives
+  a relative line (`../webshop-wt`) for the project's committed `.claude/settings.json`, so one line covers every developer; the
+  `saani:coder`, `saani:tester` and `saani:reviewer` agents never `cd` (Claude Code asks before every `cd <folder> && <command>`, and a
+  subagent's `cd` does not last): they name the worktree with `git -C`, `saani test --worktree` (new option) and `saani land
+  --worktree`, run one plain command per Bash call and never inline code; the guard allows `saani test --worktree` only into a worktree's top folder or the run's folder, and checks a test command's paths
+  from the top of its checkout (a `cd` into a subfolder no longer shifts the check); the README pairs `Bash(git -C *)` with `ask` rules for
+  `git -C ... push`, `reset` and `clean`; the auto skill checks the folder before a run; Saani's own settings carry `../saani-wt` and
+  those `ask` rules.
 - The map: the release pull request is a harvester at the Refinery (its CI on its lights), a zone's sign opens a panel with one prompt for
   all its issues, a Tweaks menu, and the "Auto mode" filter.
 

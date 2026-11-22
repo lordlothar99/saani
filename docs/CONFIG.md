@@ -10,7 +10,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `[branches]` | `integration` | `dev` | where work lands, one landing at a time |
 | | `production` | `main` | what is released; the release pull request goes integration -> production |
 | | `prod_tag` | `prod` | the tag that marks what is live; a hotfix starts there |
-| `[worktrees]` | `folder` | `../<repo name>-wt` | where the workers' worktrees go (relative to the main checkout, or absolute). Outside the main checkout, it must be in Claude Code's `permissions.additionalDirectories` (`.claude/settings.local.json` or `~/.claude/settings.json`), or every `cd` there asks the owner: `saani status` warns with the line to add |
+| `[worktrees]` | `folder` | `../<repo name>-wt` | where the workers' worktrees go (relative to the main checkout, or absolute). Outside the main checkout, it must be in Claude Code's `permissions.additionalDirectories`, best in the project's committed `.claude/settings.json` as a relative path (`"../webshop-wt"`, read from the project's folder, so one line covers every developer), or a command that writes there asks the owner: `saani status` warns with the line to add |
 | `[issues]` | `types` | `{Task = "task", Feature = "feat", Bug = "bug"}` | GitHub issue Type -> branch prefix; an issue with another Type, or none, is refused |
 | | `hotfix_default_type` | `bug` | the prefix of a hotfix whose issue has no Type |
 | | `labels` | see below | the labels Saani reads and writes |

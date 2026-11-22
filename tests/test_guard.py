@@ -94,6 +94,9 @@ def test_the_security_review_cases(ctx, name, inp, expected):
 # ---------------------------------------------------------------- Bash: allowed
 
 ALLOWED = [
+    "saani test --worktree {work} -- python -m pytest -q", "saani test --kind landing --worktree={work} -- python -m pytest -q tests/test_a.py",
+    "saani test --worktree {run} --kind full -- python -m pytest -q", "saani test --worktree {work} python -m pytest -q",
+    "cd {work}/src && saani test -- python -m pytest -q tests",
     "saani status", "saani land --worktree {work}", "saani start 12", "saani test --kind landing -- python -m pytest -q",
     "saani test --kind tier1 -- python -m pytest -q", "saani test --kind=landing -- python -m pytest -q",
     "saani test -- npm test", "saani test --kind=full -- python -m pytest -q", "saani comment 12 progress",
@@ -149,6 +152,15 @@ def test_the_run_s_own_work_is_allowed_without_a_prompt(ctx, command):
 # ---------------------------------------------------------------- Bash: refused, with the reason that is logged
 
 DENIED = [
+    ("saani test --worktree {main} -- python -m pytest -q", "cd outside the worktrees"),
+    ("saani test --worktree {wt} -- python -m pytest -q", "cd outside the worktrees"),
+    ("saani test --worktree {wt}/* -- python -m pytest -q", "cd outside the worktrees"),
+    ("saani test --worktree={wt}/* -- python -m pytest -q", "cd outside the worktrees"),
+    ("saani test --worktree {work}/src -- python -m pytest -q ../../../evil/tests", "cd outside the worktrees"),   # deeper than the top
+    ("cd {work}/src && saani test -- python -m pytest -q ../../evil/tests", "test option"),   # checked from the worktree's top, where it runs
+    ("saani test --worktree={home} -- python -m pytest -q", "cd outside the worktrees"),
+    ("saani test --worktree -- python -m pytest -q", "saani command"), ("saani test --work {work} -- python -m pytest -q", "saani command"),
+    ("saani test --worktree {work} -- python -m pytest -q {main}/tests", "test option"),
     ("git push", "git push"), ("git push origin HEAD:dev", "git push"), ("git push --force", "git push"),
     ("git status && git push", "git push"), ("git reset --hard origin/dev", "git reset --hard"), ("git clean -fd", "git clean"),
     ("git branch -D feat/12-cart-total", "git branch -D"), ("git branch --delete --force x", "git branch -D"),

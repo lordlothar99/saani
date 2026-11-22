@@ -759,20 +759,54 @@ SAANI_SPEC = {
 SAANI_TEXT = {"--slug", "--text", "--field"}
 
 
+def checkout_top(ctx, p):
+    """The top folder of the checkout `p` is in, as far as the run's places tell: the run's folder, or the worktree (the first folder
+    below the worktrees folder). Elsewhere `p` itself, which the test command's own path rules then judge."""
+    if inside(p, ctx.folder):
+        return ctx.folder
+    if ctx.wt_dir and inside(p, ctx.wt_dir) and p != ctx.wt_dir:
+        return os.path.join(ctx.wt_dir, os.path.relpath(p, ctx.wt_dir).split(os.sep)[0])
+    return p
+
+
 def saani_command(args, ctx, cwd):
     sub = args[0] if args else ""
     sub = "ui" if sub in ("map", "board") else sub
     if sub == "test":
-        rest = list(args[1:])
+        # saani test [--kind K] [--worktree P] [--] <command>: it runs in the top folder of a checkout, so the test command's paths are
+        # checked from there: the named worktree (exactly a worktree's top folder or the run's folder, no glob), else the top of the
+        # worktree the current folder is in (a `cd` into a subfolder must not shift the check).
+        rest, opts = list(args[1:]), []
         if "--" in rest:
-            kind, rest = rest[:rest.index("--")], rest[rest.index("--") + 1:]
+            opts, rest = rest[:rest.index("--")], rest[rest.index("--") + 1:]
         else:
-            kind = []
-            while rest and rest[0].startswith("--kind"):
-                kind, rest = (kind + rest[:1], rest[1:]) if "=" in rest[0] else (kind + rest[:2], rest[2:])
-        if any(not (w == "--kind" or re.fullmatch(r"(--kind=)?(landing|full|tier1)", w)) for w in kind):
-            return deny("saani command", "saani test with an option other than --kind", "saani")
-        return test_command(rest, ctx, cwd, "saani")
+            while rest and (rest[0].startswith("--kind") or rest[0].startswith("--worktree")):
+                n = 1 if "=" in rest[0] else 2
+                opts, rest = opts + rest[:n], rest[n:]
+        where, k = checkout_top(ctx, ctx.path(".", cwd)), 0
+        while k < len(opts):
+            w = opts[k]
+            name, eq, value = w.partition("=")
+            if name not in ("--kind", "--worktree"):
+                return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
+            glob = bool(getattr(w, "glob", False))           # `--worktree=<glob>`: the word as a whole carries it
+            if not eq:
+                if k + 1 >= len(opts):
+                    return deny("saani command", f"saani test {name} without a value", "saani")
+                k += 1
+                value, glob = opts[k], bool(getattr(opts[k], "glob", False))
+            if name == "--kind" and value not in ("landing", "full", "tier1"):
+                return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
+            if name == "--worktree":
+                # Exactly a worktree's top folder or the run's folder: saani test runs in the checkout's top folder, so the test paths
+                # are checked from the folder they run in (a folder deeper down would let `../..` reach out of the run).
+                where = ctx.path(value, cwd)
+                top = where == ctx.folder or (ctx.wt_dir is not None and os.path.dirname(where) == ctx.wt_dir)
+                if glob or not top or not ctx.cd_ok(where):
+                    return deny("cd outside the worktrees", "saani test --worktree that is not a worktree's top folder or the run's folder",
+                                "saani")
+            k += 1
+        return test_command(rest, ctx, where, "saani")
     if sub == "auto" and args[1:2] in (["on"], ["off"]):
         return deny("saani auto switch", f"saani auto {args[1]} inside an auto run (a run never re-arms or ends itself)", "saani",
                     how="report and stop; the owner ends the run from a terminal: saani auto off --run <id>")

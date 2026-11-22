@@ -19,7 +19,7 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
                                                     branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
-  saani test [--kind landing|full] -- <cmd...>     run a test command through the test queue (saani/queue.py)
+  saani test [--kind landing|full] [--worktree P] -- <cmd...>  run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
 
@@ -513,16 +513,21 @@ def land_hotfix(args, cwd, branch, number):
     return 0
 
 
+def named_worktree(path):
+    """The checkout `--worktree PATH` names, or the current folder's when PATH is empty. A worktree is named instead of entered because a
+    `cd` does not last: Claude Code undoes it in a subagent, and asks before `cd <folder> && <command>`."""
+    if not path:
+        return pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
+    top = git("rev-parse", "--show-toplevel", cwd=pathlib.Path(path), check=False) if pathlib.Path(path).is_dir() else None
+    cwd = known_worktree(top.stdout.strip(), [p for p, _ in worktrees()]) if top is not None and top.returncode == 0 else None
+    if cwd is None:
+        raise SystemExit(f"--worktree {path}: not a worktree of this repository (see saani status)")
+    return cwd
+
+
 def cmd_land(args):
     c = cfg()
-    if args.worktree:
-        # An auto run cannot change folder: it names the worktree instead, from the main checkout.
-        top = git("rev-parse", "--show-toplevel", cwd=pathlib.Path(args.worktree), check=False)
-        cwd = known_worktree(top.stdout.strip(), [p for p, _ in worktrees()]) if top.returncode == 0 else None
-        if cwd is None:
-            raise SystemExit(f"--worktree {args.worktree}: not a worker's worktree of this repository (see saani status)")
-    else:
-        cwd = pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
+    cwd = named_worktree(args.worktree)
     branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
     m = c.worker_branch.match(branch)
     if not m:
@@ -769,14 +774,22 @@ def additional_directories(root, files=None):
 
 def worktrees_warning(c, files=None):
     """A line for `saani status` when the workers' worktrees folder is outside every working directory of a Claude Code session of the
-    project: each `cd` there, the coders' included, then asks the owner. None when the folder is inside the main checkout or under an
-    `additionalDirectories` entry."""
+    project: then a command that writes there, the agents' included, asks the owner. None when the folder is inside the main checkout or
+    under an `additionalDirectories` entry. The line to add is relative to the main checkout when it can be (`../webshop-wt`), so the
+    project's committed `.claude/settings.json` covers every developer; Claude Code resolves it from the project's folder."""
     wt = c.wt_dir
     if _within(wt, c.root) or any(_within(wt, d) for d in additional_directories(c.root, files)):
         return None
-    shown = str(wt.resolve() if wt.exists() else wt).replace("\\", "/")
-    return (f"warning: worktrees folder {shown} is not in permissions.additionalDirectories: every cd there (the agents' included) asks "
-            f'the owner. Add it in .claude/settings.local.json: {{"permissions": {{"additionalDirectories": ["{shown}"]}}}}')
+    full = (wt.resolve() if wt.exists() else wt)
+    try:
+        entry = os.path.relpath(full, c.root.resolve())
+    except ValueError:                                     # another drive on Windows: no relative path
+        entry = str(full)
+    entry = entry.replace("\\", "/")
+    return (f"warning: worktrees folder {str(full).replace(chr(92), '/')} is not in permissions.additionalDirectories: a command that "
+            f"writes there (the agents' included) asks the owner. Add it to the project's .claude/settings.json, committed so every "
+            f"developer has it (Claude Code reads it once they trust the folder): "
+            f'{{"permissions": {{"additionalDirectories": ["{entry}"]}}}}')
 
 
 def cmd_status(args):
@@ -835,8 +848,7 @@ def cmd_test(args):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("give the command after --, e.g. saani test -- python -m pytest")
-    cwd = pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
-    return queued_run(test_kind(args.kind), command, cwd)
+    return queued_run(test_kind(args.kind), command, named_worktree(args.worktree))
 
 
 def cmd_check_msg(args):
@@ -896,6 +908,7 @@ def add_parsers(sub):
     p = sub.add_parser("test", help="run a test command through the test queue, one job at a time")
     p.add_argument("--kind", default="landing", metavar="{landing,full}",
                    help="landing (the tests before a landing) goes before full; a landing's own run goes first")
+    p.add_argument("--worktree", help="run in this worktree instead of the current folder (a subagent's cd does not last)")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(run=cmd_test)
     p = sub.add_parser("check-msg", help="the commit-msg hook")

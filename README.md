@@ -91,16 +91,20 @@ claude plugin update saani@saani          # then /reload-plugins in an open Clau
 ```
 `claude plugin list` shows the installed version; `claude plugin uninstall saani@saani` removes it.
 
-**Fewer approvals in Claude Code.** In your project's `.claude/settings.json`, allow the `saani` command, and put the worktrees folder in
-the session's working directories (it sits beside the project, so without it every `cd` there, the agents' included, asks you). The
-folder's path is your machine's, so it goes in the untracked `.claude/settings.local.json` (or your `~/.claude/settings.json`):
+**Fewer approvals in Claude Code.** In your project's `.claude/settings.json`, committed so every developer has it, allow the `saani`
+command and put the worktrees folder in the session's working directories. The folder sits beside the project, so without it a command
+that writes there, the agents' included, asks you. A relative path is read from the project's folder, so the same line works on every
+machine:
 ```json
-{"permissions": {"allow": ["Bash(saani *)"]}}
+{"permissions": {"allow": ["Bash(saani *)", "Bash(git -C *)"],
+                 "ask": ["Bash(git -C * push*)", "Bash(git -C * reset*)", "Bash(git -C * clean*)"],
+                 "additionalDirectories": ["../webshop-wt"]}}
 ```
-```json
-{"permissions": {"additionalDirectories": ["C:/Users/<you>/projects/webshop-wt"]}}
-```
-`saani status` warns, with the exact line, when the worktrees folder is not covered.
+`Bash(git -C *)` lets the agents commit in a worktree without asking; it would also let `git -C . push --force` or `reset --hard`
+through (a rule for `git push` does not match `git -C ... push`), so keep the three `ask` rules beside it. Claude Code reads a project's committed settings once you have accepted its trust dialog (the first time you open Claude Code in the
+folder). `saani status` warns, with the exact line, when the worktrees folder is not covered. Saani's agents never `cd` into a worktree:
+Claude Code asks before every `cd <folder> && <command>`, and a subagent's `cd` does not last; they name it instead (`git -C`,
+`saani test --worktree`, `saani land --worktree`).
 
 **5. Work an issue.** In Claude Code: `/saani:start 42`, ask Claude to code it, then `/saani:land`. Or the same in a terminal:
 ```bash

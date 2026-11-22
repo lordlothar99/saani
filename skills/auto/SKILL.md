@@ -26,9 +26,9 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 
 ## Before the run (questions first)
 0. **The worktrees folder, reachable without prompts.** Run `saani status`. If it prints `warning: worktrees folder ... is not in
-   permissions.additionalDirectories`, tell the owner, before anything else, the line it gives to add to `.claude/settings.local.json`
-   (or their `~/.claude/settings.json`), and why: otherwise every `cd` of the run into a worktree, the coders' included, needs an
-   approval. Never write a settings file yourself: they are the owner's. Go on once they say it is done (the away part is a new session, so
+   permissions.additionalDirectories`, tell the owner, before anything else, the line it gives to add to the project's committed
+   `.claude/settings.json` (a relative path, the same for every developer), and why: otherwise a command of the run that writes in a
+   worktree, the coders' included, needs an approval. Never write a settings file yourself: they are the owner's. Go on once they say it is done (the away part is a new session, so
    it reads it) or that they accept the prompts.
 1. **Folder.** An auto run works in its own throwaway worktree, never in the owner's folder: run `saani auto` (it makes
    `auto-<YYYY-MM-DD_HHMM>` beside the other worktrees, on the branch `auto/<YYYY-MM-DD_HHMM>` from the integration branch) and say

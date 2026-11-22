@@ -118,12 +118,15 @@ def test_every_worker_agent_is_named_like_its_file_and_has_tools_and_a_model():
 
 
 def test_the_agents_that_run_commands_keep_to_commands_an_allowlist_can_cover():
-    """#46: the coder, the tester and the reviewer read with the file tools and run one plain command per Bash call, never inline code,
-    so a project's allow rules cover what they run and nothing asks the owner."""
+    """#46: the coder, the tester and the reviewer never `cd` (a subagent's cd does not last, and `cd <folder> && <command>` always
+    asks): they name the worktree (file tools with its paths, git -C, saani test --worktree), run one plain command per Bash call, and
+    never inline code, so a project's allow rules cover what they run."""
     for role in ("coder", "tester", "reviewer"):
         text = " ".join((ROOT / "agents" / f"{role}.md").read_text(encoding="utf-8").split())
-        assert "Read files with Read, Grep and Glob" in text, role
-        assert "One plain command per Bash call; the only chaining is `cd <worktree> && <command>`" in text, role
+        assert "**Never `cd`: name the worktree.**" in text, role
+        assert "`git -C <worktree> <command>`" in text and "`saani test --worktree <worktree>" in text, role
+        assert "One plain command per Bash call, nothing chained." in text, role
+        assert "cd <worktree> &&" not in text, role
         for banned in ("`python -`", "`python -c`", "heredoc scripts", "shell loops", "`base64`", "`awk`"):
             assert banned in text, (role, banned)
 

@@ -210,7 +210,16 @@ def test_status_warns_when_the_worktrees_folder_is_outside_every_working_directo
     line = core.worktrees_warning(project)
     wt = str((project.root.parent / "webshop-wt").resolve()).replace("\\", "/")
     assert line.startswith(f"warning: worktrees folder {wt} is not in permissions.additionalDirectories")
-    assert f'"additionalDirectories": ["{wt}"]' in line and ".claude/settings.local.json" in line
+    assert '"additionalDirectories": ["../webshop-wt"]' in line                       # relative: one committed line for every developer
+    assert "the project's .claude/settings.json" in line
+
+
+def test_a_worktrees_folder_on_another_drive_is_given_as_an_absolute_path(project, monkeypatch):
+    def other_drive(path, start):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+    monkeypatch.setattr(core.os.path, "relpath", other_drive)
+    wt = str((project.root.parent / "webshop-wt").resolve()).replace("\\", "/")
+    assert f'"additionalDirectories": ["{wt}"]' in core.worktrees_warning(project)
 
 
 @pytest.mark.parametrize("where", ["project", "local", "user"])
@@ -256,3 +265,40 @@ def test_saani_test_kind_is_landing_or_full_tier1_points_to_landing_and_land_is_
         core.test_kind("land")
     with pytest.raises(SystemExit, match="unknown --kind fast"):
         core.test_kind("fast")
+
+
+# ---------------------------------------------------------------- naming a worktree instead of entering it (#46)
+
+@pytest.fixture
+def repo_with_worktree(tmp_path, monkeypatch):
+    import subprocess
+    from saani import config
+    def sh(*cmd, cwd):
+        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
+    main, wt = tmp_path / "webshop", tmp_path / "webshop-wt" / "12-cart"
+    main.mkdir()
+    sh("git", "init", "-q", "-b", "dev", cwd=main)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
+    sh("git", "worktree", "add", "-q", "-b", "feat/12-cart", str(wt), cwd=main)
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    monkeypatch.chdir(main)
+    return main, wt
+
+
+def test_a_worktree_is_named_by_its_path_and_anything_else_is_refused(repo_with_worktree, tmp_path):
+    main, wt = repo_with_worktree
+    assert core._within(core.named_worktree(str(wt)), wt) and core._within(wt, core.named_worktree(str(wt)))
+    assert core._within(core.named_worktree(None), main)                              # no option: the current folder's checkout
+    (tmp_path / "elsewhere").mkdir()
+    for bad in (str(tmp_path / "elsewhere"), str(tmp_path / "missing")):
+        with pytest.raises(SystemExit, match="not a worktree of this repository"):
+            core.named_worktree(bad)
+
+
+def test_saani_test_runs_in_the_named_worktree(repo_with_worktree, monkeypatch):
+    main, wt = repo_with_worktree
+    seen = []
+    monkeypatch.setattr(core, "queued_run", lambda kind, command, cwd: seen.append((kind, command, cwd)) or 0)
+    args = type("A", (), {"kind": "landing", "worktree": str(wt), "command": ["--", "python", "-m", "pytest", "-q"]})()
+    assert core.cmd_test(args) == 0
+    assert seen[0][1] == ["python", "-m", "pytest", "-q"] and core._within(seen[0][2], wt) and core._within(wt, seen[0][2])
