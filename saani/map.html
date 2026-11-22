@@ -53,6 +53,29 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 @keyframes warpIn{0%{filter:blur(14px) sepia(.7) saturate(1.3) brightness(1.08) contrast(.9);transform:scale(.93)}20%{transform:scale(.95) translate(4px,-2px)}
   40%{transform:scale(.97) translate(-3px,2px)}65%{filter:blur(2px) sepia(.25)}100%{filter:none;transform:none}}
 @media (prefers-reduced-motion:reduce){#storm.on::before,#storm.on::after,#stage.warp-out #map,#stage.warp-in #map{animation:none}}
+.harvtxt{font:600 8px var(--mono);letter-spacing:.06em;fill:#f0dcb4}
+.hblink{animation:hblink 1s steps(1) infinite}
+.flame{transform-box:fill-box;transform-origin:50% 100%;animation:flame .7s ease-in-out infinite alternate}
+@keyframes flame{from{transform:scaleY(.85) skewX(-4deg)}to{transform:scaleY(1.12) skewX(4deg)}}
+@keyframes hblink{50%{opacity:.15}}
+@media (prefers-reduced-motion:reduce){.hblink{animation:none}}
+/* The owner, 2026-11-22: the tweak menu, bottom left beside Signs: try the release PR, its CI lights, the trip and a sandworm */
+.tweaks{position:fixed;z-index:6;bottom:calc(14px + env(safe-area-inset-bottom,0px));left:calc(104px + env(safe-area-inset-left,0px))}
+.tweaks > .btn{position:static;background:var(--slab)}
+.tweakpanel{position:absolute!important;bottom:calc(100% + 8px);left:0;padding:12px 14px;display:grid;gap:10px;min-width:280px;transform-origin:bottom left;animation:twIn .18s ease-out both}
+@keyframes twIn{from{opacity:0;transform:translateY(6px) scale(.97)}}
+.tw-sec{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tw-h{flex:1 0 100%;font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dust)}
+.tweakpanel .btn{position:static;font-size:10px;padding:6px 8px}
+.tweakpanel .btn[disabled]{opacity:.4;cursor:default}
+.tweakpanel .btn.on{background:var(--sand);color:var(--night)}
+.tw-note{margin:0;font:400 11px/1.4 var(--body);color:var(--dust);max-width:280px}
+.zlist{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.zlist li{cursor:pointer;padding:4px 6px;border:1px solid transparent;font-size:14px}
+.zlist li:hover{border-color:var(--edge-hi);background:rgba(255,255,255,.03)}
+.zdot{display:inline-block;width:9px;height:9px;margin-right:8px;vertical-align:middle}
+.panel .prompt{white-space:pre-wrap;max-height:26vh;overflow:auto}
+
 </style>
 <style>
 /* Layout: a full-screen isometric board (SVG, pan and zoom), the HUD floating at the corners, panels over it. One dusk look, dark. */
@@ -232,11 +255,18 @@ a{color:var(--amber)}
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
  <select id="ms" aria-label="Milestone"><option value="">All milestones</option></select>
- <select id="lr" aria-label="Auto"><option value="">Auto: any</option><option value="yes">Auto: yes</option><option value="partly">Auto: partly</option><option value="no">Auto: no</option></select>
+ <select id="lr" aria-label="Auto mode" title="Filter the issues Claude Code could take in auto mode.&#10;&#10;Auto mode is a Claude Code permission mode: instead of asking you to approve each command or file change, a classifier checks every action, lets the safe ones run and blocks anything irreversible, destructive or aimed outside your environment. So Claude can work through an issue without you approving each step.&#10;&#10;Yes: repo only, nothing waits for you.&#10;Partly: auto mode does the repo part and comments the rest (the server, say).&#10;No: it needs you (an answer, an account or a key, a live check, an approval)."><option value="">Auto mode: any</option><option value="yes">Auto mode: yes</option><option value="partly">Auto mode: partly</option><option value="no">Auto mode: no</option></select>
 </div>
 
-<div class="hud summary" id="summary" aria-label="At a glance"></div>
+<div class="hud summary" id="summary" aria-label="At a glance" hidden></div>
 
+<div class="tweaks" id="tweaks"><button id="tweakbtn" class="btn hud" type="button" aria-expanded="false" aria-controls="tweakpanel">⚙ Tweaks</button>
+<div id="tweakpanel" class="hud tweakpanel" hidden>
+<div class="tw-sec"><span class="tw-h">Release PR</span><button class="btn" type="button" data-tw="merge">Merge it</button></div>
+<div class="tw-sec"><span class="tw-h">CI lights</span><button class="btn" type="button" data-tw="ci" data-state="running">Running</button><button class="btn" type="button" data-tw="ci" data-state="green">Passed</button><button class="btn" type="button" data-tw="ci" data-state="red">Failed</button></div>
+<div class="tw-sec"><span class="tw-h">Travel</span><button class="btn" type="button" data-tw="trip">Sandstorm trip</button><button class="btn" type="button" data-tw="worm">Call a sandworm</button></div>
+<p class="tw-note" id="tw-note"></p>
+</div></div>
 <details class="hud legend" id="legend"><summary>Signs</summary><button class="x" type="button" aria-label="Close the signs">×</button><ul id="legend-list"></ul></details>
 
 <div class="hud zoom"><button class="btn" id="zout" type="button" aria-label="Zoom out">−</button><span class="pct" id="pct">100%</span><button class="btn" id="zin" type="button" aria-label="Zoom in">+</button><button class="btn" id="zfit" type="button">Fit</button></div>
@@ -413,9 +443,9 @@ const ZONES = [
   {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 7,  hint: "Waits for your answer or your action. Work comes here from the backlog or from the workshops, and goes back."},
   {id: "works", cmd: "/saani:land when it is committed",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 17, hint: "Started or being built in its own worktree."},
   {id: "camp",    stage: "Camp",            name: "The Hollow",        cx: 47,  cy: 36, hint: "Where workers rest when they are not on a task."},
-  {id: "proving", cmd: "/saani:test (/saani:progress for a slow run)", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
+  {id: "proving", cmd: "/saani:test (/saani:progress for a long test run)", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
   {id: "depot", cmd: "/saani:ci pr",   stage: "Integrated",          name: "Caravan Depot",     cx: 70,  cy: 17, hint: "Merged on {int}, waiting for the next release pull request into {prod}."},
-  {id: "tower", cmd: "/saani:ci pr, then /saani:ci merged <pr> after the merge",   stage: "Release PR",      name: "The Watchtower",    cx: 82,  cy: 25, hint: "Carried by the open release pull request ({int} → {prod}). The beacon is its CI; red goes back to {int}."},
+  {id: "tower", cmd: "/saani:ci pr, then /saani:ci merged <pr> after the merge",   stage: "Release PR",      name: "The Refinery",      cx: 82,  cy: 25, hint: "Carried by the open release pull request ({int} → {prod}). The beacon is its CI; red goes back to {int}."},
   {id: "pad", cmd: "/saani:ci merged <pr>",     stage: "To deploy",       name: "Launch Pad",        cx: 95,  cy: 14,  hint: "Released with something to deploy: goes live with the next deploy."},
   {id: "archive", cmd: "/saani:ci merged <pr>", stage: "To close",        name: "The Archive",       cx: 100, cy: 34, hint: "Released with nothing to deploy (tooling, docs, tests): close it."},
   {id: "outpost", stage: "Live checks",     name: "Far Outpost",       cx: 107, cy: 9,  hint: "Deployed: the checklist of the live system waits for you."},
@@ -425,7 +455,7 @@ const ZONES = [
 // more room between Council Rock and the Workshops. Each zone: [flow, across, size]; size is the half-side of its sand patch.
 const PLACE = {
   inbox: [14, 10, 5], backlog: [26, 32, 8], you: [34, 60, 6.5], works: [46, 16, 5.5], camp: [68, 5, 5],
-  proving: [60, 36, 4.8], depot: [72, 58, 5], tower: [86, 38, 5], pad: [99, 18, 4.5], outpost: [114, 10, 4.5], archive: [99, 60, 4.8], citadel: [114, 40, 8.5],
+  proving: [60, 36, 4.8], depot: [72, 58, 5], tower: [86, 35, 7], pad: [93, 12, 4.5], outpost: [114, 10, 4.5], archive: [99, 60, 4.8], citadel: [114, 40, 8.5],
 };
 ZONES.forEach(z => { const p = PLACE[z.id]; if (p) [z.cx, z.cy, z.s] = p; });
 const SIZE = z => z.s || z.r || 5.6;                     // the sand patch
@@ -452,11 +482,11 @@ function typeOf(c) {
 const typeInfo = c => TYPE[typeOf(c)] || TYPE_NONE;
 // every move an issue can make: main road, branches, the way back, and the side tracks
 const EDGES = [
-  // The owner, 2026-11-22: a natural, scattered layout; the road winds from zone to zone. After the Watchtower it forks: something to
+  // The owner, 2026-11-22: a natural, scattered layout; the road winds from zone to zone. After the Refinery it forks: something to
   // deploy goes Launch Pad > Far Outpost > Citadel, nothing to deploy goes Archive > Citadel. Pad and Archive are alternatives, not steps.
-  {k: "main", pts: [[8, 8], [14, 10], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [80, 48], [86, 38]]},
-  {k: "main", pts: [[86, 38], [92, 28], [99, 18], [107, 13], [114, 10], [116, 24], [114, 40]], label: "deploy", at: 0},
-  {k: "main", pts: [[86, 38], [92, 50], [99, 60], [106, 54], [110, 47]], label: "nothing to deploy", at: 0},
+  {k: "main", pts: [[8, 8], [14, 10], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [80, 48], [86, 35]]},
+  {k: "main", pts: [[86, 35], [92, 28], [93, 12], [107, 13], [114, 10], [116, 24], [114, 40]], label: "deploy", at: 0},
+  {k: "main", pts: [[86, 35], [92, 50], [99, 60], [106, 54], [110, 47]], label: "nothing to deploy", at: 0},
   // The owner, 2026-11-22: no trails for the moves to and from Council Rock, the way back (tests failed, CI red) or the hotfix: they are static and add noise.
   {k: "side", pts: [[30, 38], [34, 69], [90, 69], [118, 69], [120, 49]], label: "closed, not planned", at: 1},
   {k: "camp", pts: [[50, 14], [63, 8]]},
@@ -500,11 +530,43 @@ function buildZone(z) {
       add(2, crates(cx - 5, cy - 2, 8)); add(2, crates(cx + 3.6, cy - 2.2, 6));
       { const [vx, vy] = iso(cx + .6, cy - 1.6); add(2.5, `<g transform="translate(${vx},${vy}) scale(.8)">${crawlerSVG()}</g>`); } break;
     case "tower": {
-      add(0, building(cx - 2.4, cy - 5, 4.8, 3.6, 1.4, "#8e6240", {rows: 1, door: true}));
-      add(1, bandTower(cx, cy - 3.2, 1.1, 7.4, "#a37548"));
-      const [bx, byy] = iso(cx, cy - 3.2, 7.4);
-      add(2, `<circle cx="${bx}" cy="${byy - 9}" r="40" fill="url(#g-glow)"/><circle id="beacon" class="beacon" cx="${bx}" cy="${byy - 9}" r="9" fill="${C.amber}"/>`);
-      add(3, lamp(cx - 3.6, cy - 1.2)); add(3, lamp(cx + 3.6, cy - 1.2)); add(3, banner(cx + 4.4, cy - 3.6, 2.6, C.amber)); break; }
+      // The owner, 2026-11-22: a refinery: a tank farm, a spherical gas tank on legs, two distillation columns with platforms and
+      // ladders, a process hall, a pipe rack and a flare stack; the CI beacon sits on the tallest column
+      const steel = "#8a5f3e", tankC = "#a37548", grate = "#3a2a1c";   // the same browns as the other buildings
+      const ring = r => [r * TW * .7071, r * TH * .7071];
+      const column = (x, y, r, h) => {
+        let o = cyl(x, y, r, h, steel);
+        const [rx, ry] = ring(r + .16), [lx0, ly0] = iso(x, y, 0), [, lyt] = iso(x, y, h - .2), lr = ring(r)[0];
+        o += `<path d="M${(lx0 - lr * .55).toFixed(1)} ${ly0.toFixed(1)}V${lyt.toFixed(1)}M${(lx0 - lr * .25).toFixed(1)} ${(ly0 + 3).toFixed(1)}V${(lyt + 3).toFixed(1)}" stroke="${grate}" stroke-width="1" opacity=".8"/>`;   // the ladder
+        for (let zz = 1.5; zz < h - .4; zz += 1.5) { const [px, py] = iso(x, y, zz);
+          o += `<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="${grate}" opacity=".55"/><ellipse cx="${px.toFixed(1)}" cy="${(py - 5).toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="none" stroke="#c9b79c" stroke-width="1" opacity=".7"/>`; }
+        const [tx, ty] = iso(x, y, h), [crx, cry] = ring(r * .7);
+        return o + `<ellipse cx="${tx.toFixed(1)}" cy="${(ty - 3).toFixed(1)}" rx="${crx.toFixed(1)}" ry="${(cry * 1.6).toFixed(1)}" fill="${shade(steel, 1.15)}"/>`;
+      };
+      const sphereTank = (x, y, r, lift) => {
+        let o = ""; const [sx, sy] = iso(x, y, lift + r), R = r * TW * .7071 * .9;
+        for (const [dx, dy] of [[-.6, -.6], [.6, -.6], [.6, .6], [-.6, .6]]) { const a = iso(x + dx * r, y + dy * r, 0), b = iso(x + dx * r * .8, y + dy * r * .8, lift + r * .5); o += `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${grate}" stroke-width="2.2"/>`; }
+        return o + `<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${R.toFixed(1)}" fill="${tankC}"/><path d="M${(sx + R * .2).toFixed(1)} ${(sy - R).toFixed(1)}A${R.toFixed(1)} ${R.toFixed(1)} 0 0 1 ${(sx + R * .2).toFixed(1)} ${(sy + R).toFixed(1)}A${(R * .8).toFixed(1)} ${R.toFixed(1)} 0 0 0 ${(sx + R * .2).toFixed(1)} ${(sy - R).toFixed(1)}Z" fill="${shade(tankC, .72)}"/>` +
+          `<ellipse cx="${(sx - R * .35).toFixed(1)}" cy="${(sy - R * .4).toFixed(1)}" rx="${(R * .28).toFixed(1)}" ry="${(R * .18).toFixed(1)}" fill="#fff" opacity=".35"/><ellipse cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" rx="${R.toFixed(1)}" ry="${(R * .22).toFixed(1)}" fill="none" stroke="${shade(tankC, .6)}" stroke-width="1"/>`;
+      };
+      const pipe = (pts, w = 3) => `<path d="M${pts.map(q => { const p = iso(...q); return p[0].toFixed(1) + " " + p[1].toFixed(1); }).join("L")}" fill="none" stroke="#3e2a1a" stroke-width="${w}" stroke-linejoin="round"/>`;
+      // the tank farm, at the back left
+      add(0, cyl(cx - 3.2, cy - 6, .9, 1.8, tankC)); add(0.1, cyl(cx - 5.2, cy - 4.8, 1.25, 2.4, tankC)); add(0.3, cyl(cx - 5.4, cy - 2.2, 1, 2, tankC));
+      // the pipe rack between the tanks and the columns
+      add(0.4, pipe([[cx - 4.2, cy - 4.6, 1.8], [cx - 1.2, cy - 4.6, 1.8], [cx + 2.2, cy - 4.2, 1.8]]) + pipe([[cx - 4.6, cy - 2.2, 1.4], [cx - 1, cy - 3.4, 1.4], [cx + 2.2, cy - 4, 1.4]], 2.4) +
+                  pipe([[cx - 2.6, cy - 6, 1.2], [cx - 2.6, cy - 4.8, 1.2]], 2.4));
+      add(0.6, sphereTank(cx - 2.2, cy - 2.6, 1.05, .7));
+      add(0.8, building(cx - .4, cy - 2.8, 3.6, 1.8, 1.2, "#8e6240", {rows: 1, door: true, lit: .6}));
+      // the distillation columns
+      add(1.1, column(cx + 2.6, cy - 4, .42, 5.6));
+      add(1.2, pipe([[cx + 2.9, cy - 3.8, 3], [cx + 3.6, cy - 2.8, 3], [cx + 3.6, cy - 2.4, .8]], 2.4));
+      add(1.3, cyl(cx + 3.8, cy - 2.4, .6, 1.3, tankC));
+      // the flare stack and its flame
+      add(1.4, cyl(cx + 4.8, cy - 5.6, .18, 6.6, "#4a3324")); add(1.45, smoke(cx + 4.8, cy - 5.6, 7));
+      { const [fx, fy] = iso(cx + 4.8, cy - 5.6, 6.6); add(1.5, `<circle cx="${fx}" cy="${fy - 6}" r="24" fill="url(#g-glow)"/><path class="flame" d="M${fx - 4} ${fy}Q${fx - 7} ${fy - 11} ${fx} ${fy - 20}Q${fx + 7} ${fy - 11} ${fx + 4} ${fy}Z" fill="#f0a63c"/><path d="M${fx - 2} ${fy}Q${fx - 3} ${fy - 6} ${fx} ${fy - 12}Q${fx + 3} ${fy - 6} ${fx + 2} ${fy}Z" fill="#ffe0a0"/>`); }
+      const [bx, byy] = iso(cx + 2.6, cy - 4, 5.6);
+      add(2, `<circle cx="${bx}" cy="${byy - 9}" r="30" fill="url(#g-glow)"/><circle id="beacon" class="beacon" cx="${bx}" cy="${byy - 9}" r="7" fill="${C.amber}"/>`);
+      add(3, lamp(cx - 3.6, cy - 1.2)); add(3, lamp(cx + 3.6, cy - 1.2)); break; }
     case "pad": {
       const ring = [...Array(8)].map((_, i) => { const a = Math.PI / 8 + i * Math.PI / 4; return iso(cx - .6 + Math.cos(a) * 3.4, cy - 2.6 + Math.sin(a) * 3.4); });
       add(0, `<polygon points="${P(ring)}" fill="#6e5440" stroke="${C.ridge}" stroke-opacity=".5"/><polygon points="${P(ring.map(p => [p[0], p[1] + 8]))}" fill="#3e2b1c" opacity=".6"/>` + ring.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="2.6" fill="${LIT}" class="spark"/>`).join(""));
@@ -676,7 +738,7 @@ function drawGround() {
   $("#ground").innerHTML = g.join("");
   cacheDeco();
 }
-const ROUTE = [[8, 8], [14, 10], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [80, 48], [86, 38], [92, 28], [99, 18], [107, 13], [114, 10], [116, 24], [114, 40]];
+const ROUTE = [[8, 8], [14, 10], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [80, 48], [86, 35], [92, 28], [93, 12], [107, 13], [114, 10], [116, 24], [114, 40]];
 // The layout above is written as (flow, across). The owner, 2026-11-22: START at the bottom left, END at the top right. On screen that
 // is the -y direction, so each point turns: x = across, y = BOARD_D - flow.
 // The owner, 2026-11-22: the milestones written in front of a zone must not reach the next building, so consecutive zones on the
@@ -714,10 +776,10 @@ function autoRun(c) {
   if (c.anchor || c.step === "checks") return {fit: "no", why: "A checklist of the live system: only you can check it."};
   if (L.includes(LAB("answer"))) return {fit: "no", why: "Waits for your answer."};
   if (L.includes(LAB("act"))) return {fit: "no", why: "Needs you to act: an account, a key, a live check or an approval."};
-  if (L.includes("infra")) return {fit: "partly", why: "Touches the server: an auto run does the repo part and comments the rest."};
+  if (L.includes("infra")) return {fit: "partly", why: "Touches the server: auto mode does the repo part and comments the rest."};
   return {fit: "yes", why: "Repo only and nothing waits for you."};
 }
-const FIT = {yes: {color: () => C.water, word: "Auto: yes"}, partly: {color: () => C.amber, word: "Auto: partly"}, no: {color: () => C.alert, word: "Auto: no"}};
+const FIT = {yes: {color: () => C.water, word: "Auto mode: yes"}, partly: {color: () => C.amber, word: "Auto mode: partly"}, no: {color: () => C.alert, word: "Auto mode: no"}};   // The owner, 2026-11-22: the long run is now Claude Code's auto mode
 function folderFor(c) {                                 // the folders come from saani.toml, [board] folders
   const p = DATA.project || {}, f = p.folders || {};
   if (["pr", "deploy"].includes(c.step)) return {path: f.deploy || f.work || "the project's checkout", branch: PROD(), why: "deploys and releases"};
@@ -750,12 +812,68 @@ function promptFor(c) {
 const SLOT = 1.12;
 let POS = {}, GROUPS = [];                               // number -> [x, y]; the milestone groups, written in the sand
 const GAP = .9;
+// The owner, 2026-11-22: the release PR is a big harvester parked in front of the Refinery, every issue of the PR riding in its open
+// hopper; its lights give the PR's CI: green when it passed, red when it failed, yellow and blinking while it runs
+let HARV = null;
+function harvesterLayout(z, list) {
+  // the hopper holds at least 6 issues (2 rows of 3) and grows longer, then a third row deep, for bigger releases
+  const n = list.length, rows = n > 12 ? 3 : 2, cols = Math.max(3, Math.ceil(n / rows)), SX = 1.05, SY = .85;
+  const w = cols * SX + .5, d = rows * SY + .6, len = w + 1.9, x0 = z.cx - len / 2 + .2, y0 = z.cy + SIZE(z) - 1.1 - d;
+  HARV = {x0, y0, w, d, floor: .66};
+  list.sort((a, b) => a.number - b.number).forEach((c, i) => POS[c.number] = [x0 + .25 + SX / 2 + (i % cols) * SX, y0 + .3 + SY / 2 + Math.floor(i / cols) * SY, HARV.floor]);
+}
+function ciLook(pr) {
+  const st = String((pr && pr.ci || {}).state || "").toLowerCase();
+  return /green|success|pass/.test(st) ? {col: C.ok, blink: false, word: "passed"} : /red|fail|error/.test(st) ? {col: C.alert, blink: false, word: "failed"} : {col: C.amber, blink: true, word: "running"};
+}
+function harvesterParts(H, pr, rev = false) {
+  const {x0, y0, w, d, floor: f} = H, L = w + 1.9, hull = "#6f5644", wall = "#8a6c52", cab = "#9b7d5f", track = "#2a1b10", dark = "#1f140b", wh = .55;
+  const ci = ciLook(pr);
+  const sh = [iso(x0 - .5, y0 - .3), iso(x0 + L + .3, y0 - .3), iso(x0 + L + .3, y0 + d + .4), iso(x0 - .5, y0 + d + .4)];
+  let back = `<polygon points="${P(sh)}" fill="#000" opacity=".16"/>`;
+  const hx = rev ? x0 - 1.7 : x0 - .2, cabX = rev ? x0 - 1.45 : x0 + w + .05, scoopX = rev ? x0 - 1.9 : x0 + w + 1.45, stackX = rev ? x0 + w - .06 : x0 - .14, lightX = rev ? x0 - .7 : x0 + w + .75;
+  back += prismZ(hx, y0 - .12, L, .34, .34, track, 0);                                         // the far track
+  back += prismZ(stackX, y0 + .14, .2, .2, 2.3, dark, .34) + prismZ(stackX, y0 + .5, .17, .17, 1.9, dark, .34);   // exhaust stacks
+  back += prismZ(hx, y0, L, d, .32, hull, .34);
+  if (rev) back += prismZ(scoopX, y0 + .04, .45, d - .08, .24, dark, .14) + prismZ(cabX, y0 + .08, 1.4, d - .16, .95, cab, .66);   // facing away: the cab sits behind the hopper                                                // the hull
+  back += prismZ(x0, y0, w, .08, wh, wall, f) + prismZ(x0, y0, .08, d, wh, wall, f);               // the hopper's far walls
+  let front = prismZ(x0, y0 + d - .08, w, .08, wh, wall, f) + prismZ(x0 + w - .08, y0, .08, d, wh, wall, f);   // its near walls
+  for (let i = 1; i < 5; i++) { const a = iso(x0 + w * i / 5, y0 + d, f), b = iso(x0 + w * i / 5, y0 + d, f + wh); front += `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}" stroke="${dark}" stroke-width="1" stroke-opacity=".45"/>`; }
+  front += prismZ(hx, y0 + d - .22, L, .4, .36, track, 0);                                     // the near track and its wheels
+  for (let i = 0; i < 7; i++) { const [wx, wy] = iso(hx + .15 + (L - .3) * i / 6, y0 + d + .18, .18); front += `<circle cx="${wx.toFixed(1)}" cy="${wy.toFixed(1)}" r="6.5" fill="#4a3324" stroke="${dark}" stroke-width="1"/><circle cx="${wx.toFixed(1)}" cy="${wy.toFixed(1)}" r="1.8" fill="${dark}"/>`; }
+  if (!rev) {
+    front += prismZ(cabX, y0 + .08, 1.4, d - .16, .95, cab, .66);                                   // the cab
+    const a = iso(x0 + w + 1.45, y0 + .22, 1.42), b = iso(x0 + w + 1.45, y0 + d - .22, 1.42), c2 = iso(x0 + w + 1.45, y0 + d - .28, 1.18), d2 = iso(x0 + w + 1.45, y0 + .28, 1.18);
+    front += `<polygon points="${P([a, b, c2, d2])}" fill="#17100a"/>`;                             // its visor
+    front += prismZ(scoopX, y0 + .04, .45, d - .08, .24, dark, .14);                                 // the scoop
+  } else {                                                                                            // side windows on the cab's visible face
+    const a = iso(cabX + .2, y0 + d - .08, 1.42), b = iso(cabX + 1.2, y0 + d - .08, 1.42), c2 = iso(cabX + 1.2, y0 + d - .08, 1.18), d2 = iso(cabX + .2, y0 + d - .08, 1.18);
+    front += `<polygon points="${P([a, b, c2, d2])}" fill="#17100a"/>`;
+  }
+  const [lx, ly] = iso(x0 + w * .45, y0 + d, .5);
+  front += `<text transform="matrix(1,.5,0,1,${lx.toFixed(1)},${ly.toFixed(1)})" text-anchor="middle" class="harvtxt">PR #${esc(pr.number)} · CI ${ci.word}</text>`;
+  // the lights: a bar of two on the cab roof and one on each corner of the hopper's rim
+  const lights = [iso(lightX, y0 + d * .3, f + .95 + .14), iso(lightX, y0 + d * .7, f + .95 + .14), iso(x0, y0, f + wh + .08), iso(x0 + w, y0, f + wh + .08), iso(x0, y0 + d, f + wh + .08), iso(x0 + w, y0 + d, f + wh + .08)];
+  const [r1, r2] = [iso(lightX, y0 + d * .22, f + .95), iso(lightX, y0 + d * .78, f + .95)];
+  front += `<line x1="${r1[0].toFixed(1)}" y1="${(r1[1] - 4).toFixed(1)}" x2="${r2[0].toFixed(1)}" y2="${(r2[1] - 4).toFixed(1)}" stroke="${dark}" stroke-width="3.5" stroke-linecap="round"/>`;
+  for (const p of lights) front += `<g class="${ci.blink ? "hblink" : ""}"><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="15" fill="${ci.col}" opacity=".38"/><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="5" fill="${ci.col}" stroke="${dark}" stroke-width="1.2"/><circle cx="${(p[0] - 1.5).toFixed(1)}" cy="${(p[1] - 1.5).toFixed(1)}" r="1.6" fill="#fff" opacity=".7"/></g>`;
+  return {back, front};
+}
+// the sample's release PR carries a few more issues, so the harvester has a load to show
+function sampleRelease(d) {
+  if (!d || !d.cards || !d.pr) return d;
+  const extra = d.cards.filter(c => c.step === "dev" || c.step === "testing").slice(0, 3).map(c => c.number);
+  d.cards = d.cards.map(c => extra.includes(c.number) ? {...c, step: "pr"} : c);
+  d.pr = {...d.pr, inside: [...new Set([...(d.pr.inside || []), ...extra])]};
+  return d;
+}
 function layout() {
-  POS = {}; GROUPS = [];
+  POS = {}; GROUPS = []; HARV = null;
   const byZone = {};
   for (const c of DATA.cards) (byZone[STEP_ZONE[c.step] || "backlog"] ||= []).push(c);
   const msKey = m => { const p = (m || "").match(/\d+/g); return p ? p.map(Number).reduce((a, v) => a * 100 + v, 0) : 1e9; };
   for (const [zid, list] of Object.entries(byZone)) {
+    if (zid === "tower" && DATA.pr && list.length) { harvesterLayout(ZONE[zid], list); continue; }
     // one strip per milestone, side by side in front of the building; spare columns go to the tallest strip first
     const z = ZONE[zid], by = {};
     for (const c of list) (by[c.milestone || ""] ||= []).push(c);
@@ -855,12 +973,14 @@ function render() {
   const byZone = layout();
   const items = [];
   for (const c of DATA.cards) { const p = POS[c.number]; if (p) items.push({d: p[0] + p[1], kind: "b", c, p}); }
+  if (HARV && DATA.pr) { const H = HARV, P2 = harvesterParts(H, DATA.pr); items.push({d: H.x0 + H.y0 - 1, kind: "raw", html: P2.back}, {d: H.x0 + H.w + 1.6 + H.y0 + H.d + .2, kind: "raw", html: P2.front}); }
   const ws = workers(); placeWorkers(ws); WORKERS = Object.fromEntries(ws.map(w => [w.id, w]));
   for (const w of ws) items.push({d: w.pos[0] + w.pos[1] + .3, kind: "w", w, p: w.pos});
   items.sort((a, b) => a.d - b.d);
   let html = GROUPS.map(sandWrite).join("");
   for (const it of items) {
-    const [x, y] = iso(it.p[0], it.p[1]);
+    if (it.kind === "raw") { html += it.html; continue; }
+    const [x, y] = iso(it.p[0], it.p[1], it.p[2] || 0);
     if (it.kind === "b") html += `<g class="blk" data-n="${it.c.number}" tabindex="0" role="button" aria-label="Issue ${it.c.number}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${blockSVG(it.c)}</g>`;
     else html += `<g class="wkr" data-w="${esc(it.w.id)}" tabindex="0" role="button" aria-label="${esc(it.w.name)}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">${workerSVG(it.w)}</g>`;
   }
@@ -878,7 +998,7 @@ function summary(byZone, ws) {
   const pr = DATA.pr, ci = pr ? (pr.ci || {}).state || "none" : null;
   const busy = ws.filter(w => w.state === "working").length;
   const rows = [
-    ["need", C.ember, need, "need you"], ["works", C.amber, prog, "in progress"], ["fit", C.water, DATA.cards.filter(c => (autoRun(c) || {}).fit === "yes").length, "an auto run can take"],
+    ["need", C.ember, need, "need you"], ["works", C.amber, prog, "in progress"], ["fit", C.water, DATA.cards.filter(c => (autoRun(c) || {}).fit === "yes").length, "an auto mode can take"],
     ["tower", pr ? ({green: C.ok, red: C.alert}[ci] || C.amber) : C.faint, pr ? "#" + pr.number : "—", pr ? "release PR · " + ci : "no release PR"],
     ["workers", C.sand, busy, busy === 1 ? "worker busy" : "workers busy"],
   ];
@@ -999,7 +1119,7 @@ $("#map").addEventListener("pointerover", e => {
   const b = e.target.closest(".blk"), w = e.target.closest(".wkr"), z = e.target.closest(".plaque");
   if (b) { const c = DATA.cards.find(x => x.number == b.dataset.n); tip.innerHTML = `<span class="n">#${c.number}</span><span class="t">${esc(c.title)}</span><span class="s">${esc(typeInfo(c).word)} · ${esc(STEP_LABEL[c.step] || c.step)} · ${esc(c.milestone || "no milestone")}${c.need ? " · needs you" : ""}</span>${(ZONE[STEP_ZONE[c.step]] || {}).cmd ? `<span class="s">Command: ${esc(ZONE[STEP_ZONE[c.step]].cmd)}</span>` : ""}`; }
   else if (w) { const k = WORKERS[w.dataset.w]; tip.innerHTML = `<span class="n">${esc(k.name)}${k.folder ? " · " + esc(k.folder) : ""}</span><span class="t">${esc(stateWord(k))}</span><span class="s">${esc(k.model || (k.kind === "planned" ? "not hired yet" : "model not recorded"))}</span>`; }
-  else if (z) { const zz = ZONE[z.dataset.zone]; tip.innerHTML = `<span class="n">${esc(zz.name)}</span><span class="t">${esc(zz.stage)}</span><span class="s">${esc(hintOf(zz))}</span>`; }
+  else if (z) { const zz = ZONE[z.dataset.zone]; tip.innerHTML = `<span class="n">${esc(zz.name)}</span><span class="t">${esc(zz.stage)}</span><span class="s">${esc(hintOf(zz))}${zz.id !== "camp" ? " Click for a prompt covering all its issues." : ""}</span>`; }
   else return hideTip();
   tip.hidden = false; moveTip(e);
 });
@@ -1089,7 +1209,7 @@ function issuePanel(c) {
       el("ul", {class: "crit"}, d.criteria.map(x => el("li", {class: x.done ? "done" : ""}, el("span", {class: "box"}), el("span", {html: md(x.text).replace(/^<p>|<\/p>$/g, "")}))))) : null);
   const agents = (c.agents || []).map(a => `${a.name || "session"} (${a.state || "?"})`).concat(Object.values(WORKERS).filter(w => w.issue === c.number && w.kind !== "architect" && w.state === "working").map(w => `${w.name} (working)`));
   const right = el("div", {},
-    fit ? el("div", {class: "sec"}, el("h3", {}, "Auto"), el("div", {class: "fit", style: `border-color:${FIT[fit.fit].color()}`},
+    fit ? el("div", {class: "sec"}, el("h3", {}, "Auto mode"), el("div", {class: "fit", style: `border-color:${FIT[fit.fit].color()}`},
       el("svg", {width: 18, height: 22, viewBox: "0 0 18 22", html: `<line x1="3" y1="2" x2="3" y2="22" stroke="${C.wood}" stroke-width="1.6"/>` + (fit.fit === "no" ? `<rect x="3" y="2" width="12" height="10" fill="${C.alert}"/>` : `<polygon points="3,2 17,7 3,12" fill="${fit.fit === "yes" ? C.water : "none"}" stroke="${FIT[fit.fit].color()}" stroke-width="1.4"/>` + (fit.fit === "partly" ? `<polygon points="3,2 10,4.5 10,9.5 3,12" fill="${C.amber}"/>` : ""))}),
       el("div", {}, el("strong", {}, FIT[fit.fit].word), el("span", {}, fit.why + (c.auto ? "" : " Estimated from the labels until the issue carries the At a glance table (the issue templates)."))))) : null,
     el("div", {class: "sec"}, el("h3", {}, "Now"), el("dl", {class: "grid"},
@@ -1108,6 +1228,41 @@ function issuePanel(c) {
   return el("div", {class: "panel", role: "dialog", "aria-modal": "true", "aria-label": `Issue ${c.number}`},
     el("header", {}, el("div", {class: "big"}, "#" + c.number), el("div", {}, el("h2", {}, c.title), tags), el("button", {class: "x", type: "button", "aria-label": "Close", onclick: closePanel}, "×")),
     el("div", {class: "body"}, left, right), foot);
+}
+// The owner, 2026-11-22: each zone's sign opens a panel with every issue at that stage and one prompt to take care of them all
+function zonePrompt(z, cards) {
+  // one short instruction for the whole stage, the issues listed once
+  const ns = cards.map(c => "#" + c.number), many = ns.length > 1, list = many ? ns.slice(0, -1).join(", ") + " and " + ns[ns.length - 1] : ns[0];
+  const say = {
+    inbox: `Triage ${list}: set ${many ? "each one's" : "its"} Type, milestone and labels, and rewrite ${many ? "them" : "it"} in the issue template.`,
+    backlog: `Work through ${list} by milestone priority, one at a time: saani start, implement, test and land each.`,
+    you: `${list} ${many ? "wait" : "waits"} for me: tell me what ${many ? "each" : "it"} needs from me${many ? ", one at a time" : ""}.`,
+    works: `Where ${many ? "are" : "is"} ${list}? For ${many ? "each" : "it"}: what is done, what is left, anything blocked.`,
+    proving: `/saani:progress (the test run of ${list})`,
+    depot: `Prepare the ${INT()} into ${PROD()} pull request for ${list}: what is left before I can merge it?`,
+    tower: DATA.pr ? `Release PR #${DATA.pr.number} carries ${list}: check its CI and their acceptance criteria, and tell me what is left before the merge.` : `Prepare the ${INT()} into ${PROD()} pull request for ${list}.`,
+    pad: `Give me the deploy command for ${list} on ${PROD()}; read ${many ? "their" : "its"} deploy warnings first.`,
+    archive: `${list} ${many ? "are" : "is"} merged on ${PROD()} with nothing to deploy: close ${many ? "them" : "it"}, citing the merge commit.`,
+    outpost: `Walk me through the live checks of ${list}${many ? ", one issue at a time" : ""}.`,
+    citadel: null,
+  }[z.id];
+  if (say === undefined) return `Take care of ${list} (stage "${z.stage}").`;
+  return say && (z.cmd && z.id !== "proving" ? `${say} (${z.cmd})` : say);
+}
+function zonePanel(z) {
+  const cards = DATA.cards.filter(c => (STEP_ZONE[c.step] || "backlog") === z.id).sort((a, b) => a.number - b.number);
+  const f = cards.length ? folderFor(cards[0]) : folderFor({step: ""}), prompt = cards.length ? zonePrompt(z, cards) : null;
+  const items = cards.length ? el("ul", {class: "zlist"}, cards.map(c => { const li = el("li", {}, el("span", {class: "zdot", style: `background:${typeInfo(c).color}`}), el("b", {}, "#" + c.number), " ", c.title, el("span", {class: "muted"}, " · " + (c.milestone || "no milestone")));
+      li.addEventListener("click", () => { openPanel(issuePanel(c)); if (LIVE && !DETAILS[c.number] && !c.detail) fetchDetail(c); }); return li; }))
+    : el("p", {class: "muted"}, "No issue is at this stage right now.");
+  const foot = el("footer", {},
+    el("div", {class: "folder"}, "Paste in a Claude Code chat opened in ", el("b", {}, f.path), ` (branch ${f.branch}, ${f.why})`),
+    prompt ? el("div", {class: "prompt"}, prompt) : el("div", {class: "prompt muted"}, cards.length ? "Nothing to do: they are done." : "Nothing to do here."),
+    prompt ? el("div", {class: "copy"}, copyButton(() => `Folder: ${f.path} (branch ${f.branch})\n${prompt}`)) : null);
+  return el("div", {class: "panel", role: "dialog", "aria-modal": "true", "aria-label": `Zone ${z.name}`},
+    el("header", {}, el("div", {class: "big"}, String(cards.length)), el("div", {}, el("h2", {}, z.name), el("div", {class: "chips"}, el("span", {class: "tag"}, z.stage), z.cmd ? el("span", {class: "tag"}, z.cmd) : null)),
+      el("button", {class: "x", type: "button", "aria-label": "Close", onclick: closePanel}, "×")),
+    el("div", {class: "body"}, el("div", {}, el("div", {class: "sec"}, el("h3", {}, "What happens here"), el("p", {}, hintOf(z))), el("div", {class: "sec"}, el("h3", {}, `At this stage · ${cards.length}`), items)), el("div", {})), foot);
 }
 function workerPanel(w) {
   const where = w.issue ? DATA.cards.find(c => c.number === w.issue) : null;
@@ -1131,11 +1286,46 @@ function clickAt(e) {
   const b = t.closest(".blk"), w = t.closest(".wkr"), z = t.closest(".plaque");
   if (b) { const c = DATA.cards.find(c => c.number == b.dataset.n); openPanel(issuePanel(c)); if (LIVE && !DETAILS[c.number] && !c.detail) fetchDetail(c); }
   else if (w) openPanel(workerPanel(WORKERS[w.dataset.w]));
-  else if (z) { const zz = ZONE[z.dataset.zone]; centerOn(zz.cx, zz.cy, Math.max(VIEW.s, 1.1)); }
+  else if (z) { const zz = ZONE[z.dataset.zone]; if (zz.id !== "camp") openPanel(zonePanel(zz)); else centerOn(zz.cx, zz.cy, Math.max(VIEW.s, 1.1)); }
 }
 
 // ------------------------------------------------------------------ the air: transport flights and ambient traffic
 const air = $("#air"); const flights = [];
+// The owner, 2026-11-22: when the release PR is merged, its harvester drives its load down the track to the Launch Pad (deploy) or the
+// Archive (nothing to deploy), stops, and the issues appear there as it leaves
+const trips = [];
+function harvesterTrip(ns, step, harvOld, prOld) {
+  if (RM || !harvOld) return false;
+  const z = ZONE[STEP_ZONE[step]]; if (!z) return false;
+  const cards = ns.map(n => DATA.cards.find(c => c.number === n)).filter(Boolean).sort((a, b) => a.number - b.number).slice(0, 24);
+  const rows = cards.length > 12 ? 3 : 2, cols = Math.max(3, Math.ceil(cards.length / rows)), SX = 1.05, SY = .85, w = cols * SX + .5, d = rows * SY + .6, f = .66;
+  const S = [harvOld.x0 + harvOld.w / 2, harvOld.y0 + harvOld.d / 2], T = [z.cx, z.cy + SIZE(z) - 1.1 - d / 2];
+  const edge = EDGES.find(e => e.label === (step === "close" ? "nothing to deploy" : "deploy"));
+  let mid = [];
+  if (edge) { let best = 0, bd = Infinity; edge.pts.forEach((p, i) => { const dd = Math.hypot(p[0] - z.cx, p[1] - z.cy); if (dd < bd) { bd = dd; best = i; } }); mid = edge.pts.slice(1, best); }
+  const rev = T[0] < S[0], H0 = {x0: -w / 2, y0: -d / 2, w, d, floor: f}, parts = harvesterParts(H0, {...(prOld || {}), ci: {state: "green"}}, rev);
+  const load = cards.map((c, i) => [H0.x0 + .25 + SX / 2 + (i % cols) * SX, H0.y0 + .3 + SY / 2 + Math.floor(i / cols) * SY, c])
+    .sort((a, b) => (a[0] + a[1]) - (b[0] + b[1])).map(([x, y, c]) => { const [px, py] = iso(x, y, f); return `<g transform="translate(${px.toFixed(1)},${py.toFixed(1)})" class="cargo">${blockSVG({...c, need: null})}</g>`; }).join("");
+  const g = document.createElementNS(NS, "g"); g.innerHTML = parts.back + load + parts.front; air.append(g);
+  const pts = smooth([S, ...mid, T].map(p => iso(p[0], p[1]))); const segs = []; let len = 0;
+  for (let i = 0; i < pts.length - 1; i++) { const L = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]); segs.push({a: pts[i], b: pts[i + 1], L, at: len}); len += L; }
+  for (const n of ns) { const blk = document.querySelector(`.blk[data-n="${n}"]`); if (blk) blk.style.visibility = "hidden"; }
+  trips.push({g, segs, len, ns, t0: performance.now(), dur: 2200 + len * 2.4});
+  return true;
+}
+function tripStep(now) {
+  for (let i = trips.length - 1; i >= 0; i--) {
+    const tr = trips[i], t = Math.min(1, (now - tr.t0) / tr.dur), e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2, at = e * tr.len;
+    const sg = tr.segs.find(s => at <= s.at + s.L) || tr.segs[tr.segs.length - 1], k = sg.L ? (at - sg.at) / sg.L : 1;
+    const x = sg.a[0] + (sg.b[0] - sg.a[0]) * k, y = sg.a[1] + (sg.b[1] - sg.a[1]) * k - (t < 1 ? Math.abs(Math.sin(now / 90)) * 1.4 : 0);
+    tr.g.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
+    if (t >= 1 && !tr.done) {                                                    // arrived: unload, then drive off into the haze
+      tr.done = true; for (const n of tr.ns) { const blk = document.querySelector(`.blk[data-n="${n}"]`); if (blk) blk.style.visibility = ""; }
+      tr.g.querySelectorAll(".cargo").forEach(c => c.remove());
+      tr.g.style.transition = "opacity .8s ease .5s"; tr.g.style.opacity = "0"; setTimeout(() => tr.g.remove(), 1400); trips.splice(i, 1);
+    }
+  }
+}
 // The owner, 2026-11-22: now and then a sandworm cruises round the base, out in the desert: a ridged back breaking the sand in
 // humps, with a furrow and a little spray behind it. An original design; purely decoration, it never touches the board.
 const wormG = $("#worms");
@@ -1152,11 +1342,11 @@ function wormStep(now) {
   const p0 = P(WORM.th), p1 = P(WORM.th + .001), speed = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) / .001;   // px per radian here
   const head = WORM.th + WORM.dir * t * 120 / speed, gap = 44 / speed, env = Math.max(0, Math.min(1, t / 2.2, (dur - t) / 2.2));
   let s = "";
-  for (let i = 26; i >= 0; i--) {                         // the furrow: old disturbed sand fading behind the worm
-    const [x, y] = P(head - WORM.dir * gap * (i + 2) * 1.6); s += `<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="44" ry="15" fill="#6a4428" opacity="${(.16 * env * (1 - i / 27)).toFixed(3)}"/>`;
+  for (let i = 13; i >= 0; i--) {                         // the furrow: old disturbed sand fading behind the worm (half as long since 2026-11-22)
+    const [x, y] = P(head - WORM.dir * gap * (i + 2) * 1.6); s += `<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="44" ry="15" fill="#6a4428" opacity="${(.16 * env * (1 - i / 14)).toFixed(3)}"/>`;
   }
-  for (let i = 15; i >= 0; i--) {                         // the back, tail first so the head is drawn last
-    const [x, y] = P(head - WORM.dir * gap * i), wave = Math.sin(i * .9 - t * 3.2 + WORM.seed), taper = 1 - i / 18;
+  for (let i = 7; i >= 0; i--) {                          // the back, tail first so the head is drawn last
+    const [x, y] = P(head - WORM.dir * gap * i), wave = Math.sin(i * 1.4 - t * 3.2 + WORM.seed), taper = 1 - i / 9.5;
     const h = (.4 + .6 * Math.max(0, wave)) * 46 * taper * env * (i === 0 ? 1.3 : 1), rx = (i === 0 ? 34 : 30) * (.55 + .45 * taper);
     s += `<ellipse cx="${x.toFixed(1)}" cy="${(y + 2).toFixed(1)}" rx="${(rx * 1.4).toFixed(1)}" ry="${(rx * .42).toFixed(1)}" fill="${C.sand}" opacity="${(.55 * env).toFixed(2)}"/>`;
     if (h < 2) continue;
@@ -1199,17 +1389,21 @@ function tick(now) {
   }
   if (crawlerG && SEG.length) { const p = along(now * .018); crawlerG.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)}) scale(${p.dir * .9},.9)`); }
   if (patrolG) { const [cx, cy] = iso(BOARD_W / 2, BOARD_D / 2), a = now / 14000; patrolG.setAttribute("transform", `translate(${(cx + Math.cos(a) * 1900).toFixed(1)},${(cy + Math.sin(a) * 520 - 260).toFixed(1)}) scale(${Math.sin(a) > 0 ? -1 : 1},1)`); }
+  tripStep(now);
   if (!RM) wormStep(now);
   requestAnimationFrame(tick);
 }
 
 // ------------------------------------------------------------------ loading, refreshing, demo traffic
 function setData(d, live) {
-  const old = PREV; DATA = normalize(d); LIVE = live;
+  const old = PREV, prOld = DATA && DATA.pr, harvOld = HARV && {...HARV}; DATA = normalize(d); LIVE = live;
   REPO = (DATA.project && DATA.project.repo) || REPO;
   const before = {...POS}; render();
   PREV = Object.fromEntries(DATA.cards.map(c => [c.number, c.step]));
-  for (const c of DATA.cards) if (old[c.number] && old[c.number] !== c.step && before[c.number] && POS[c.number]) fly(c.number, before[c.number], POS[c.number]);
+  const moved = DATA.cards.filter(c => old[c.number] && old[c.number] !== c.step && before[c.number] && POS[c.number]);
+  const merged = {}; for (const c of moved) if (old[c.number] === "pr" && (c.step === "deploy" || c.step === "close")) (merged[c.step] ||= []).push(c.number);
+  const byTrip = new Set(); for (const [step, ns] of Object.entries(merged)) if (harvesterTrip(ns, step, harvOld, prOld)) ns.forEach(n => byTrip.add(n));
+  for (const c of moved) if (!byTrip.has(c.number)) fly(c.number, before[c.number], POS[c.number]);
   $("#src").textContent = live ? "Live" : "Sample data"; $("#src").className = "badge " + (live ? "live" : "sample");
   $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : (DATA.sample || {}).note || "Sample data";
   $("#clock").textContent = live ? "updated " + (DATA.time || "") : "snapshot " + ((DATA.sample || {}).taken || "");
@@ -1219,6 +1413,8 @@ function setData(d, live) {
   projects(DATA.projects);
 }
 function demoStep() {
+  const inPR = DATA.cards.filter(c => c.step === "pr");
+  if (inPR.length > 1 && Math.random() < .2) { mergeSamplePR(); return; }
   // now and then an issue gets stuck in the backlog and waits for you: a long move, so it flies
   const stuck = DATA.cards.filter(c => c.step === "backlog");
   if (stuck.length && Math.random() < .3) { const c = stuck[Math.floor(Math.random() * stuck.length)]; setData({...DATA, cards: DATA.cards.map(x => x.number === c.number ? {...x, step: "you", need: "answer", staged: true} : x)}, false); return; }
@@ -1251,7 +1447,7 @@ function projects(list) {
 async function load() {
   try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.status === 404 && PROJECT) { PROJECT = ""; history.replaceState(null, "", location.pathname); return load(); }   // a bookmark of a project no longer listed
     if (!r.ok) throw 0; const d = await r.json(); if (!d.board && !d.cards) throw 0; setData(d, true); setTimeout(refresh, 5000); return; } catch (_) {}
-  try { const r = await fetch("mock-state.json", {cache: "no-store"}); setData(await r.json(), false); demo(true); }
+  try { const r = await fetch("mock-state.json", {cache: "no-store"}); setData(sampleRelease(await r.json()), false); demo(true); }
   catch (_) { $("#src").textContent = "No data"; $("#clock").textContent = "Neither /api/state nor mock-state.json answered."; }
 }
 async function refresh() { try { const r = await fetch(stateUrl(), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {} setTimeout(refresh, 5000); }
@@ -1271,6 +1467,10 @@ async function switchProject(key) {
   PREV = {}; FILTER.ms = ""; $("#ms").value = "";                            // another project's cards do not fly from the old one's places
   await warp(async () => { const r = await fetch(stateUrl(), {cache: "no-store"}); if (!r.ok) return null; const d = await r.json(); return () => { setData(d, true); fit(); }; });
 }
+function mergeSamplePR() {
+  // the sample's release PR is merged: everything in it goes to deploy (an issue labelled for tooling or docs would go to the Archive)
+  setData({...DATA, cards: DATA.cards.map(x => x.step === "pr" ? {...x, step: "deploy", need: null, staged: true} : x)}, false);
+}
 
 // ------------------------------------------------------------------ wiring
 $("#q").addEventListener("input", e => { FILTER.q = e.target.value; applyFilter(); });
@@ -1282,20 +1482,34 @@ $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip
 $("#demo").addEventListener("click", () => demo(!demoTimer));
 $("#proj").addEventListener("change", e => switchProject(e.target.value));
 addEventListener("hashchange", () => { const k = location.hash.slice(1); if (k && k !== PROJECT) switchProject(k); });
-// a preview of the trip, for the artifact build (one sample project): press W on the map
-addEventListener("keydown", e => { if ((e.key === "w" || e.key === "W") && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target.closest && e.target.closest("input,select,textarea")) && $("#veil").hidden) warp(async () => () => fit()); });
 $("#refresh").addEventListener("click", async e => {
   const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…";
   try { const r = await fetch(stateUrl(true), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}
   b.disabled = false; b.textContent = "↻ Refresh";
 });
-drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 // the page switch: a fade where the browser has no cross-page View Transitions
 if (!("PageRevealEvent" in window)) {
   document.documentElement.classList.add("pg-enter");
   document.addEventListener("click", e => { const a = e.target.closest && e.target.closest(".pages a"); if (!a || a.getAttribute("aria-current") || a.hasAttribute("aria-disabled") || e.metaKey || e.ctrlKey || e.shiftKey) return;
     e.preventDefault(); document.body.classList.add("pg-leave"); setTimeout(() => { location.href = a.href; }, RM ? 0 : 240); });
 }
+// the tweak menu
+function tweakSync() {
+  const live = LIVE, hasPR = !!(DATA && DATA.pr), inPR = DATA ? DATA.cards.filter(c => c.step === "pr").length : 0, st = ciLook(DATA && DATA.pr).word;
+  for (const b of document.querySelectorAll('#tweakpanel [data-tw="merge"]')) b.disabled = live || !inPR;
+  for (const b of document.querySelectorAll('#tweakpanel [data-tw="ci"]')) { b.disabled = live || !hasPR; b.classList.toggle("on", hasPR && {running: "running", green: "passed", red: "failed"}[b.dataset.state] === st); }
+  $("#tw-note").textContent = live ? "Live data: the release PR follows GitHub; only the trip and the sandworm can be tried here."
+    : inPR ? `Sample PR #${DATA.pr.number} carries ${inPR} issue${inPR > 1 ? "s" : ""}.` : "The sample PR is empty: its issues left on the last merge. The Caravan Depot refills it as the demo runs.";
+}
+$("#tweakbtn").addEventListener("click", () => { const p = $("#tweakpanel"), open = p.hidden; p.hidden = !open; $("#tweakbtn").setAttribute("aria-expanded", String(open)); if (open) tweakSync(); });
+$("#tweakpanel").addEventListener("click", e => {
+  const b = e.target.closest("[data-tw]"); if (!b || b.disabled) return;
+  if (b.dataset.tw === "merge") mergeSamplePR();
+  if (b.dataset.tw === "ci" && DATA.pr) { DATA.pr.ci = {...(DATA.pr.ci || {}), state: b.dataset.state}; render(); }
+  if (b.dataset.tw === "trip") warp(async () => () => fit());
+  if (b.dataset.tw === "worm") { WORM = null; nextWorm = 0; }
+  setTimeout(tweakSync, 50);
+});
+addEventListener("pointerdown", e => { if (!e.target.closest("#tweaks") && !$("#tweakpanel").hidden) { $("#tweakpanel").hidden = true; $("#tweakbtn").setAttribute("aria-expanded", "false"); } });
+drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 </script>
-
-
