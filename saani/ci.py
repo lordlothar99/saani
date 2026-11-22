@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import time
 
-from . import config, core
+from . import comments, config, core
 
 LOG_NAME = "saani-ci.json"
 
@@ -262,7 +262,7 @@ def cmd_pr(run, head=None, force_pc=False):
     c = cfg()
     head = head or c.integration
     prs = run.json("gh", "pr", "list", "--repo", c.repo, "--base", c.production, "--head", head, "--state", "open",
-                   "--json", "number,headRefOid") or []
+                   "--json", "number,headRefOid,url") or []
     if not prs:
         raise SystemExit(f"no open {head} -> {c.production} pull request")
     number, sha = prs[0]["number"], prs[0]["headRefOid"]
@@ -293,6 +293,7 @@ def cmd_pr(run, head=None, force_pc=False):
     log({"job": job, "pr": number, "sha": sha, "place": where, "why": why, "result": result, "minutes": minutes,
          "minutes_left_before": b["left"]})
     print(f"{c.ci_status_context} on {sha[:7]}: {state}")
+    comment_in_pr(run, number, prs[0].get("url"))
     return 0 if state == "success" else 1
 
 
@@ -300,7 +301,7 @@ def cmd_merged(run, number):
     """After a merge: the relabel (GitHub's workflow when it is on (sync); otherwise, or when it was refused, `[ci] relabel` or gh here) and the
     removal of the auto runs that are finished."""
     c = cfg()
-    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "state,mergedAt,title,body,commits") or {}
+    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "state,mergedAt,title,body,commits,mergeCommit") or {}
     if pr.get("state") != "MERGED":
         print(f"pull request #{number} is not merged: nothing to relabel")
         return 1
@@ -311,6 +312,7 @@ def cmd_merged(run, number):
         if ok:
             print(f"the relabel ran on GitHub (run {ok[0]['databaseId']}): nothing to do here")
             log({"job": "relabel", "pr": number, "place": "github", "result": "passed"})
+            comment_on_main(run, number, pr)
             core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
             return 0
     if c.relabel:
@@ -325,6 +327,8 @@ def cmd_merged(run, number):
             log({"job": "relabel", "pr": number, "place": "pc", "result": "passed" if code == 0 else "failed"})
     else:
         code = relabel_issues(run, number, pr)
+    if code == 0:
+        comment_on_main(run, number, pr)
     core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
     return code
 
@@ -359,6 +363,31 @@ def issues_named(pr):
     return sorted({int(n) for n in re.findall(r"#(\d+)", "\n".join(texts))})
 
 
+def comment_in_pr(run, number, url=None):
+    """`In PR` on each named issue that carries the in-dev label, once per pull request and issue. A gh failure only warns."""
+    c = cfg()
+    try:
+        pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "title,body,commits") or {}
+    except (SystemExit, OSError, ValueError) as e:
+        print(f"could not read pull request #{number} to comment its issues: {e}")
+        return
+    fields = {"PR": f"#{number}", **({"URL": url} if url else {})}
+    for n in issues_named(pr):
+        if n != number:
+            comments.try_post(n, "in-pr", fields, io=run, once=f"#{number}", needs={c.labels["in_dev"]})
+
+
+def comment_on_main(run, number, pr):
+    """`On main` on each named issue that carries in-main or in-dev, once per pull request: after the merge is confirmed, whoever did the
+    relabel (this is also the retry of a run that stopped halfway). A gh failure only warns."""
+    c = cfg()
+    oid = (pr.get("mergeCommit") or {}).get("oid")
+    fields = {"PR": f"#{number}", **({"Merge commit": oid[:7]} if oid else {})}
+    for n in issues_named(pr):
+        if n != number:
+            comments.try_post(n, "on-main", fields, io=run, labels=False, once=f"#{number}", needs={c.labels["in_main"], c.labels["in_dev"]})
+
+
 def relabel_issues(run, number, pr):
     """The relabel done here, with gh: each issue the pull request names that carries the in-dev label swaps it for in-main."""
     c = cfg()
@@ -374,6 +403,7 @@ def relabel_issues(run, number, pr):
         except SystemExit as e:
             print(e)
             failed += 1
+            continue
     if not run.dry:
         log({"job": "relabel", "pr": number, "place": "pc", "result": "failed" if failed else "passed"})
     return 1 if failed else 0

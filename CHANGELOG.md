@@ -2,6 +2,7 @@
 
 ## Unreleased
 - `saani deploy [--dry-run]` (`/saani:deploy`, owner-typed only) and the `saani:deployer` agent (issue #5): CI green on the production head, no issue in production since the prod tag whose At a glance Deploy row says not to deploy, the `[deploy]` checks and dry run, the deploy with a timeout and its log in `build/`, then the prod tag moved (the one force push Saani does: the moving tag) and the `in-main` issues commented `✔ Deployed` and closed. New `[deploy]` settings: `command`, `dry_run`, `checks`, `log_ok`, `key`, `timeout_minutes`. `saani merge --deploy` now runs it.
+- `saani comment <n> <kind>`: a status comment in the shape of `.github/COMMENT_KINDS.md` and its label change. `saani start` posts `Started` (`--no-comment` skips it), `saani land` posts `On dev` through it, `saani ci pr` posts `In PR` and `saani ci merged` posts `On main`, each once per pull request and issue.
 
 ## 0.3.0 (2026-11-22)
 - Plugin 0.3.0: the board is the Map (`/map`, `saani map`), the map shows the GitHub issue Type, switching project is a sand storm, long run becomes `auto` and `saani new` becomes `saani start`.

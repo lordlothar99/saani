@@ -620,17 +620,18 @@ def test_landing_comments_the_issue_and_labels_it_and_says_so_when_gh_refuses(mo
     from saani import core
     calls = []
     monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 0})())
-    text = core.landing_comment({"head": "abc1234", "seconds": 18})
+    row = {"head": "abc1234", "seconds": 18}
+    text = core.landing_comment(row)
     assert text.splitlines()[0] == "### ✅ On dev" and "abc1234" in text and "18 s" in text and "with the next pull request" in text
-    assert core.mark_on_dev("14", text) is True
+    assert core.mark_on_dev("14", row) is True
     assert calls[0][:4] == ["gh", "issue", "comment", "14"] and calls[1][:4] == ["gh", "issue", "edit", "14"] and calls[1][-2:] == ["--add-label", "in-dev"]
     monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 1})())
-    assert core.mark_on_dev("14", text) is False
+    assert core.mark_on_dev("14", row) is False
 
     def missing(cmd, **k):
         raise FileNotFoundError("gh")
     monkeypatch.setattr(core.subprocess, "run", missing)
-    assert core.mark_on_dev("14", text) is False
+    assert core.mark_on_dev("14", row) is False
 
 
 def test_a_card_carries_the_issue_type_github_holds(monkeypatch):
