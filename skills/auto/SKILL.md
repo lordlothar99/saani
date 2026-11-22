@@ -14,16 +14,18 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 1. **Folder.** An auto run works in its own throwaway worktree, never in the owner's folder: run `saani auto` (it makes
    `auto-<YYYY-MM-DD_HHMM>` beside the other worktrees, on the branch `auto/<YYYY-MM-DD_HHMM>` from the integration branch) and say
    its folder. Run every command of the run from that folder (the session cannot change folder: `cd` in each call), and
-   `saani start <n>` for each issue from there as usual. `[board] folders` `auto` is not needed.
+   `saani start <n>` for each issue from there as usual. `[board] folders` `auto` is not needed. Make it now, while the session is still in
+   present mode: once the run is on, the guard refuses plain `saani auto`.
 2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (`saani auto pick`). For
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed.
 4. **Last thing before the run: switch it on.** Once the questions are answered, run `saani auto on --id <id> --folder <run folder>`
    (`--deploy` only if the owner said, in their own words, that the run may deploy), alone: nothing chained to it, or the guard does not
-   register the session. It prints one line, `saani auto: on <id> folder=<path>`; from then on the guard decides every tool call (no more
-   questions), and `saani auto status` shows the run, its refusals and its limits. The guard refuses `saani auto on` and `saani auto off`
-   inside the run: the run never switches itself off.
+   register the session. The id and the folder are those of step 1 and 3. On success it prints, as its last line, `saani auto: on <id>
+   folder=<path>`, and the guard registers the session from it; from then on the guard decides every tool call (no more questions), and
+   `saani auto status` shows the run, its refusals and its limits. If the line is missing, the run is not on: say so and stop. The guard
+   refuses `saani auto`, `saani auto on` and `saani auto off` inside the run: the run never re-arms or switches itself off.
 
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the

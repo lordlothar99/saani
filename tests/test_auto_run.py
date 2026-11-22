@@ -13,6 +13,16 @@ from saani import auto, comments, config, core, guard
 START = datetime.datetime(2026, 11, 22, 8, 0, tzinfo=datetime.timezone.utc)
 
 
+def worktree(root, folder):
+    """A folder that looks like a git worktree of `root` (a .git file, the common dir), without running git."""
+    folder.mkdir(parents=True)
+    admin = root / ".git" / "worktrees" / folder.name
+    admin.mkdir(parents=True)
+    (admin / "commondir").write_text("../..", encoding="utf-8")
+    (folder / ".git").write_text(f"gitdir: {admin}", encoding="utf-8")
+    return folder
+
+
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     """A main checkout with a .git folder, a worktrees folder with the run's folder, an empty guard registry."""
@@ -22,9 +32,9 @@ def world(tmp_path, monkeypatch):
         monkeypatch.setenv(var, str(home))
     root = tmp_path / "webshop"
     (root / ".git").mkdir(parents=True)
+    (root / "saani.toml").write_text('[project]\nrepo = "acme/webshop"\n', encoding="utf-8")
     wt = tmp_path / "webshop-wt"
-    run = wt / "auto-2026-11-22_0800"
-    run.mkdir(parents=True)
+    run = worktree(root, wt / "auto-2026-11-22_0800")
     config.use(config.Config(repo="acme/webshop", owner="someone", root=root, tier1=["{python}", "-c", "pass"]))
     monkeypatch.chdir(run)
     return type("World", (), {"root": root, "wt": wt, "run": run, "home": home, "git": root / ".git"})
@@ -58,8 +68,7 @@ def test_on_writes_the_record_in_the_shared_git_folder(world, capsys):
 
 
 def test_on_with_id_folder_and_deploy(world, capsys, tmp_path):
-    other = world.wt / "auto-other"
-    other.mkdir()
+    other = worktree(world.root, world.wt / "auto-other")
     os.chdir(tmp_path)
     assert auto.cmd_on(args(id="mine", folder=str(other), deploy=True)) == 0
     rec = auto.read_record()
@@ -510,3 +519,36 @@ def test_saani_land_journals_the_landing(world, monkeypatch, capsys):
     assert core.cmd_land(land) == 0
     assert "LANDED: task/12-cart" in capsys.readouterr().out
     assert [(r["issue"], r["kind"]) for r in auto.read_journal("r1")] == [(12, "landed")]
+
+
+def test_the_marker_line_is_the_guards_contract(world, capsys, tmp_path):
+    other = worktree(world.root, world.wt / "auto-x1")
+    assert auto.cmd_on(args(id="x1", folder=str(other))) == 0
+    out = capsys.readouterr().out
+    found = list(guard.MARKER.finditer(out))
+    assert len(found) == 1 and out.rstrip('\r\n ') .splitlines()[-1] == found[0].group(0)       # exactly one, and the last line
+    assert found[0].group("id") == "x1" and found[0].group("folder") == guard.norm(other)
+
+
+def test_on_refuses_a_folder_that_is_no_worktree_of_this_project_and_prints_no_marker(world, capsys):
+    plain = world.wt / "auto-plain"
+    plain.mkdir()
+    with pytest.raises(SystemExit) as e:
+        auto.cmd_on(args(folder=str(plain)))
+    assert "not a worktree of this project" in str(e.value) and "saani auto: on" not in capsys.readouterr().out
+    (world.root / "saani.toml").unlink()
+    with pytest.raises(SystemExit):
+        auto.cmd_on(args())
+    assert auto.read_record() is None
+
+
+def test_off_run_uses_the_guards_turn_off_run_when_no_other_project_holds_the_id(world, monkeypatch):
+    seen = []
+    real = guard.turn_off_run
+    monkeypatch.setattr(guard, "turn_off_run", lambda run: seen.append(run) or real(run))
+    guard.turn_on("mine", "r1", world.root, world.wt, folder=world.run)
+    assert auto.end_guard_entries("r1") == 1 and seen == ["r1"]
+    other_project(world)
+    guard.turn_on("mine", "r1", world.root, world.wt, folder=world.run)
+    assert auto.end_guard_entries("r1") == 1 and seen == ["r1"]               # another project holds the id: filtered here
+    assert guard.state("sess-x") is not None

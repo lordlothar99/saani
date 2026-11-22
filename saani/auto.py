@@ -480,11 +480,12 @@ def end_guard_entries(run_id):
     """Removes the guard's registry entries of this run made for this repository (every session that registered it), through the guard's
     `turn_off`; the entries of another project's run with the same id stay. Returns how many."""
     from . import guard
-    n = 0
-    for session, _ in own_entries(run_id):
+    mine = own_entries(run_id)
+    if len(mine) == len([1 for _, e in entries() if e.get("id") == run_id]):      # no other project holds this id: the guard's own call
+        return guard.turn_off_run(run_id) or 0
+    for session, _ in mine:
         guard.turn_off(session)
-        n += 1
-    return n
+    return len(mine)
 
 
 def cmd_on(args):
@@ -496,6 +497,9 @@ def cmd_on(args):
     if not (guard.inside(folder, wt) and folder != wt and os.path.isdir(folder)):
         raise SystemExit(f"saani auto on: the run's folder must be a folder inside {c.wt_dir} (made by `saani auto`; "
                          "run this from it or pass --folder)")
+    dirs = guard.git_dirs(folder)
+    if not dirs or guard.norm(os.path.dirname(dirs[1])) != here() or not os.path.isfile(os.path.join(os.path.dirname(dirs[1]), config.FILE)):
+        raise SystemExit(f"saani auto on: the run's folder is not a worktree of this project ({config.FILE} in its main checkout)")
     run_id = args.id or os.path.basename(folder).removeprefix("auto-")
     if not valid_id(run_id):
         raise SystemExit(f"saani auto on: run id '{run_id}': letters, digits, - and _ only, at most 64")
@@ -508,7 +512,8 @@ def cmd_on(args):
         raise SystemExit("saani auto on: not inside a git checkout")
     rec = {"id": run_id, "started": stamp(now), "folder": str(folder), "deploy": bool(args.deploy), "limits": dict(LIMITS)}
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
-    # The guard registers the session after this process exits 0, from this one line (the plugin's PostToolUse hook): print it, and only it.
+    # The guard's PostToolUse hook registers the session after this process exits 0 and printed this line: the last line of stdout, on
+    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both).
     print(f"saani auto: on {run_id} folder={folder}")
     return 0
 
