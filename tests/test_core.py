@@ -123,3 +123,28 @@ def test_saani_new_warns_about_an_issue_without_a_milestone_unless_it_is_an_idea
     text = core.milestone_warning({"milestone": None, "labels": ["ui"]}, 7)
     assert text.startswith("WARNING: issue #7 has no milestone") and "--milestone" in text
     assert core.milestone_warning({}, 8).startswith("WARNING: issue #8")
+
+
+def test_saani_longrun_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path, monkeypatch, capsys):
+    """longrun-<id> beside the other worktrees, on the branch longrun/<id> from the integration branch (prune keeps it); an id twice is refused."""
+    import subprocess
+    from saani import config
+
+    def sh(*cmd, cwd):
+        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
+    origin, main = tmp_path / "origin.git", tmp_path / "webshop"
+    sh("git", "init", "-q", "--bare", "-b", "dev", str(origin), cwd=tmp_path)
+    sh("git", "clone", "-q", str(origin), str(main), cwd=tmp_path)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
+    sh("git", "push", "-q", "origin", "HEAD:dev", cwd=main)
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    core.cmd_longrun(type("A", (), {"id": "2026-11-22_1500"})())
+    wt = tmp_path / "webshop-wt" / "longrun-2026-11-22_1500"
+    assert wt.is_dir() and (wt / "build").is_dir()
+    out = capsys.readouterr().out
+    assert "longrun/2026-11-22_1500" in out and str(wt) in out
+    assert core.git("branch", "--show-current", cwd=wt) == "longrun/2026-11-22_1500"
+    with pytest.raises(SystemExit, match="already exists"):
+        core.cmd_longrun(type("A", (), {"id": "2026-11-22_1500"})())
+    with pytest.raises(SystemExit, match="letters, digits"):
+        core.cmd_longrun(type("A", (), {"id": "a b"})())

@@ -73,6 +73,7 @@ flowchart TB
 | `saani new <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: tier 1 against production, the branch pushed, the pull request into production opened. |
 | `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed. `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (a long run cannot change folder). |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches waiting for `prune`, the test queue. |
+| `saani longrun [--id ID]` | A throwaway worktree for a long run: folder `longrun-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `longrun/<same id>` from the integration branch (never landed; `saani prune` keeps it). |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two, a `longrun/*` branch or a branch checked out in a worktree. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
