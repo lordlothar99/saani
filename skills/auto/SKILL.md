@@ -38,9 +38,9 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    in-dev issue); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
    most 3 attempts, then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
 5. **Report** in the chat and as a comment on the pull request: start, end, duration, id, folder; the issues done; a table of what is
-   pending (issue | question with context | options with pros and cons); what was refused; the numbers (`saani kpis`). End with the exact
-   commands for the owner, each with its folder and branch. To merge, the owner says "merge" (`/saani:merge`, or `--deploy`); that runs `saani ci merged <PR>`, which relabels the issues and removes this
-   run's folder and branch by itself: give that command, never a manual `git worktree remove` or `git branch -d`.
+   pending (issue | question with context | options with pros and cons); what was refused; the numbers (`saani kpis`). End with `/saani:merge` (or
+   `/saani:merge --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
+   branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 
 ## off
 Say what is left, write the report, stop.

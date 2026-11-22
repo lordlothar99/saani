@@ -6,10 +6,11 @@ never deleted: it is the integration branch), then does what `saani ci merged <P
 Standard library only; the checks are pure functions (tests/test_merge.py).
 """
 import importlib
+import json
 
 from . import ci, config
 
-FAILED_CHECKS = ("failure", "cancelled", "timed_out")
+PASSED_CHECKS = ("success", "neutral", "skipped")      # any other conclusion (failure, cancelled, timed_out, action_required, stale...) refuses
 
 
 def cfg():
@@ -56,9 +57,9 @@ def refusal(pr, status, checks):
     if state != "success":
         return f"CI is red on {sha} ({c.ci_status_context}: {state}): fix it, land, then run saani ci pr"
     runs = (checks or {}).get("check_runs", [])
-    bad = [r.get("name") for r in runs if r.get("status") == "completed" and r.get("conclusion") in FAILED_CHECKS]
+    bad = [r.get("name") for r in runs if r.get("status") == "completed" and r.get("conclusion") not in PASSED_CHECKS]
     if bad:
-        return f"a check run failed on {sha} ({', '.join(map(str, bad))}): fix it, land, then run saani ci pr"
+        return f"a check run did not pass on {sha} ({', '.join(map(str, bad))}): fix it, land, then run saani ci pr"
     if any(r.get("status") != "completed" for r in runs):
         return f"CI still running on {sha} (a check run has not finished): wait for it, then run saani merge again"
     return None
@@ -73,6 +74,14 @@ def deployer():
 
 
 def run_command(args):
+    try:
+        return merge_it(args)
+    except json.JSONDecodeError as e:
+        print(f"refused: gh gave an answer that is not JSON ({e}): nothing was merged; try again")
+        return 1
+
+
+def merge_it(args):
     c = cfg()
     gh = ci.Run(args.dry_run)
     n = find_pr(gh, args.pr)
@@ -81,7 +90,7 @@ def run_command(args):
     pr.setdefault("number", n)
     sha = pr.get("headRefOid", "")
     status = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/status")
-    checks = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/check-runs")
+    checks = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/check-runs?per_page=100", "--paginate")
     why = refusal(pr, status, checks)
     if why:
         print(f"refused: {why}")
@@ -93,7 +102,12 @@ def run_command(args):
         if args.deploy:
             print("dry-run: then the deploy" + ("" if deployer() else " (not available yet: the deployer is issue #5)"))
         return 0
-    gh.write("gh", "pr", "merge", str(n), "--repo", c.repo, "--merge")
+    gh.write("gh", "pr", "merge", str(n), "--repo", c.repo, "--merge", "--match-head-commit", sha)
+    after = gh.json("gh", "pr", "view", str(n), "--repo", c.repo, "--json", "state") or {}
+    if after.get("state") != "MERGED":
+        print(f"#{n} is {after.get('state')}, not MERGED (a merge queue may only have enqueued it): stopping before the relabel; "
+              f"when it is merged, run saani ci merged {n}")
+        return 1
     print(f"merged #{n} into {c.production}")
     code = ci.cmd_merged(gh, n)
     if not args.deploy:

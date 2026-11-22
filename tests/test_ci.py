@@ -230,6 +230,36 @@ def test_after_a_merge_the_issues_in_dev_swap_to_in_main_by_gh_when_no_relabel_c
     assert cleaned == [[(None, "auto/2026-11-01_1000")]]                                        # the finished auto run goes too
 
 
+RELABEL = "Relabel merged issues"
+
+
+def relabel_world(jobs, monkeypatch, runs, slept):
+    from saani import core
+    monkeypatch.setattr(core, "finished_auto_runs", lambda before=None, cwd=None: [])
+    monkeypatch.setattr(core, "remove_auto_runs", lambda found, dry=False, cwd=None: None)
+    monkeypatch.setattr(fci, "log", lambda entry: None)
+    monkeypatch.setattr(fci.time, "sleep", lambda s: slept.append(s))
+    jobs.relabel = None
+    return FakeMergeGh({("pr", "view"): {**MERGED, "title": "x", "body": "", "commits": []},
+                        ("workflow", "list"): [{"name": RELABEL, "state": "active"}], ("run", "list"): runs})
+
+
+def test_a_relabel_run_from_before_the_merge_does_not_count_and_gh_relabels_itself(jobs, monkeypatch):
+    slept = []
+    old = [{"databaseId": 1, "conclusion": "success", "createdAt": "2026-11-22T13:00:00Z"}]    # MERGED merged at 14:26
+    gh = relabel_world(jobs, monkeypatch, old, slept)
+    assert fci.cmd_merged(gh, 26) == 0
+    assert len(slept) == 11                                                  # it waited about a minute for a run that never came
+
+
+def test_a_relabel_run_created_after_the_merge_counts(jobs, monkeypatch, capsys):
+    slept = []
+    new = [{"databaseId": 2, "conclusion": "success", "createdAt": "2026-11-22T14:27:00Z"}]
+    gh = relabel_world(jobs, monkeypatch, new, slept)
+    assert fci.cmd_merged(gh, 26) == 0 and slept == []
+    assert "ran on GitHub (run 2)" in capsys.readouterr().out
+
+
 def test_a_pull_request_that_is_not_merged_relabels_nothing(jobs, capsys):
     jobs.relabel = None
     gh = FakeMergeGh({("pr", "view"): {"state": "OPEN"}, ("workflow", "list"): []})

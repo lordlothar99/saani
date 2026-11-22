@@ -20,15 +20,16 @@ class FakeGh:
         self.pr, self.status, self.checks = {**PR, **(pr or {})}, status, checks
         self.prs = [{"number": 7}] if prs is None else prs
         self.written = []
+        self.after = "MERGED"                                            # the state read back after gh pr merge
 
     def json(self, *cmd):
         if cmd[:3] == ("gh", "pr", "list"):
             return self.prs
         if cmd[:3] == ("gh", "pr", "view"):
-            return self.pr
-        if cmd[-1].endswith("/status"):
+            return {"state": self.after} if cmd[-1] == "state" else self.pr
+        if cmd[2].endswith("/status"):
             return self.status
-        if cmd[-1].endswith("/check-runs"):
+        if "/check-runs" in cmd[2]:
             return self.checks
         raise AssertionError(cmd)
 
@@ -103,10 +104,51 @@ def test_a_named_pull_request_is_still_checked_for_its_branches(world, capsys):
 
 def test_a_green_pull_request_is_merged_with_a_merge_commit_then_ci_merged_runs(world):
     assert merge.run_command(args()) == 0
-    assert world.gh.written == [("gh", "pr", "merge", "7", "--repo", "acme/webshop", "--merge")]
+    assert world.gh.written == [("gh", "pr", "merge", "7", "--repo", "acme/webshop", "--merge", "--match-head-commit", SHA)]
     assert world.merged == [(7, world.gh.written)]                      # ci merged ran after the merge
     flat = " ".join(world.gh.written[0])
     assert "--squash" not in flat and "--rebase" not in flat and "--delete-branch" not in flat
+
+
+def test_the_checked_head_is_the_one_merged(world):
+    other = "b" * 40
+    world.gh = FakeGh(pr={"headRefOid": other})
+    assert merge.run_command(args()) == 0
+    assert world.gh.written[0][-2:] == ("--match-head-commit", other)
+
+
+def test_an_odd_check_conclusion_refuses_and_the_passing_ones_do_not(world):
+    for conclusion in ("action_required", "stale", "startup_failure"):
+        world.gh = FakeGh(checks={"check_runs": [{"name": "x", "status": "completed", "conclusion": conclusion}]})
+        assert merge.run_command(args()) == 1
+    ok = [{"name": n, "status": "completed", "conclusion": c} for n, c in (("a", "neutral"), ("b", "skipped"), ("c", "success"))]
+    world.gh = FakeGh(checks={"check_runs": ok})
+    assert merge.run_command(args()) == 0
+
+
+def test_check_runs_are_read_whole(world, monkeypatch):
+    seen = []
+    real = world.gh.json
+    monkeypatch.setattr(world.gh, "json", lambda *cmd: seen.append(cmd) or real(*cmd))
+    merge.run_command(args())
+    runs = [c for c in seen if c[2].endswith("check-runs?per_page=100")]
+    assert runs and "--paginate" in runs[0]
+
+
+def test_an_answer_that_is_not_json_refuses_cleanly(world, capsys):
+    import json as _json
+
+    def broken(*cmd):
+        raise _json.JSONDecodeError("Expecting value", "", 0)
+    world.gh.json = broken
+    assert merge.run_command(args()) == 1
+    assert "not JSON" in capsys.readouterr().out and world.gh.written == [] and world.merged == []
+
+
+def test_a_pull_request_that_is_not_merged_after_the_command_stops_before_ci_merged(world, capsys):
+    world.gh.after = "OPEN"                                              # a merge queue only enqueued it
+    assert merge.run_command(args(deploy=True)) == 1
+    assert "not MERGED" in capsys.readouterr().out and len(world.gh.written) == 1 and world.merged == []
 
 
 def test_a_dry_run_checks_everything_and_merges_nothing(world, capsys):

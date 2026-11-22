@@ -307,9 +307,7 @@ def cmd_merged(run, number):
     relabel = c.ci_jobs.get("relabel", {})
     states = {w["name"]: w["state"] for w in run.json("gh", "workflow", "list", "--repo", c.repo, "--all", "--json", "name,state") or []}
     if relabel.get("workflow") and states.get(relabel["workflow"]) == "active":
-        runs = run.json("gh", "run", "list", "--repo", c.repo, "--workflow", relabel["workflow"], "--limit", "5",
-                        "--json", "databaseId,conclusion,displayTitle") or []
-        ok = [r for r in runs if r.get("conclusion") == "success"]
+        ok = relabel_run_after_merge(run, relabel["workflow"], pr.get("mergedAt"))
         if ok:
             print(f"the relabel ran on GitHub (run {ok[0]['databaseId']}): nothing to do here")
             log({"job": "relabel", "pr": number, "place": "github", "result": "passed"})
@@ -329,6 +327,20 @@ def cmd_merged(run, number):
         code = relabel_issues(run, number, pr)
     core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
     return code
+
+
+def relabel_run_after_merge(run, workflow, merged, tries=12, pause=5):
+    """The successful relabel run of `workflow` created at or after the merge (`merged`, ISO time), or []: an older run belongs to an earlier
+    merge. Right after a merge the run is not there yet, so it is polled for about a minute (`tries` x `pause` seconds); never in a dry run."""
+    for attempt in range(tries):
+        runs = run.json("gh", "run", "list", "--repo", cfg().repo, "--workflow", workflow, "--limit", "5",
+                        "--json", "databaseId,conclusion,displayTitle,createdAt") or []
+        ok = [r for r in runs if r.get("conclusion") == "success" and merged and r.get("createdAt", "") >= merged]
+        if ok or run.dry or not merged:
+            return ok
+        if attempt + 1 < tries:
+            time.sleep(pause)
+    return []
 
 
 def merged_at(pr):
