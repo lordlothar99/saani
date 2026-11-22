@@ -51,3 +51,12 @@ def test_the_command_starts_and_says_its_version():
     r = subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "--version"], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
     assert re.search(r"\d+\.\d+", r.stdout + r.stderr)
+
+
+def test_the_license_is_the_same_everywhere():
+    spdx = "PolyForm-Noncommercial-1.0.0"
+    assert (ROOT / "LICENSE").read_text(encoding="utf-8").startswith("# PolyForm Noncommercial License 1.0.0")
+    assert "Required Notice: Copyright" in (ROOT / "LICENSE").read_text(encoding="utf-8")
+    plugin = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    assert plugin["license"] == spdx
+    assert "PolyForm Noncommercial 1.0.0" in (ROOT / "README.md").read_text(encoding="utf-8")
