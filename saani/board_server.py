@@ -676,7 +676,7 @@ def issues():
         queries["assigned"] = ("--assignee", c.owner, "--state", "open", "--limit", "100")
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
-    # The status page shows what is started (assigned), waits for the owner or is merged; the board (/board) places every open issue.
+    # The status page shows what is started (assigned), waits for the owner or is merged; the board (/) places every open issue.
     lab = c.labels
     flagged = [i for i in got["open"] if set(i["labels"]) & {lab["in_dev"], lab["in_main"], lab["answer"], lab["act"]}]
     return {"board": got.get("assigned", []) + flagged + got["closed"], "open": got["open"], "closed": got["closed"]}

@@ -79,7 +79,7 @@ flowchart TB
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
-| `saani ui [--open] [--json]` | The local status page and the board (below): one board for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
+| `saani ui [--open] [--json]` | The local board and kanban page (below): one board for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | The projects the board's selector offers, in `~/.saani/projects.toml`. |
 | `saani progress run\|show\|watch` | A progress bar with the remaining time for a test run in the background. |
 
@@ -131,7 +131,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 - After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran, or runs `[ci] relabel` here.
 - Every decision goes to `build/saani-ci.json`.
 
-## The status page and the board
+## The board and the kanban page
 `saani ui` (alias `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
 - **`/kanban`, the kanban page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
   needs and a "Copy prompt" to paste to the Architect; the open pull request with its CI in three colours; the Claude Code sessions of the
