@@ -5,11 +5,11 @@ the worker agents now, hooks later.
 
 | Part | State |
 |---|---|
-| `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:start`, `/saani:land`, `/saani:merge`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `start`, `land`, `merge` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
+| `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:start`, `/saani:land`, `/saani:merge`, `/saani:comment`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `start`, `land`, `merge` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
 | `bin/saani`, `bin/saani.cmd` | the `saani` command inside Claude Code: `bin/` is on the PATH of Claude's shell while the plugin is enabled, and the launchers run `saani.py` from the plugin's own copy (bash: the first Python 3.11+; Windows: `python`). `.gitattributes` keeps `bin/saani` in LF, or bash fails on Windows checkouts |
 | `skills/auto/SKILL.md` | `/saani:auto`, `/saani:auto 12 15`, `/saani:auto off`: the checklist of an auto run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani auto`) |
 | Claude Code hooks | none yet (they will live in `hooks/hooks.json`). The **git** commit-msg hook is not part of the plugin: it is [.githooks/commit-msg](../.githooks/commit-msg), and needs `SAANI_HOME` because git runs it outside Claude Code |
-| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` and `deployer` wait for their issues |
+| `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`, `deployer`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` waits for its issue |
 
 ## Worker roles
 Five are written (`agents/`); the models are a first choice, to be changed by a trial on real issues, never by a price list. A role's model is
@@ -23,7 +23,7 @@ harness, is a one-line change after the cost per landing is measured (#8). A wor
 | Scribe | Haiku | issue comments, labels, commit trailers |
 | Researcher | Sonnet | reads docs, releases and code, brings back the answer |
 | Sentinel (planned) | Sonnet | server diagnostics with a read-only key |
-| Deployer (planned) | Sonnet | deploys production after the owner's tap, with a deploy-only key |
+| Deployer | Sonnet | runs `saani deploy --dry-run`, reports the risks (the issues and commits in the range), reads a deploy log and says what a failure means; never deploys, never touches keys: the main session, which sees the owner, runs `saani deploy` or `saani merge --deploy` after the owner asks and taps their SSH agent |
 
 ## The pipeline from an issue to dev
 The Architect (the main session, strongest model) runs it; the Coder, Tester, Reviewer and Scribe are its hands.
