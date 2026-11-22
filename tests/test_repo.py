@@ -126,3 +126,10 @@ def test_the_agents_that_run_commands_keep_to_commands_an_allowlist_can_cover():
         assert "One plain command per Bash call; the only chaining is `cd <worktree> && <command>`" in text, role
         for banned in ("`python -`", "`python -c`", "heredoc scripts", "shell loops", "`base64`", "`awk`"):
             assert banned in text, (role, banned)
+
+
+def test_the_command_and_the_plugin_say_the_same_version():
+    """#40: `saani --version` prints the plugin's version, so the command on the PATH and `claude plugin list` agree."""
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    r = subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "--version"], capture_output=True, text=True, encoding="utf-8")
+    assert (r.stdout + r.stderr).strip() == f"saani {plugin['version']}"
