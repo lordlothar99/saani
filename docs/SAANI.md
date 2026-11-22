@@ -154,6 +154,12 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 
 The long-run checklist is the plugin's skill (`skills/longrun/SKILL.md`).
 
+Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
+(Long run, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
+A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
+`🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the long-run fit, what is deployed, what the owner is
+asked, what blocks the issue); the board and the long run read it through that one parser.
+
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),
 landings and conflicts by file, test jobs per kind (median wait and run, failures). The owner's waiting time and interventions and the tokens

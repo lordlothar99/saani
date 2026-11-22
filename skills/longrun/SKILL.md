@@ -24,7 +24,8 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that.
 1. **Which issues: as many as possible.** Milestone order (lowest version first), then issues with no milestone; inside one, bugs first.
-   Excluded, real blockers only: the server or a live check, the owner's answer (`[labels] answer`), the owner's action (`[labels] act`), a key or account only the
+   The issue's **At a glance** table says what to expect (`.github/ISSUE_TEMPLATE/`; read like `saani/glance.py` does): `Long run ⛔ No` is not
+   taken, `🟡 Partly` only for the part the table names, and `Blocked by` an issue still open or a date not yet come is not taken. Excluded, real blockers only: the server or a live check, the owner's answer (`[labels] answer`), the owner's action (`[labels] act`), a key or account only the
    owner has. A partly blocked issue: do the repo's part, comment the rest. An unclear one: comment the pending decision (context, options,
    a recommendation) and move on. Never change an issue's milestone. **The next issue is searched again after each one, never taken from a
    list made at the start**, so an issue created, relabelled or answered during the run is seen.
