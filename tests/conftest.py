@@ -14,5 +14,5 @@ from saani import config  # noqa: E402
 def cfg(tmp_path):
     return config.use(config.Config(repo="acme/webshop", owner="someone", root=tmp_path / "webshop",
                                     generated=("docs/SPEC.md", "tests/support/browser_groups.json"),
-                                    tier1=["{python}", "-c", "pass"], full=["{python}", "-c", "pass"],
+                                    landing=["{python}", "-c", "pass"], full=["{python}", "-c", "pass"],
                                     folders={"work": "C:/work/webshop", "deploy": "C:/work/webshop-main"}))

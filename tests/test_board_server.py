@@ -105,6 +105,30 @@ def test_the_roster_lists_defined_planned_and_built_in_subagents_with_what_runs_
     assert "built into Claude Code" in rows["Explore"]["file"]
 
 
+def test_a_plugin_agent_is_one_roster_row_with_its_role_and_the_page_gives_it_the_look_of_that_role(tmp_path, monkeypatch):
+    """`saani:coder` and `saani:reviewer` were two grey figures with an "o" (#42): the roster listed them as built-in next to a planned Coder and
+    Reviewer, and the page looked the look up by the exact name. Now the plugin's agents are defined roles, their runs count on the role's row,
+    and the page strips the plugin prefix."""
+    (tmp_path / "coder.md").write_text("---\nname: coder\ndescription: writes the change\nmodel: sonnet\n---\nbody", encoding="utf-8")
+    (tmp_path / "reviewer.md").write_text("---\nname: reviewer\nmodel: opus\n---\nbody", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(fp, "cfg", lambda: type("Cfg", (), {"root": project})())          # no .claude/agents in this project
+    defined = fp.defined_agents(tmp_path)
+    assert [(d["name"], d["file"]) for d in defined] == [("coder", "the saani plugin: agents/coder.md"), ("reviewer", "the saani plugin: agents/reviewer.md")]
+    sessions = [{"name": "saani", "subagents": [{"type": "saani:coder", "description": "#3 guard", "state": "working"},
+                                                {"type": "saani:coder", "description": "#33 comments", "state": "working"},
+                                                {"type": "saani:reviewer", "description": "Review #33", "state": "done"}]}]
+    rows = {r["name"]: r for r in fp.roster(defined, sessions)}
+    assert "saani:coder" not in rows and "saani:reviewer" not in rows and "Coder" not in rows and "Reviewer" not in rows
+    assert rows["coder"]["kind"] == "defined" and rows["coder"]["runs"] == 2 and len(rows["coder"]["running"]) == 2
+    assert rows["reviewer"]["runs"] == 1 and rows["reviewer"]["running"] == []
+    assert rows["Tester"]["kind"] == "planned"                                 # a role nobody defined yet stays planned
+    assert fp.agent_key("saani:Coder") == fp.agent_key("coder") == "coder"
+    page = fp.MAP_FILE.read_text(encoding="utf-8")
+    assert 'String(name || "").split(":").pop().toLowerCase()' in page and "ROLE[roleOf(w.role)]" in page
+
+
 def test_the_columns_have_short_names_and_their_explanations_are_tooltips():
     """Ready, Building, Testing, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
     assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "To close", "Deployed"]
@@ -249,7 +273,7 @@ def test_the_pull_request_shows_green_yellow_or_red_and_only_its_tasks():
 
 
 def test_the_top_left_shows_the_architect_sessions():
-    """the Architect sessions in the top left, in place of the explanations."""
+    """the Claude Code sessions in the top left, in place of the explanations."""
     top = fp.page()[fp.page().index('<div class="top">'):fp.page().index('<div class="slab pc"')]
     assert 'id="crew"' in top and "How to work" not in fp.page() and fp.page().count('id="crew"') == 1
 
@@ -596,17 +620,18 @@ def test_landing_comments_the_issue_and_labels_it_and_says_so_when_gh_refuses(mo
     from saani import core
     calls = []
     monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: calls.append(cmd) or type("R", (), {"returncode": 0})())
-    text = core.landing_comment({"head": "abc1234", "seconds": 18})
+    row = {"head": "abc1234", "seconds": 18}
+    text = core.landing_comment(row)
     assert text.splitlines()[0] == "### ✅ On dev" and "abc1234" in text and "18 s" in text and "with the next pull request" in text
-    assert core.mark_on_dev("14", text) is True
+    assert core.mark_on_dev("14", row) is True
     assert calls[0][:4] == ["gh", "issue", "comment", "14"] and calls[1][:4] == ["gh", "issue", "edit", "14"] and calls[1][-2:] == ["--add-label", "in-dev"]
     monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: type("R", (), {"returncode": 1})())
-    assert core.mark_on_dev("14", text) is False
+    assert core.mark_on_dev("14", row) is False
 
     def missing(cmd, **k):
         raise FileNotFoundError("gh")
     monkeypatch.setattr(core.subprocess, "run", missing)
-    assert core.mark_on_dev("14", text) is False
+    assert core.mark_on_dev("14", row) is False
 
 
 def test_a_card_carries_the_issue_type_github_holds(monkeypatch):

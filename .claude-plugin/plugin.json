@@ -1,7 +1,7 @@
 {
   "name": "saani",
-  "version": "0.3.0",
-  "description": "Saani: an AI workshop for GitHub projects. A slash command for each saani command (/saani:ui, /saani:start, /saani:land...), the auto skill, and later the worker agents and hooks.",
+  "version": "0.4.0",
+  "description": "Saani: an AI workshop for GitHub projects. A slash command for each saani command (/saani:ui, /saani:start, /saani:land...), the auto skill, the worker agents and the guard hook.",
   "author": {
     "name": "lordlothar99"
   },

@@ -29,10 +29,11 @@ def test_every_skill_has_a_name_and_a_description():
 
 
 def test_every_command_has_a_skill_that_runs_it_the_same_way():
-    """One /saani:<command> skill per subcommand of saani (check-msg is the git hook), each with the same "Running saani" section."""
+    """One /saani:<command> skill per subcommand of saani (check-msg is the git hook, guard the Claude Code hook), each with the same
+    "Running saani" section."""
     out = subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "--help"], capture_output=True, text=True, encoding="utf-8").stdout
     aliases = {a.strip() for found in re.findall(r"^\s+[a-z-]+ \(([a-z, -]+)\)", out, re.M) for a in found.split(",")}
-    commands = set(re.search(r"\{([a-z,-]+)\}", out).group(1).split(",")) - {"check-msg"} - aliases
+    commands = set(re.search(r"\{([a-z,-]+)\}", out).group(1).split(",")) - {"check-msg", "guard"} - aliases
     skills = ROOT / "skills"
     assert commands <= {p.name for p in skills.iterdir() if (p / "SKILL.md").is_file()}
     sections = {c: (skills / c / "SKILL.md").read_text(encoding="utf-8").split("## Running saani", 1) for c in commands}
@@ -114,3 +115,24 @@ def test_every_worker_agent_is_named_like_its_file_and_has_tools_and_a_model():
         assert re.search(r"^model: (sonnet|opus|haiku)$", head, re.M), agent
     reviewer = (folder / "reviewer.md").read_text(encoding="utf-8").split("---")[1]
     assert not re.search(r"\b(Edit|Write)\b", re.search(r"^tools: .*$", reviewer, re.M).group(0)), "the reviewer is read-only"
+
+
+def test_the_agents_that_run_commands_keep_to_commands_an_allowlist_can_cover():
+    """#46: the coder, the tester and the reviewer never `cd` (a subagent's cd does not last, and `cd <folder> && <command>` always
+    asks): they name the worktree (file tools with its paths, git -C, saani test --worktree), run one plain command per Bash call, and
+    never inline code, so a project's allow rules cover what they run."""
+    for role in ("coder", "tester", "reviewer"):
+        text = " ".join((ROOT / "agents" / f"{role}.md").read_text(encoding="utf-8").split())
+        assert "**Never `cd`: name the worktree.**" in text, role
+        assert "`git -C <worktree> <command>`" in text and "`saani test --worktree <worktree>" in text, role
+        assert "One plain command per Bash call, nothing chained." in text, role
+        assert "cd <worktree> &&" not in text, role
+        for banned in ("`python -`", "`python -c`", "heredoc scripts", "shell loops", "`base64`", "`awk`"):
+            assert banned in text, (role, banned)
+
+
+def test_the_command_and_the_plugin_say_the_same_version():
+    """#40: `saani --version` prints the plugin's version, so the command on the PATH and `claude plugin list` agree."""
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    r = subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "--version"], capture_output=True, text=True, encoding="utf-8")
+    assert (r.stdout + r.stderr).strip() == f"saani {plugin['version']}"

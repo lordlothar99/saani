@@ -36,8 +36,8 @@ invented project, also served locally at `/mock-state.json`).
 | Field | Meaning |
 |---|---|
 | `pr` | the open integration -> production pull request: `number`, `url`, `ci.state` (`green`, `red`, `running`, `stale`, `none`: the Watchtower's beacon), `inside` (issue numbers) |
-| `roster[]` | every subagent kind: `name`, `kind` (`defined`, `planned`, `built-in`), `model`, `what`, `file`, `runs`, `running[{description, issue?}]` |
+| `roster[]` | every subagent kind: `name`, `kind` (`defined`, `planned`, `built-in`), `model`, `what`, `file`, `runs`, `running[{description, issue?}]` (a plugin's agent, `saani:coder`, is the row of its role, `coder`: its runs count there; the page draws every worker with the look of its role) |
 | `milestones[]` | the milestone strip: `title`, `open`, `closed`, `checks` (the number of its open "Live checks ..." issue, or null), `ready` (everything closed, something done) |
 | `hygiene[]` | the tidy-up strip, only the kinds that are not empty: `{kind, issues[]}`; `kind` is `closed_labelled` (closed, still labelled in-dev / in-main), `no_milestone` (open, not an idea) or `landed_unlabelled` (named by commits on the integration branch, no in-dev / in-main) |
-| `crew[]` | the Architect sessions: `session`, `name` (folder name only), `branch`, `model`, `state`, `age_min`, `issue` |
+| `crew[]` | the Claude Code sessions: `session`, `name` (folder name only), `branch`, `model`, `state`, `age_min`, `issue` |
 | `sample` | sample only: `taken`, `note`, `staged` |

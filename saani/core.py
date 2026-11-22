@@ -9,14 +9,17 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
                                                     any Type (none: the hotfix default); it warns when production holds merged work that is
                                                     not live yet, it never refuses for that
   saani land [--keep] [--wait MIN] [--dry-run]      from inside a worker's worktree: take the landing lock, merge origin/<integration>,
-         [--worktree PATH]                          rebuild the generated files, tier 1, fast-forward into the integration branch, release
-                                                    the lock, remove the worktree; a hotfix never lands on the integration branch: tier 1
-                                                    against production, the branch pushed and its pull request into production opened
+         [--worktree PATH]                          rebuild the generated files, the landing tests, fast-forward into the integration
+                                                    branch, release the lock, remove the worktree; a hotfix never lands on the integration
+                                                    branch: the landing tests against production, the branch pushed and its pull request
+                                                    into production opened
+  saani auto pick [--json] [--limit N] [--only N..]   the open issues an auto run may take now, in order (saani/auto.py)
+  saani auto on|off|status|report ...               an auto run's record, stop rules and report (saani/auto.py)
   saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
                                                     branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
-  saani test [--kind tier1|land|full] -- <cmd...>   run a test command through the test queue (saani/queue.py)
+  saani test [--kind landing|full] [--worktree P] -- <cmd...>  run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
 
@@ -28,9 +31,10 @@ Landing, step by step:
 3. `git merge origin/<integration>`; a conflict only in generated files is solved by taking the integration copy, they are rebuilt next;
    any other conflict stops the landing, the lock is released, the worker resolves, commits and lands again;
 4. the generated files are rebuilt (settings `[land] rebuild`) and committed if they changed;
-5. tier 1 (settings `[tests] tier1`), through the test queue with the landing's priority; red stops the landing;
-6. `git push origin HEAD:<integration>`, never forced: on a refusal it merges again and retries, tier 1 again only when the new commits
-   touch the branch's files, at most `push_attempts` times;
+5. the landing tests (settings `[tests] landing`), through the test queue with the landing's priority (kind `land`); red stops the
+   landing;
+6. `git push origin HEAD:<integration>`, never forced: on a refusal it merges again and retries, the landing tests again only when the
+   new commits touch the branch's files, at most `push_attempts` times;
 7. the lock is released, the landing is recorded (build/saani-landings.jsonl of the main checkout), the worktree and its local branch
    are removed (--keep leaves them).
 """
@@ -45,7 +49,7 @@ import subprocess
 import sys
 import time
 
-from . import config, queue
+from . import comments, config, queue
 
 LOCK_NAME = "saani-landing.lock"
 LANDINGS = "saani-landings.jsonl"
@@ -134,8 +138,9 @@ def split_conflicts(paths):
     return [p for p in paths if p in gen], [p for p in paths if p not in gen]
 
 
-def rerun_tier1(moved, changed):
-    """After the integration branch moved under a landing: tier 1 again only when the new commits touch a file this branch changed."""
+def rerun_landing(moved, changed):
+    """After the integration branch moved under a landing: the landing tests again only when the new commits touch a file this branch
+    changed."""
     return bool((set(moved) & set(changed)) - set(cfg().generated))
 
 
@@ -311,6 +316,26 @@ def hotfix_base():
 def cmd_auto(args):
     """A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>`, branch `auto/<YYYY-MM-DD_HHMM>` from the integration
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
+    action = getattr(args, "action", None)
+    for name, only in (("folder", ("on", "away")), ("deploy", ("on", "away")), ("here", ("on",)), ("check", ("status",)), ("pr", ("report",)),
+                       ("post", ("report",)), ("run_id", ("off",))):
+        given = getattr(args, name, None)
+        if given is not None and given is not False and action not in only:
+            raise SystemExit(f"saani auto: --{name.removesuffix('_id')} belongs to " + " and ".join(f"`saani auto {o}`" for o in only))
+    if action in ("on", "off", "status", "report", "away"):
+        if action not in ("on", "away") and getattr(args, "id", None):
+            raise SystemExit(f"saani auto {action}: --id belongs to `saani auto`, `saani auto on` and `saani auto away`" + ("; `off` takes --run" if action == "off" else ""))
+        if getattr(args, "json", False) or getattr(args, "limit", None) is not None or (getattr(args, "only", None) and action != "away"):
+            raise SystemExit("saani auto: --json and --limit belong to `saani auto pick`, --only to `pick` and `away`")
+        from . import auto
+        return auto.cmd_run(args)
+    if action != "pick" and (getattr(args, "json", False) or getattr(args, "limit", None) is not None or getattr(args, "only", None)):
+        raise SystemExit("saani auto: --json, --limit and --only belong to `saani auto pick`")
+    if action == "pick" and args.id:
+        raise SystemExit("saani auto pick: --id belongs to `saani auto` (the run's worktree)")
+    if action == "pick":
+        from . import auto
+        return auto.cmd_pick(args)
     c = cfg()
     stamp = args.id or time.strftime("%Y-%m-%d_%H%M")
     if not re.fullmatch(r"[0-9A-Za-z_-]+", stamp):
@@ -365,9 +390,11 @@ def cmd_start(args):
         git("config", "--worktree", "core.hooksPath", ".githooks", cwd=folder)
     if not args.no_assign and c.owner:
         subprocess.run(["gh", "issue", "edit", str(args.issue), "--repo", c.repo, "--add-assignee", c.owner], capture_output=True)
+    if not args.no_comment:
+        comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name})
     print(f"worktree: {folder}")
     print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
-    print(f"timing:   {report or 'none found: the tier 1 estimate is rougher'}")
+    print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
     need = " and ".join(t + ":" for t in c.trailers)
     if args.hotfix:
         print(f"HOTFIX: commits need {need}; `saani land` pushes the branch and opens the pull request into {c.production} "
@@ -456,14 +483,14 @@ def stop(lock, branch, row, message, code=1):
 
 
 def land_hotfix(args, cwd, branch, number):
-    """A hotfix never reaches the integration branch: tier 1 against production, the branch pushed, the pull request into production
-    opened (or the open one named). No landing lock. CI, merge, deploy and the merge back follow."""
+    """A hotfix never reaches the integration branch: the landing tests against production, the branch pushed, the pull request into
+    production opened (or the open one named). No landing lock. CI, merge, deploy and the merge back follow."""
     c = cfg()
     if args.dry_run:
-        print(f"would run tier 1 against origin/{c.production}, push {branch} and open its pull request into {c.production}")
+        print(f"would run the landing tests against origin/{c.production}, push {branch} and open its pull request into {c.production}")
         return 0
-    if c.tier1 and queued_run("land", [*c.command("tier1"), "--base", f"origin/{c.production}"], cwd) != 0:
-        print("HOTFIX STOPPED: tier 1 is red: fix it on the branch, commit, land again")
+    if c.landing and queued_run("land", [*c.command("landing"), "--base", f"origin/{c.production}"], cwd) != 0:
+        print("HOTFIX STOPPED: the landing tests are red: fix it on the branch, commit, land again")
         return 1
     push = git("push", "-u", "origin", branch, cwd=cwd, check=False)
     if push.returncode != 0:
@@ -487,16 +514,21 @@ def land_hotfix(args, cwd, branch, number):
     return 0
 
 
+def named_worktree(path):
+    """The checkout `--worktree PATH` names, or the current folder's when PATH is empty. A worktree is named instead of entered because a
+    `cd` does not last: Claude Code undoes it in a subagent, and asks before `cd <folder> && <command>`."""
+    if not path:
+        return pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
+    top = git("rev-parse", "--show-toplevel", cwd=pathlib.Path(path), check=False) if pathlib.Path(path).is_dir() else None
+    cwd = known_worktree(top.stdout.strip(), [p for p, _ in worktrees()]) if top is not None and top.returncode == 0 else None
+    if cwd is None:
+        raise SystemExit(f"--worktree {path}: not a worktree of this repository (see saani status)")
+    return cwd
+
+
 def cmd_land(args):
     c = cfg()
-    if args.worktree:
-        # An auto run cannot change folder: it names the worktree instead, from the main checkout.
-        top = git("rev-parse", "--show-toplevel", cwd=pathlib.Path(args.worktree), check=False)
-        cwd = known_worktree(top.stdout.strip(), [p for p, _ in worktrees()]) if top.returncode == 0 else None
-        if cwd is None:
-            raise SystemExit(f"--worktree {args.worktree}: not a worker's worktree of this repository (see saani status)")
-    else:
-        cwd = pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
+    cwd = named_worktree(args.worktree)
     branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
     m = c.worker_branch.match(branch)
     if not m:
@@ -521,7 +553,7 @@ def cmd_land(args):
         raise SystemExit(f"{frozen} is frozen: the record of a change is its commit message and the issue comment")
     if args.dry_run:
         print(f"would land {branch} ({len(changed)} files) into {c.integration}: lock, merge {base}, "
-              f"rebuild {', '.join(c.generated) or 'nothing'}, tier 1, push HEAD:{c.integration}, "
+              f"rebuild {', '.join(c.generated) or 'nothing'}, landing tests, push HEAD:{c.integration}, "
               f"{'keep' if args.keep else 'remove'} the worktree")
         return 0
 
@@ -537,16 +569,16 @@ def cmd_land(args):
     row = {"time": datetime.datetime.now().isoformat(timespec="seconds"), "branch": branch, "issue": int(m.group(2)),
            "conflicts": [], "auto_resolved": []}
     try:
-        need_tier1, attempt = True, 0
+        need_tests, attempt = True, 0
         while True:
             git("fetch", "-q", "origin", c.integration, cwd=cwd)
             problem = merge_and_rebuild(cwd, base, row, m.group(2))
             if problem:
                 return stop(lock, branch, row, problem)
             tested = git("rev-parse", base, cwd=cwd)
-            if need_tier1 and c.tier1:
-                if queued_run("land", c.command("tier1"), cwd) != 0:
-                    return stop(lock, branch, row, "tier 1 is red: fix it on the branch, commit, land again")
+            if need_tests and c.landing:
+                if queued_run("land", c.command("landing"), cwd) != 0:
+                    return stop(lock, branch, row, "the landing tests are red: fix it on the branch, commit, land again")
             push = git("push", "origin", f"HEAD:{c.integration}", cwd=cwd, check=False)
             if push.returncode == 0:
                 break
@@ -557,9 +589,10 @@ def cmd_land(args):
                             f"Saani): land again. {(push.stderr or '').strip()[-300:]}")
             git("fetch", "-q", "origin", c.integration, cwd=cwd)
             moved = git("diff", "--name-only", tested, base, cwd=cwd).splitlines()
-            need_tier1 = rerun_tier1(moved, changed)
+            need_tests = rerun_landing(moved, changed)
             print(f"{c.integration} moved during the landing ({len(moved)} files): merging again, "
-                  + ("tier 1 again (the new commits touch this branch's files)" if need_tier1 else "no file in common: no new tier 1"))
+                  + ("the landing tests again (the new commits touch this branch's files)" if need_tests
+                     else "no file in common: no new landing tests"))
         row["result"], row["seconds"] = "landed", round(time.time() - started)
         row["head"] = git("rev-parse", "--short", "HEAD", cwd=cwd)
         release_lock(lock, branch)
@@ -569,7 +602,7 @@ def cmd_land(args):
         raise
     print(f"LANDED: {branch} -> {c.integration} at {row['head']} in {row['seconds']} s"
           + (f"; conflicts: {', '.join(row['conflicts'])}" if row["conflicts"] else ""))
-    restore_generated(cwd)                 # tier 1 may rewrite them with other line endings
+    restore_generated(cwd)                 # the landing tests may rewrite them with other line endings
     if not args.keep:
         home = main_checkout(cwd)
         os.chdir(home)
@@ -579,29 +612,36 @@ def cmd_land(args):
             print(f"removed: {cwd} and the local branch {branch}")
         else:
             print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
-    if args.no_comment or not mark_on_dev(m.group(2), landing_comment(row)):
+    from . import auto
+    auto.journal(m.group(2), "landed")
+    if args.no_comment or not mark_on_dev(m.group(2), row):
         print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
     return 0
 
 
+def landing_fields(row):
+    c = cfg()
+    tests = "landing tests green" if c.landing else "no landing tests configured"
+    return {"Commit": row["head"], "Tests": f"{tests}, landed in {row['seconds']} s", "Next": f"goes to {c.production} with the next pull request"}
+
+
 def landing_comment(row):
     """The issue comment of a landing (.github/COMMENT_KINDS.md, `On dev`): the commit, how long it took, where it goes next."""
-    c = cfg()
-    tests = "tier 1 green" if c.tier1 else "no tier 1 configured"
-    return chr(10).join(["### ✅ On dev", "| Commit | Tests | Next |", "|---|---|---|",
-                      f"| {row['head']} | {tests}, landed in {row['seconds']} s | goes to {c.production} with the next pull request |"])
+    return comments.render("on-dev", landing_fields(row))
 
 
-def mark_on_dev(number, text):
-    """Comment the landing on the issue and add its in-dev label. True when both worked; False (nothing said, the caller prints the
-    manual step) when gh is missing or refuses: a landing is never undone by its bookkeeping."""
-    c = cfg()
-    steps = [["gh", "issue", "comment", str(number), "--repo", c.repo, "--body", text],
-             ["gh", "issue", "edit", str(number), "--repo", c.repo, "--add-label", c.labels.get("in_dev", "in-dev")]]
+def mark_on_dev(number, row):
+    """Comment the landing on the issue and add its in-dev label (saani/comments.py). True when the comment went out (a failed label
+    edit prints its own step); False (nothing said, the caller prints both steps) when gh is missing or refuses: a landing is never undone by its bookkeeping."""
     try:
-        return all(subprocess.run(s, cwd=c.root, capture_output=True, text=True, stdin=subprocess.DEVNULL).returncode == 0 for s in steps)
-    except OSError:
+        comments.post(number, "on-dev", landing_fields(row), labels=False)
+    except (SystemExit, OSError):
         return False
+    try:
+        comments.apply_labels(number, "on-dev")
+    except (SystemExit, OSError):
+        print(f"next: label #{number} {cfg().labels.get('in_dev', 'in-dev')} (the comment is posted)")
+    return True
 
 
 # ---------------------------------------------------------------- saani prune
@@ -697,7 +737,66 @@ def cmd_prune(args):
 
 # ---------------------------------------------------------------- status and the commit-msg hook
 
+def claude_settings_files(root):
+    """The Claude Code settings files that can widen a session of the project: its shared and its local settings, and the user's."""
+    home = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude")
+    return [root / ".claude" / "settings.json", root / ".claude" / "settings.local.json", home / "settings.json"]
+
+
+def _abs(entry, base):
+    """An additionalDirectories entry as an absolute path. Git Bash's `/c/...` is read as `C:/...` on Windows. A relative entry is taken
+    from the main checkout (Claude Code does not document the base, so the warning asks for an absolute path)."""
+    if os.name == "nt" and re.match(r"^/[A-Za-z](/|$)", entry):
+        entry = entry[1].upper() + ":" + (entry[2:] or "/")
+    p = pathlib.Path(entry)
+    return p if p.is_absolute() else base / p
+
+
+def _within(path, folder):
+    """True when `path` is `folder` or below it; case-insensitive on Windows, `/` and `\\` alike."""
+    p, f = (os.path.normcase(os.path.abspath(str(x))) for x in (path, folder))
+    return p == f or p.startswith(f.rstrip(os.sep) + os.sep)
+
+
+def additional_directories(root, files=None):
+    """The `permissions.additionalDirectories` of the project's Claude Code settings (all files merged), as absolute paths. Read only:
+    the settings are the owner's, Saani never writes them. A file that is missing or not valid JSON adds nothing."""
+    out = []
+    for path in claude_settings_files(root) if files is None else files:
+        try:
+            data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        perms = data.get("permissions") if isinstance(data, dict) else None
+        dirs = perms.get("additionalDirectories") if isinstance(perms, dict) else None
+        out += [_abs(d.strip(), root) for d in dirs or [] if isinstance(d, str) and d.strip()] if isinstance(dirs, list) else []
+    return out
+
+
+def worktrees_warning(c, files=None):
+    """A line for `saani status` when the workers' worktrees folder is outside every working directory of a Claude Code session of the
+    project: then a command that writes there, the agents' included, asks the owner. None when the folder is inside the main checkout or
+    under an `additionalDirectories` entry. The line to add is relative to the main checkout when it can be (`../webshop-wt`), so the
+    project's committed `.claude/settings.json` covers every developer; Claude Code resolves it from the project's folder."""
+    wt = c.wt_dir
+    if _within(wt, c.root) or any(_within(wt, d) for d in additional_directories(c.root, files)):
+        return None
+    full = (wt.resolve() if wt.exists() else wt)
+    try:
+        entry = os.path.relpath(full, c.root.resolve())
+    except ValueError:                                     # another drive on Windows: no relative path
+        entry = str(full)
+    entry = entry.replace("\\", "/")
+    return (f"warning: worktrees folder {str(full).replace(chr(92), '/')} is not in permissions.additionalDirectories: a command that "
+            f"writes there (the agents' included) asks the owner. Add it to the project's .claude/settings.json, committed so every "
+            f"developer has it (Claude Code reads it once they trust the folder): "
+            f'{{"permissions": {{"additionalDirectories": ["{entry}"]}}}}')
+
+
 def cmd_status(args):
+    warning = worktrees_warning(cfg())
+    if warning:
+        print(warning)
     held = read_lock(lock_path())
     print("landing lock: " + ("free" if held is None else f"held by {held.get('branch')} since {held.get('started')}"))
     for path, branch in worktrees():
@@ -732,12 +831,25 @@ def queued_run(kind, command, cwd):
                      main_checkout(cwd) / "build" / TESTS_LOG)
 
 
+def test_kind(kind):
+    """The queue kind for `saani test --kind`: landing or full; the old name tier1 is read as landing, with a message. `land` is the
+    run inside `saani land` (it holds the landing lock, so it goes first): it is not offered here."""
+    if kind in queue.RENAMED_KINDS:
+        new = queue.RENAMED_KINDS[kind]
+        print(f"saani test: --kind {kind} is now --kind {new} (run as {new})", file=sys.stderr)
+        return new
+    if kind == "land":
+        raise SystemExit("saani test: --kind land is the run inside saani land (it holds the landing lock): use --kind landing")
+    if kind not in queue.KINDS:
+        raise SystemExit(f"saani test: unknown --kind {kind}: one of {', '.join(queue.KINDS)}")
+    return kind
+
+
 def cmd_test(args):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("give the command after --, e.g. saani test -- python -m pytest")
-    cwd = pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
-    return queued_run(args.kind, command, cwd)
+    return queued_run(test_kind(args.kind), command, named_worktree(args.worktree))
 
 
 def cmd_check_msg(args):
@@ -765,9 +877,23 @@ def add_parsers(sub):
     p.add_argument("--slug", help="words for the branch name instead of the issue's title")
     p.add_argument("--no-assign", action="store_true", help="do not assign the issue to the owner")
     p.add_argument("--hotfix", action="store_true", help="an urgent fix: from the prod tag, landed as a pull request into production")
+    p.add_argument("--no-comment", action="store_true", help="do not post the Started comment on the issue")
     p.set_defaults(run=cmd_start)
-    p = sub.add_parser("auto", help="a throwaway worktree (auto-<timestamp>) for an auto run to work in")
-    p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM)")
+    p = sub.add_parser("auto", help="a throwaway worktree (auto-<timestamp>) for an auto run to work in; `auto pick`: the issues to take now")
+    p.add_argument("action", nargs="?", choices=["pick", "on", "off", "status", "report", "away"],
+                   help="pick: the eligible issues in the run's order, the free slots, why the others are left; on, off, status, report: the run; "
+                        "away: start the run in a headless Claude Code session, in the background (saani/auto.py)")
+    p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM); with `on`, the id of the run")
+    p.add_argument("--folder", help="on, away: the run's folder (default: the current one), inside the worktrees folder")
+    p.add_argument("--deploy", action="store_true", help="on, away: the owner started the run so that it may deploy")
+    p.add_argument("--here", action="store_true", help="on: the interactive sub-mode: the run's record, the guard left in present mode")
+    p.add_argument("--run", dest="run_id", help="off: end this run (its guard entries and the record), from a terminal")
+    p.add_argument("--check", action="store_true", help="status: exit 3 when a stop rule is reached")
+    p.add_argument("--pr", type=int, help="report: the pull request the report is for (the merge commands name it)")
+    p.add_argument("--post", action="store_true", help="report: comment the report on the pull request (--pr)")
+    p.add_argument("--json", action="store_true", help="pick: as JSON")
+    p.add_argument("--limit", type=int, help="pick: at most this many eligible issues")
+    p.add_argument("--only", type=int, nargs="+", metavar="N", help="pick, away: take only these issues (pick: before the overlap check)")
     p.set_defaults(run=cmd_auto)
     p = sub.add_parser("land", help="land the current worktree's branch into the integration branch")
     p.add_argument("--keep", action="store_true", help="keep the worktree and its branch after landing")
@@ -783,7 +909,9 @@ def add_parsers(sub):
     p.add_argument("--local-only", action="store_true", help="leave GitHub alone")
     p.set_defaults(run=cmd_prune)
     p = sub.add_parser("test", help="run a test command through the test queue, one job at a time")
-    p.add_argument("--kind", choices=sorted(queue.PRIORITY), default="tier1", help="land first, then tier1, then full")
+    p.add_argument("--kind", default="landing", metavar="{landing,full}",
+                   help="landing (the tests before a landing) goes before full; a landing's own run goes first")
+    p.add_argument("--worktree", help="run in this worktree instead of the current folder (a subagent's cd does not last)")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(run=cmd_test)
     p = sub.add_parser("check-msg", help="the commit-msg hook")

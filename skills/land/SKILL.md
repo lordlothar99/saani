@@ -1,6 +1,6 @@
 ---
 name: land
-description: Land the current Saani worktree into the integration branch - lock, merge, rebuild generated files, tier-1 tests, push, clean up. Use when the owner types /saani:land or /saani:land --dry-run.
+description: Land the current Saani worktree into the integration branch - lock, merge, rebuild generated files, landing tests, push, clean up. Use when the owner types /saani:land or /saani:land --dry-run.
 argument-hint: "[--dry-run] [--keep] [--wait minutes] [--worktree path]"
 disable-model-invocation: true
 ---

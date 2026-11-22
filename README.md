@@ -22,13 +22,13 @@ One Claude Code session is fast. Several at once, or one left alone for hours, r
 | You have to stay at the keyboard | `/saani:auto` lets Claude work through the open issues for hours, then hand back one pull request and a report |
 | You don't know where things stand | `saani ui` opens the map: every issue, worktree, test job and Claude session on a local page |
 
-You talk to one Claude Code session, **the Architect**. It plans the work, hands tasks to subagents (**workers**), checks what they return
+You talk to one **Claude Code** session. It plans the work, hands tasks to subagents (**workers**), checks what they return
 and reports back to you. Saani provides the commands and rules that keep this safe.
 
 ## How it works
 ```mermaid
 flowchart LR
-    you(["You"]) <--> arch["Architect<br/>(main Claude Code session)"]
+    you(["You"]) <--> arch["Claude Code<br/>(the main session)"]
     arch --> w1["worker · worktree #12"] & w2["worker · worktree #15"]
     w1 & w2 -->|saani test| q[["test queue<br/>one job at a time"]]
     w1 & w2 -->|saani land| lock{{"landing lock"}}
@@ -91,15 +91,34 @@ claude plugin update saani@saani          # then /reload-plugins in an open Clau
 ```
 `claude plugin list` shows the installed version; `claude plugin uninstall saani@saani` removes it.
 
+**Fewer approvals in Claude Code.** In your project's `.claude/settings.json`, committed so every developer has it, allow the `saani`
+command and put the worktrees folder in the session's working directories. The folder sits beside the project, so without it a command
+that writes there, the agents' included, asks you. A relative path is read from the project's folder, so the same line works on every
+machine:
+```json
+{"permissions": {"allow": ["Bash(saani *)", "Bash(git -C *)"],
+                 "ask": ["Bash(git -C * push*)", "Bash(git -C * reset*)", "Bash(git -C * clean*)"],
+                 "additionalDirectories": ["../webshop-wt"]}}
+```
+`Bash(git -C *)` lets the agents commit in a worktree without asking; it would also let `git -C . push --force` or `reset --hard`
+through (a rule for `git push` does not match `git -C ... push`), so keep the three `ask` rules beside it. Claude Code reads a project's committed settings once you have accepted its trust dialog (the first time you open Claude Code in the
+folder). Open Claude Code in the project's main folder, never inside a worktree: the relative path is read from the folder the session
+starts in, so from a worktree `../webshop-wt` points to the wrong place and every write there asks again. `saani status` warns, with the exact line, when the worktrees folder is not covered. Saani's agents never `cd` into a worktree:
+Claude Code asks before every `cd <folder> && <command>`, and a subagent's `cd` does not last; they name it instead (`git -C`,
+`saani test --worktree`, `saani land --worktree`).
+
 **5. Work an issue.** In Claude Code: `/saani:start 42`, ask Claude to code it, then `/saani:land`. Or the same in a terminal:
 ```bash
 cd ~/projects/webshop
 saani start 42        # worktree ../webshop-wt/42-<slug> on feat/42-<slug>, from origin/dev
 cd ../webshop-wt/42-*
 # ... Claude (or you) codes and commits, with "refs #42", Why: and Undo:
-saani land            # lock → merge dev → rebuild → tier-1 tests → push → clean up
+saani land            # lock → merge dev → rebuild → landing tests → push → clean up
 ```
-Or let Claude take the whole backlog while you're away: in Claude Code, `/saani:auto` (or `/saani:auto 12 15` for selected issues).
+Or let Claude take the whole backlog: in Claude Code, `/saani:auto away` (or `/saani:auto away 12 15` for selected issues) asks its
+questions, then starts the run itself in a headless session in the background (`claude -p ... --permission-mode auto
+--permission-prompts none`), so nothing waits for an approval while you're gone. `/saani:auto here` runs it in your session instead, and
+asks you whenever it needs to.
 
 ## Commands
 Each command has two forms. In a **terminal**, run it from your project's folder (with the alias from step 1, or as `python -I path/to/saani.py`).
@@ -111,15 +130,21 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers (`~/.saani/projects.toml`); one map shows them all |
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
-| `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |
-| `saani test [--kind tier1\|land\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
+| `saani comment <n> <kind> [--text T] [--field K=V]` | `/saani:comment 42 blocked --text ...` | a status comment on an issue and its label (`start`, `land`, `ci pr` and `ci merged` post theirs by themselves) |
+| `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, landing tests, push, clean up |
+| `saani merge [PR] [--deploy] [--dry-run]` | `/saani:merge`, `/saani:merge --deploy` | merge the green dev -> main pull request an auto run left (merge commit; refused unless mergeable and its CI is green on the exact head), relabel, remove the finished auto runs; `--deploy` then runs `saani deploy`. Saying "merge" or "merge and deploy" in a session means this |
+| `saani deploy [--dry-run]` | `/saani:deploy` | the deployer: CI green on the production head (or a merge of a green commit), no issue whose Deploy row says "⛔ Do not deploy", the `[deploy]` checks and dry run, the deploy and its log, then the prod tag moved and the `in-main` issues commented and closed. Owner-typed only |
+| `saani test [--kind landing\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
+| `saani auto on\|off [--run ID]\|status [--check]\|report [--pr N] [--post]\|away` | (used by `/saani:auto`) | the run's record, stop rules (40 refusals, 10 of the same reason in a row, 10 hours; `status --check` exits 3 at a limit) and report (landed, left, refusals, cost; posted on the pull request) |
+| `saani auto [pick [--json] [--limit N] [--only N ...]]` | (used by `/saani:auto`) | a throwaway worktree for an auto run; `auto pick` lists the issues the run may take now, in order, with the free slots (`[auto] parallel`) and why the others are left |
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |
 | `saani ci status\|sync\|pr\|merged\|place` | `/saani:ci pr` | hybrid CI: GitHub Actions within the free minutes, the PC for the rest |
 | `saani kpis [--baseline]` | `/saani:kpis --baseline` | issues landed per day, conflicts by file, test waits, tokens and estimated cost, compared with the previous window |
 | `saani progress run\|show\|watch` | `/saani:progress` | progress bar and time left for a background test run |
 | `saani check-msg <file>` | (none) | the commit-msg hook: git runs it, not you |
+| `saani guard` | (none) | the plugin's Claude Code hook: Claude Code runs it before each tool call, not you |
 
-Claude never runs `/saani:start`, `/saani:land` or `/saani:prune` on its own, because they change your repo: you type them, or ask for them.
+Claude never runs `/saani:start`, `/saani:land`, `/saani:merge` or `/saani:prune` on its own, because they change your repo: you type them, or ask for them.
 In an auto run (`/saani:auto`), Claude lands each issue itself, because you started the run for that.
 
 ## The plugin
@@ -128,7 +153,7 @@ In an auto run (`/saani:auto`), Claude lands each issue itself, because you star
 | `/saani:<command>`: a slash command for every `saani` command (see [Commands](#commands)) | available |
 | `/saani:auto`: an unattended run over the open issues, ending in one pull request and a report | available |
 | Worker subagents `saani:coder`, `saani:tester`, `saani:reviewer`, `saani:scribe`, `saani:researcher` (`agents/`), each on a model that fits the job; the pipeline from an issue to dev is in [docs/PLUGIN.md](docs/PLUGIN.md) | available, not yet tried in an auto run |
-| Claude Code hooks (guardrails for unattended runs) | planned |
+| Claude Code hooks: the guard, which runs an auto run without prompts and refuses what it must never do (push, merge, secrets, edits outside the worktrees); [docs/SAANI.md](docs/SAANI.md#the-guard) | available |
 
 Details: [docs/PLUGIN.md](docs/PLUGIN.md).
 

@@ -10,12 +10,12 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `[branches]` | `integration` | `dev` | where work lands, one landing at a time |
 | | `production` | `main` | what is released; the release pull request goes integration -> production |
 | | `prod_tag` | `prod` | the tag that marks what is live; a hotfix starts there |
-| `[worktrees]` | `folder` | `../<repo name>-wt` | where the workers' worktrees go (relative to the main checkout, or absolute) |
+| `[worktrees]` | `folder` | `../<repo name>-wt` | where the workers' worktrees go (relative to the main checkout, or absolute). Outside the main checkout, it must be in Claude Code's `permissions.additionalDirectories`, best in the project's committed `.claude/settings.json` as a relative path (`"../webshop-wt"`, read from the project's folder, so one line covers every developer), or a command that writes there asks the owner: `saani status` warns with the line to add |
 | `[issues]` | `types` | `{Task = "task", Feature = "feat", Bug = "bug"}` | GitHub issue Type -> branch prefix; an issue with another Type, or none, is refused |
 | | `hotfix_default_type` | `bug` | the prefix of a hotfix whose issue has no Type |
 | | `labels` | see below | the labels Saani reads and writes |
 | `[commits]` | `trailers` | `["Why", "Undo"]` | the lines each commit on a worker's branch or the integration branch must carry |
-| `[tests]` | `tier1` | `[]` | before every landing: the tests a change can affect (empty: no tests at landing) |
+| `[tests]` | `landing` | `[]` | before every landing: the tests a change can affect (empty: no tests at landing). The old name `tier1` is still read, with a message to rename it; both at once are refused |
 | | `full` | `[]` | everything: before a release, and the PC's CI |
 | | `check` | `[]` | quick checks before the full run on the PC |
 | | `timing_reports` | `[]` | files copied into a new worktree (the first is the newest timing report among worktrees) |
@@ -24,10 +24,18 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `frozen` | `{}` | `path = "mark"`: once the mark is in the first 2,000 characters of that file on the integration branch, no branch may change it |
 | | `lock_stale_hours` | `2` | a landing lock older than this is taken over |
 | | `push_attempts` | `3` | how many times a landing merges again when the integration branch moved under it |
-| `[deploy]` | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
-| `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`) |
+| `[deploy]` | `command` | `[]` | the deploy, a command list, e.g. `["ssh", "-i", "{key}", "deploy@host", "deploy-prod", "{sha}"]`; `{key}`, `{sha}` (the commit checked, so the server deploys exactly it) and `{python}` are expanded. Empty: `saani deploy` refuses |
+| | `dry_run` | `[]` | the same with a dry-run flag (`{sha}` and `{python}` work, `{key}` too); empty: skipped. Use a gate on the server (docs/SAANI.md, "Deploy"), never a bare forced `command=` |
+| | `checks` | `[]` | command lists run before the deploy (e.g. disk space); each must exit 0 (`{sha}`, `{python}` and `{key}` work) |
+| | `log_ok` | `""` | a regex the deploy's output must match to count as a success (with exit 0) |
+| | `key` | `""` | the path of the deploy key, never its content: only passed through as `{key}` (printed as `<key>`) |
+| | `timeout_minutes` | `30` | the deploy is stopped after this long |
+| | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
+| `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`). Only these three keys: any other is refused, and the old `longrun` is refused with its new name, `auto` |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |
+| `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(3, cores // 4, free RAM in GB // 4), each at least 1 (macOS: cores only); `n >= 1` = fixed; never more than 3 |
+| | `ci_attempts` | `3` | an auto run: the most `saani ci pr` rounds (read why it is red, fix, land, run it again) before the pull request is left open |
 | `[ci]` | `workflow` | `ci.yml` | the GitHub Actions workflow `saani ci pr` starts (it must accept `workflow_dispatch`) |
 | | `free_minutes` | `2000` | free Actions minutes a month for the whole account |
 | | `reserve_minutes` | `50` | kept for the end of the month |

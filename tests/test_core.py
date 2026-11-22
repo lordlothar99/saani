@@ -52,11 +52,11 @@ def test_conflicts_in_generated_files_are_solved_by_the_landing_and_the_others_b
     assert others == ["docs/RUNBOOK.md"]
 
 
-def test_when_dev_moves_under_a_landing_tier1_runs_again_only_for_files_in_common():
+def test_when_dev_moves_under_a_landing_its_tests_run_again_only_for_files_in_common():
     """Two landings in a row were once refused because other sessions pushed to dev during tier 1."""
     mine = ["saani/core.py", "docs/SAANI.md", "docs/SPEC.md"]
-    assert not core.rerun_tier1(["infra/diag_x.sh", "docs/SPEC.md"], mine)      # the generated file does not count
-    assert core.rerun_tier1(["docs/SAANI.md"], mine)
+    assert not core.rerun_landing(["infra/diag_x.sh", "docs/SPEC.md"], mine)      # the generated file does not count
+    assert core.rerun_landing(["docs/SAANI.md"], mine)
     assert core.cfg().push_attempts >= 2
 
 
@@ -187,3 +187,118 @@ def test_an_auto_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):
     assert core.auto_started("longrun/2026-11-22_1513") == datetime.datetime(2026, 11, 22, 15, 13)      # the old name
     assert core.auto_started("auto/nightly") is None
     assert core.auto_started("auto/nightly", tmp_path) is not None
+
+
+# ---------------------------------------------------------------- the worktrees folder and Claude Code's working directories (#46)
+
+def _settings(path, dirs):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(__import__("json").dumps({"permissions": {"allow": ["Bash(saani *)"], "additionalDirectories": dirs}}), encoding="utf-8")
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    from saani import config
+    main = tmp_path / "webshop"
+    main.mkdir()
+    (tmp_path / "webshop-wt").mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "user-claude"))
+    return config.Config(repo="acme/webshop", root=main)
+
+
+def test_status_warns_when_the_worktrees_folder_is_outside_every_working_directory(project):
+    line = core.worktrees_warning(project)
+    wt = str((project.root.parent / "webshop-wt").resolve()).replace("\\", "/")
+    assert line.startswith(f"warning: worktrees folder {wt} is not in permissions.additionalDirectories")
+    assert '"additionalDirectories": ["../webshop-wt"]' in line                       # relative: one committed line for every developer
+    assert "the project's .claude/settings.json" in line
+
+
+def test_a_worktrees_folder_on_another_drive_is_given_as_an_absolute_path(project, monkeypatch):
+    def other_drive(path, start):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+    monkeypatch.setattr(core.os.path, "relpath", other_drive)
+    wt = str((project.root.parent / "webshop-wt").resolve()).replace("\\", "/")
+    assert f'"additionalDirectories": ["{wt}"]' in core.worktrees_warning(project)
+
+
+@pytest.mark.parametrize("where", ["project", "local", "user"])
+def test_an_entry_in_any_of_the_three_settings_files_covers_it(project, where, tmp_path):
+    file = {"project": project.root / ".claude" / "settings.json", "local": project.root / ".claude" / "settings.local.json",
+            "user": tmp_path / "user-claude" / "settings.json"}[where]
+    _settings(file, [str(tmp_path / "webshop-wt")])
+    assert core.worktrees_warning(project) is None
+
+
+def test_relative_parent_forward_slash_and_case_entries_cover_it(project, tmp_path):
+    _settings(project.root / ".claude" / "settings.json", ["../webshop-wt"])            # relative: from the main checkout
+    assert core.worktrees_warning(project) is None
+    _settings(project.root / ".claude" / "settings.json", [str(tmp_path).replace("\\", "/")])    # a parent folder, written with /
+    assert core.worktrees_warning(project) is None
+    if core.os.name == "nt":
+        _settings(project.root / ".claude" / "settings.json", [str(tmp_path / "WEBSHOP-WT").upper()])
+        assert core.worktrees_warning(project) is None
+
+
+def test_other_folders_broken_files_and_lookalike_names_do_not_cover_it(project, tmp_path):
+    _settings(project.root / ".claude" / "settings.json", [str(tmp_path / "webshop-w"), "../docs", 42, ""])
+    (project.root / ".claude" / "settings.local.json").write_text("{not json", encoding="utf-8")
+    assert core.worktrees_warning(project) is not None
+
+
+def test_a_worktrees_folder_inside_the_main_checkout_needs_nothing(project):
+    project.worktree_folder = "wt"
+    assert core.worktrees_warning(project) is None
+
+
+def test_status_never_writes_the_settings(project):
+    core.worktrees_warning(project)
+    assert not (project.root / ".claude").exists()
+
+
+def test_saani_test_kind_is_landing_or_full_tier1_points_to_landing_and_land_is_not_offered(capsys):
+    """#48: --kind landing (the default) or full; the old tier1 runs as landing with a message; land is saani land's own run."""
+    assert core.test_kind("landing") == "landing" and core.test_kind("full") == "full"
+    assert core.test_kind("tier1") == "landing"
+    assert "--kind tier1 is now --kind landing" in capsys.readouterr().err
+    with pytest.raises(SystemExit, match="use --kind landing"):
+        core.test_kind("land")
+    with pytest.raises(SystemExit, match="unknown --kind fast"):
+        core.test_kind("fast")
+
+
+# ---------------------------------------------------------------- naming a worktree instead of entering it (#46)
+
+@pytest.fixture
+def repo_with_worktree(tmp_path, monkeypatch):
+    import subprocess
+    from saani import config
+    def sh(*cmd, cwd):
+        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
+    main, wt = tmp_path / "webshop", tmp_path / "webshop-wt" / "12-cart"
+    main.mkdir()
+    sh("git", "init", "-q", "-b", "dev", cwd=main)
+    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
+    sh("git", "worktree", "add", "-q", "-b", "feat/12-cart", str(wt), cwd=main)
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    monkeypatch.chdir(main)
+    return main, wt
+
+
+def test_a_worktree_is_named_by_its_path_and_anything_else_is_refused(repo_with_worktree, tmp_path):
+    main, wt = repo_with_worktree
+    assert core._within(core.named_worktree(str(wt)), wt) and core._within(wt, core.named_worktree(str(wt)))
+    assert core._within(core.named_worktree(None), main)                              # no option: the current folder's checkout
+    (tmp_path / "elsewhere").mkdir()
+    for bad in (str(tmp_path / "elsewhere"), str(tmp_path / "missing")):
+        with pytest.raises(SystemExit, match="not a worktree of this repository"):
+            core.named_worktree(bad)
+
+
+def test_saani_test_runs_in_the_named_worktree(repo_with_worktree, monkeypatch):
+    main, wt = repo_with_worktree
+    seen = []
+    monkeypatch.setattr(core, "queued_run", lambda kind, command, cwd: seen.append((kind, command, cwd)) or 0)
+    args = type("A", (), {"kind": "landing", "worktree": str(wt), "command": ["--", "python", "-m", "pytest", "-q"]})()
+    assert core.cmd_test(args) == 0
+    assert seen[0][1] == ["python", "-m", "pytest", "-q"] and core._within(seen[0][2], wt) and core._within(wt, seen[0][2])

@@ -10,8 +10,8 @@ The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
    your answer; the `act` label: your action), Ready (open, nothing blocks it, nobody on it yet), Building (a worktree with work in it), Testing (tests
    running in its worktree, or the final check of `saani land`), Merged on the integration branch (`in_dev`), To deploy (`in_main`),
-   Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to the Architect
-   (prompt_for): the owner talks to one agent, the Architect, who starts the workers.
+   Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to Claude Code
+   (prompt_for): the owner talks to one agent, Claude Code, which starts the workers.
 2. Who works on what? The Claude Code sessions of the project's folders active in the last hours, from the metadata of the session files in
    ~/.claude/projects/ (folder, branch, last activity, model, and the issue numbers of the worktree folders its lines name; only those
    numbers are kept, never message or command text). A session goes on the card its branch names, else the worktree it runs in, else the
@@ -57,8 +57,8 @@ TEST_LIVE_SECONDS = 120                # a test output written in the last two m
 TAIL_BYTES = 256 * 1024
 LIVE_DAYS = 7
 COLUMNS = [
-    ("you", "Waiting for you", "Your answer or your action. Copy the card's prompt and paste it to the Architect."),
-    ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. The Architect can start it. Command: /saani:start <issue>."),
+    ("you", "Waiting for you", "Your answer or your action. Copy the card's prompt and paste it to Claude Code."),
+    ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. Claude Code can start it. Command: /saani:start <issue>."),
     ("building", "Building", "An agent works on it in its own folder (a worktree). Command: /saani:land when it is committed."),
     ("testing", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a slow run)."),
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
@@ -84,7 +84,7 @@ BUILTIN = {
     "web-fetch": "reads a web page and answers a question about it",
     "claude-code-guide": "answers questions about Claude Code itself",
     "statusline-setup": "sets up Claude Code's status line",
-    "fork": "a copy of the Architect for a side task",
+    "fork": "a copy of the main Claude Code session for a side task",
 }
 FRIENDLY = {"python": "Python · tests, scripts, this page", "chrome": "Chromium · browser tests", "headless_shell": "Chromium · browser tests",
             "node": "Node · Claude Code", "claude": "Claude Code", "code": "VS Code", "msmpeng": "Windows Defender",
@@ -304,7 +304,7 @@ def column_for(issue, worktree=None, testing=(), closing=()):
 
 
 def prompt_for(number, column, need=None):
-    """The sentence the owner pastes to the Architect for a card, or None when the card needs nothing from them."""
+    """The sentence the owner pastes to Claude Code for a card, or None when the card needs nothing from them."""
     if column == "you":
         return (f"#{number} waits for my answer: give me the context, the options and your recommendation, one question at a time."
                 if need == "answer" else f"#{number} waits for me to act: tell me exactly what to do, step by step, with ready-to-paste commands.")
@@ -488,8 +488,14 @@ def frontmatter(text):
     return out
 
 
+def agent_key(kind):
+    """The role an agent type stands for: `saani:coder` (a plugin's agent) and `coder` are both the Coder (#42)."""
+    return str(kind).split(":")[-1].lower()
+
+
 def roster(defined, sessions):
-    """Every subagent kind: defined in the repo, planned for Saani, or built in; with the runs seen in the sessions listed."""
+    """Every subagent kind: defined in the repo or the plugin, planned for Saani, or built in; with the runs seen in the sessions listed.
+    A plugin's agent (`saani:coder`) is the same row as its role (`coder`, `Coder`): its runs are counted there, not in a row of its own."""
     seen = collections.defaultdict(lambda: {"runs": 0, "running": []})
     for s in sessions:
         for sub in s.get("subagents", []):
@@ -502,11 +508,13 @@ def roster(defined, sessions):
     names = {r["name"].lower() for r in rows}
     rows += [{"name": n, "kind": "planned", "model": m, "what": w, "file": f"planned: .claude/agents/{n.lower()}.md"}
              for n, m, w in PLANNED_ROLES if n.lower() not in names]
+    roles = {r["name"].lower() for r in rows}
     rows += [{"name": n, "kind": "built-in", "model": "", "what": w, "file": "built into Claude Code (no file in the repo)"} for n, w in BUILTIN.items()]
     rows += [{"name": n, "kind": "built-in", "model": "", "what": "", "file": "built into Claude Code (no file in the repo)"}
-             for n in seen if n.lower() not in names and n not in BUILTIN]
+             for n in seen if n.lower() not in names and agent_key(n) not in roles and n not in BUILTIN]
     for r in rows:
-        r.update(seen.get(r["name"], {"runs": 0, "running": []}))
+        mine = [seen[t] for t in seen if t == r["name"] or (r["kind"] in ("defined", "planned") and agent_key(t) == r["name"].lower())]
+        r.update({"runs": sum(m["runs"] for m in mine), "running": [x for m in mine for x in m["running"]]})
     def rank(r):                       # running, defined, used lately, planned, the rest
         return 0 if r["kind"] == "defined" else 1 if r["runs"] else 2 if r["kind"] == "planned" else 3
     return sorted(rows, key=lambda r: (-len(r["running"]), rank(r), -r["runs"], r["name"]))
@@ -625,13 +633,18 @@ def agents(now=None):
     return sorted(out, key=lambda s: s["age_min"])
 
 
-def defined_agents():
+def defined_agents(plugin_folder=None):
+    """The agents the project defines (.claude/agents/*.md) and the ones the Saani plugin brings (agents/*.md beside this code), the project's
+    first: a project agent of the same name wins."""
     rows = []
-    folder = cfg().root / ".claude" / "agents"
-    for f in sorted(folder.glob("*.md")) if folder.is_dir() else []:
-        meta = frontmatter(f.read_text(encoding="utf-8"))
-        rows.append({"name": meta.get("name") or f.stem, "description": meta.get("description", "")[:160], "model": meta.get("model", ""),
-                     "file": f.relative_to(cfg().root).as_posix()})
+    for folder, base in ((cfg().root / ".claude" / "agents", cfg().root), (plugin_folder or HERE.parent / "agents", None)):
+        for f in sorted(folder.glob("*.md")) if folder.is_dir() else []:
+            meta = frontmatter(f.read_text(encoding="utf-8"))
+            name = meta.get("name") or f.stem
+            if name.lower() in {r["name"].lower() for r in rows}:
+                continue
+            rows.append({"name": name, "description": meta.get("description", "")[:160], "model": meta.get("model", ""),
+                         "file": f.relative_to(base).as_posix() if base else f"the saani plugin: agents/{f.name}"})
     return rows
 
 

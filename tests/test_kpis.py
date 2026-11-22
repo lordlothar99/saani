@@ -59,13 +59,14 @@ def test_no_landing_and_no_test_job_give_zeros_not_an_error():
 
 
 def test_test_jobs_give_per_kind_medians_and_failures():
+    """An old log row of kind tier1 counts as landing (#48)."""
     rows = [{"time": "2026-11-21T10:00:00", "kind": "tier1", "wait": 0, "run": 240, "code": 0},
-            {"time": "2026-11-21T11:00:00", "kind": "tier1", "wait": 60, "run": 300, "code": 1},
+            {"time": "2026-11-21T11:00:00", "kind": "landing", "wait": 60, "run": 300, "code": 1},
             {"time": "2026-11-22T11:00:00", "kind": "tier1", "wait": 30, "run": 200, "code": 0},
             {"time": "2026-11-22T12:00:00", "kind": "full", "wait": 10, "run": 900, "code": 0},
             {"time": "bad", "kind": "full", "wait": 0, "run": 0, "code": 0}]
     k = fk.test_kpis(rows, SINCE, UNTIL)
-    assert k["tier1"] == {"jobs": 3, "failed": 1, "median_wait": 30, "median_run": 240}
+    assert "tier1" not in k and k["landing"] == {"jobs": 3, "failed": 1, "median_wait": 30, "median_run": 240}
     assert k["full"] == {"jobs": 1, "failed": 0, "median_wait": 10, "median_run": 900}
 
 

@@ -25,7 +25,7 @@ class Config:
     types: dict = dataclasses.field(default_factory=lambda: {"Task": "task", "Feature": "feat", "Bug": "bug"})
     hotfix_default_type: str = "bug"             # an urgent fix is never refused for a missing issue Type
     trailers: tuple = ("Why", "Undo")            # each commit on a worker's branch or the integration branch carries them
-    tier1: list = dataclasses.field(default_factory=list)       # the tests a change can affect, before every landing
+    landing: list = dataclasses.field(default_factory=list)     # the tests a change can affect, before every landing
     full: list = dataclasses.field(default_factory=list)        # everything, before a release
     check: list = dataclasses.field(default_factory=list)       # quick repository checks run before the full run on the PC
     generated: tuple = ()                        # files rebuilt by `land`, never by hand (a conflict there takes the integration copy)
@@ -39,7 +39,15 @@ class Config:
     folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / auto: the folders named in the map's prompts
     session_match: str = ""                      # the map lists Claude Code sessions whose project folder name contains this
     deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
+    deploy_command: list = dataclasses.field(default_factory=list)    # the deploy (`saani deploy`); {key} and {python} expanded
+    deploy_dry_run: list = dataclasses.field(default_factory=list)    # the same with a dry-run flag; empty: skipped
+    deploy_checks: list = dataclasses.field(default_factory=list)     # command lists run before the deploy; each must exit 0
+    deploy_log_ok: str = ""                      # a regex the deploy's output must match to count as a success
+    deploy_key: str = ""                         # the PATH of the deploy key, never its content: only passed through
+    deploy_timeout_minutes: float = 30
     board_port: int = 8771
+    parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory, capped at 3
+    ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
     ci_reserve_minutes: int = 50
@@ -77,6 +85,19 @@ class Config:
         return [sys.executable if part == "{python}" else part for part in getattr(self, name)]
 
 
+FOLDER_KEYS = ("work", "deploy", "auto")                     # [board] folders: the folders the map's prompts name
+RENAMED_FOLDERS = {"longrun": "auto"}                       # old keys, refused with the new name
+RENAMED_TESTS = {"tier1": "landing"}                        # old [tests] keys, still read, with a message naming the new one
+_warned = set()
+
+
+def warn(message):
+    """A message on stderr, once per process (a setting still read under its old name)."""
+    if message not in _warned:
+        _warned.add(message)
+        print(message, file=sys.stderr)
+
+
 def from_toml(data, root):
     """A Config from the parsed TOML (docs/CONFIG.md for the tables). Unknown keys are refused, so a typo is never silent."""
     flat = {}
@@ -85,13 +106,16 @@ def from_toml(data, root):
             ("worktrees", "folder"): "worktree_folder",
             ("issues", "types"): "types", ("issues", "hotfix_default_type"): "hotfix_default_type", ("issues", "labels"): "labels",
             ("commits", "trailers"): "trailers",
-            ("tests", "tier1"): "tier1", ("tests", "full"): "full", ("tests", "check"): "check", ("tests", "timing_reports"): "timing_reports",
+            ("tests", "landing"): "landing", ("tests", "full"): "full", ("tests", "check"): "check",
+            ("tests", "timing_reports"): "timing_reports",
             ("land", "generated"): "generated", ("land", "rebuild"): "rebuild", ("land", "frozen"): "frozen",
             ("land", "lock_stale_hours"): "lock_stale_hours", ("land", "push_attempts"): "push_attempts",
-            ("deploy", "paths"): "deploy_paths", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
+            ("deploy", "paths"): "deploy_paths", ("deploy", "command"): "deploy_command", ("deploy", "dry_run"): "deploy_dry_run",
+            ("deploy", "checks"): "deploy_checks", ("deploy", "log_ok"): "deploy_log_ok", ("deploy", "key"): "deploy_key",
+            ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
-            ("ci", "relabel"): "relabel", ("hints",): "hints"}
+            ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("ci", "relabel"): "relabel", ("hints",): "hints"}
     for table, values in data.items():
         if table == "hints":
             flat["hints"] = dict(values)
@@ -99,15 +123,37 @@ def from_toml(data, root):
         if not isinstance(values, dict):
             raise SystemExit(f"{FILE}: `{table}` must be a table")
         for key, value in values.items():
+            if table == "tests" and key in RENAMED_TESTS:
+                new = RENAMED_TESTS[key]
+                if new in values:
+                    raise SystemExit(f"{FILE}: [tests] {key} is now [tests] {new}: keep only {new}")
+                warn(f"{FILE}: [tests] {key} is now [tests] {new} (rename the key; read as {new} meanwhile)")
+                key = new
             field = maps.get((table, key))
             if not field:
                 raise SystemExit(f"{FILE}: unknown setting [{table}] {key} (docs/CONFIG.md lists them)")
             flat[field] = value
+    folders = flat.get("folders", {})
+    if not isinstance(folders, dict):
+        raise SystemExit(f"{FILE}: [board] folders must be a table, e.g. {{ work = \"...\", deploy = \"...\", auto = \"...\" }}")
+    for key, value in folders.items():
+        if key in RENAMED_FOLDERS:
+            raise SystemExit(f"{FILE}: [board] folders: `{key}` is now `{RENAMED_FOLDERS[key]}` (rename the key)")
+        if key not in FOLDER_KEYS:
+            raise SystemExit(f"{FILE}: unknown [board] folders key `{key}` (allowed: {', '.join(FOLDER_KEYS)}; docs/CONFIG.md)")
+        if not isinstance(value, str):
+            raise SystemExit(f"{FILE}: [board] folders {key} must be a path (a string)")
     for key in ("trailers", "generated", "timing_reports", "deploy_paths"):
         if key in flat:
             flat[key] = tuple(flat[key])
     if "labels" in flat:
         flat["labels"] = {**Config().labels, **flat["labels"]}
+    par = flat.get("parallel", 0)
+    if not isinstance(par, int) or isinstance(par, bool) or par < 0:
+        raise SystemExit(f"{FILE}: [auto] parallel must be a whole number, 0 or more")
+    att = flat.get("ci_attempts", 3)
+    if not isinstance(att, int) or isinstance(att, bool) or att < 1:
+        raise SystemExit(f"{FILE}: [auto] ci_attempts must be a whole number, 1 or more")
     cfg = Config(**flat, root=pathlib.Path(root))
     if "/" not in cfg.repo:
         raise SystemExit(f"{FILE}: [project] repo must be owner/name")

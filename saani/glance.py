@@ -24,6 +24,16 @@ def table(body):
     return rows
 
 
+DO_NOT_DEPLOY = re.compile(r"^(⛔|do not deploy|don[’']t deploy)", re.I)
+
+
+def deploy_blocked(body):
+    """The text of the At a glance Deploy row when it says not to deploy (it starts with "⛔", "Do not deploy" or "Don't deploy", any case),
+    else None. "None", "No" and "—" mean there is nothing to deploy: they never block."""
+    text = table(body).get("deploy")
+    return text if text and DO_NOT_DEPLOY.match(text.strip()) else None
+
+
 def issue_numbers(text):
     return [int(n) for n in re.findall(r"#(\d+)", text or "")]
 
