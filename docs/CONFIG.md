@@ -31,7 +31,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `key` | `""` | the path of the deploy key, never its content: only passed through as `{key}` (printed as `<key>`) |
 | | `timeout_minutes` | `30` | the deploy is stopped after this long |
 | | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
-| `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`) |
+| `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`). Only these three keys: any other is refused, and the old `longrun` is refused with its new name, `auto` |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |
 | `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(3, cores // 4, free RAM in GB // 4), each at least 1 (macOS: cores only); `n >= 1` = fixed; never more than 3 |

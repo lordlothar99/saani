@@ -85,6 +85,10 @@ class Config:
         return [sys.executable if part == "{python}" else part for part in getattr(self, name)]
 
 
+FOLDER_KEYS = ("work", "deploy", "auto")                     # [board] folders: the folders the map's prompts name
+RENAMED_FOLDERS = {"longrun": "auto"}                       # old keys, refused with the new name
+
+
 def from_toml(data, root):
     """A Config from the parsed TOML (docs/CONFIG.md for the tables). Unknown keys are refused, so a typo is never silent."""
     flat = {}
@@ -113,6 +117,16 @@ def from_toml(data, root):
             if not field:
                 raise SystemExit(f"{FILE}: unknown setting [{table}] {key} (docs/CONFIG.md lists them)")
             flat[field] = value
+    folders = flat.get("folders", {})
+    if not isinstance(folders, dict):
+        raise SystemExit(f"{FILE}: [board] folders must be a table, e.g. {{ work = \"...\", deploy = \"...\", auto = \"...\" }}")
+    for key, value in folders.items():
+        if key in RENAMED_FOLDERS:
+            raise SystemExit(f"{FILE}: [board] folders: `{key}` is now `{RENAMED_FOLDERS[key]}` (rename the key)")
+        if key not in FOLDER_KEYS:
+            raise SystemExit(f"{FILE}: unknown [board] folders key `{key}` (allowed: {', '.join(FOLDER_KEYS)}; docs/CONFIG.md)")
+        if not isinstance(value, str):
+            raise SystemExit(f"{FILE}: [board] folders {key} must be a path (a string)")
     for key in ("trailers", "generated", "timing_reports", "deploy_paths"):
         if key in flat:
             flat[key] = tuple(flat[key])

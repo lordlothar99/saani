@@ -78,3 +78,14 @@ def test_worker_branches_follow_the_issue_types():
 def test_load_outside_git_says_so(tmp_path):
     with pytest.raises(SystemExit, match="git checkout"):
         config.load(tmp_path)
+
+
+def test_board_folders_accepts_only_work_deploy_and_auto():
+    """#47: [board] folders is a table of known keys, so a typo or an old key is never silently ignored."""
+    ok = config.from_toml({"project": {"repo": "acme/webshop"}, "board": {"folders": {"work": "w", "deploy": "d", "auto": "a"}}}, ".")
+    assert ok.folders == {"work": "w", "deploy": "d", "auto": "a"}
+    for folders, says in (({"longrun": "x"}, "`longrun` is now `auto`"), ({"wrok": "x"}, "unknown [board] folders key `wrok`"),
+                          ({"auto": 3}, "must be a path"), ("C:/work", "must be a table")):
+        with pytest.raises(SystemExit) as e:
+            config.from_toml({"project": {"repo": "acme/webshop"}, "board": {"folders": folders}}, ".")
+        assert says in str(e.value), (folders, str(e.value))
