@@ -815,8 +815,10 @@ const ROLE = {
   Researcher: {color: "ok", glyph: "M4 1.5A2.6 2.6 0 1 0 4 6.7A2.6 2.6 0 1 0 4 1.5M5.9 6L9 9"}, Sentinel: {color: "alert", glyph: "M5 1L9 2.5V5Q9 8 5 9.5Q1 8 1 5V2.5Z"},
   Deployer: {color: "ember", glyph: "M1 8L9 2L6 9L5 6Z"}, Architect: {color: "amber", glyph: "M5 1L6.2 5L5 9L3.8 5ZM1 5H9"},
 };
+// A worker's look is its role's, wherever it stands: `saani:coder` (a plugin's agent), `coder` and `Coder` are all the Coder (#42)
+const roleOf = name => Object.keys(ROLE).find(k => k.toLowerCase() === String(name || "").split(":").pop().toLowerCase());
 function workerSVG(w) {
-  const role = ROLE[w.role] || {color: "mute", glyph: "M5 3A2 2 0 1 0 5 7A2 2 0 1 0 5 3"};
+  const role = ROLE[roleOf(w.role)] || {color: "mute", glyph: "M5 3A2 2 0 1 0 5 7A2 2 0 1 0 5 3"};
   const col = C[role.color], cloak = w.kind === "architect" ? "#6b4a2a" : w.kind === "built-in" ? "#6d6256" : "#8a6a48";
   const ghost = w.kind === "planned" ? ` opacity=".5"` : "", asleep = w.state === "asleep" ? ` opacity=".55"` : "";
   let s = `<ellipse cx="2" cy="1" rx="8" ry="3.5" fill="#000" opacity=".2"/><g class="${w.state === "working" ? "bob" : ""}"${ghost}${asleep}>`;

@@ -76,5 +76,5 @@ def test_the_baseline_is_the_window_of_the_same_length_just_before():
 
 def test_the_report_says_what_it_cannot_measure_and_adds_a_git_baseline():
     r = fk.report([], [], [], SINCE, UNTIL, baseline=True)
-    assert set(r["not_measured"]) == {"owner_waiting_time", "owner_interventions", "tokens_per_issue"}
+    assert set(r["not_measured"]) == {"owner_waiting_time", "owner_interventions"}
     assert r["baseline"]["window"] == {"since": "2026-11-19", "until": "2026-11-20"} and "git" in r["baseline"]
