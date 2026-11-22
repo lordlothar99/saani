@@ -23,7 +23,7 @@ The status of each feature lives in its GitHub issue (epic: Saani v1), never in 
 - **Landing one at a time.** A worker that is done takes the landing lock, merges the integration branch, resolves its conflicts, rebuilds
   the generated files, runs its tests again and pushes. Then the next one.
 - **One test queue.** The tests are the only heavy load on the PC (the models run remotely). One runner takes test jobs in order and gives
-  each the whole machine: landings first, then tier 1, then full runs.
+  each the whole machine: landings first, then the landing tests, then full runs.
 - **The record of a change is its commit message**: `refs #n`, the trailers `Why:` and `Undo:`, then a comment on the issue. A commit on a
   worker's branch or on the integration branch without them is refused (the commit-msg hook, and `land` checks every commit).
 - **Narrow keys.** No worker holds a key that can do more than its one job (Deployer: a deploy-only key behind the owner's tap, see "Deploy"; planned: Sentinel with
@@ -70,8 +70,8 @@ flowchart TB
 | Command | What it does |
 |---|---|
 | `saani start <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment, `--no-comment` skips the `Started` comment (branch, worktree folder name). Warns when the issue has no milestone. |
-| `saani start <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: tier 1 against production, the branch pushed, the pull request into production opened. |
-| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
+| `saani start <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: the landing tests against production, the branch pushed, the pull request into production opened. |
+| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, the landing tests, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
 | `saani comment <n> <kind> [--text T] [--field K=V ...] [--dry-run]` | Posts a status comment on issue `n` and applies the kind's label change (Status comments, below). |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. First, a warning when the worktrees folder is outside every working directory of a Claude Code session of the project (not inside the main checkout, and under no `permissions.additionalDirectories` entry of `.claude/settings.json`, `.claude/settings.local.json` or the user's `settings.json`, in `CLAUDE_CONFIG_DIR` when set), with the line to add: without it every `cd` into a worktree, the agents' included, asks the owner. It only reads those files; a relative entry is taken from the main checkout (Claude Code does not document its base, so the warning gives an absolute path). |
 | `saani auto pick [--json] [--limit N] [--only N ...]` | The issues an auto run may take now, in the run's order (milestone: versions ascending, then other named milestones alphabetically, then none; then the Type whose `[issues] types` prefix is `bug`; then the number; up to 500 open issues are read; `--only` takes just those numbers, before the overlap check), read from one `gh issue list` and each issue's At a glance table: `Auto` yes or partly (no table: eligible, flagged), not blocked, no needs-the-owner row, none of the `answer`, `act`, `idea`, `in_dev` or `in_main` labels, not already in a worktree ("already in a worktree") or on a worker branch ("has a worker branch"), and a Type from `[issues] types`. The others are listed with their reason (`no Type`, `blocked by #n` (the still-open blockers), `overlaps #m (path)`...). A `gh` failure stops it with gh's message, never an empty list; options `--json`, `--limit` and `--only` need `pick`, `--id` does not go with it. It also says the free slots (`[auto] parallel` less the issues in worktrees). `--json`: `{slots, parallel, running, eligible, skipped}`. A script, no model, changes nothing. |
@@ -83,7 +83,7 @@ flowchart TB
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
 | `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does. `--deploy` then runs `saani deploy` (below). `--dry-run` checks and prints, merges nothing. |
 | `saani deploy [--dry-run]` | The deployer (below): CI green on the production head (a merge of a green commit counts), no issue in production since the prod tag whose Deploy row says not to deploy ("⛔", "Do not deploy"), the `[deploy]` checks and dry run, the deploy with a timeout, its log, the prod tag moved, `✔ Deployed` and the close on each `in-main` issue of the range. `--dry-run` stops after the dry run and prints the command (the key as `<key>`). |
-| `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
+| `saani test [--kind landing\|full] -- <cmd>` | Runs a test command through the test queue: `landing` (the default) or `full`; the old `tier1` still runs, as `landing`. |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani guard` | The plugin's Claude Code hook before every tool call and after every Bash call (below, The guard): JSON on stdin, a decision on stdout during an auto run, nothing otherwise. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). `ci pr` also posts `In PR` on the issues the pull request names, `ci merged` posts `On main` on those it relabels. |
@@ -101,8 +101,8 @@ flowchart TB
   the landing and releases the lock: the worker resolves it, commits, and lands again.
 - **Generated files** (`[land] generated`, rebuilt by `[land] rebuild`) are rebuilt at landing and committed there, so workers never commit
   them.
-- **Tier 1 red, or a push refused** (the integration branch moved): the landing merges again and retries, tier 1 again only when the new
-  commits touch the branch's files, at most `push_attempts` times; otherwise it stops and nothing reaches the integration branch.
+- **Landing tests red, or a push refused** (the integration branch moved): the landing merges again and retries, the landing tests
+  again only when the new commits touch the branch's files, at most `push_attempts` times; otherwise it stops and nothing reaches the integration branch.
 - **Landing while a pull request is open**: a finished task lands at once. Each landing makes that pull request's CI stale; the CI runs once
   more right before the merge, and that run is the one that counts.
 - **The measure**: each landing appends a line to `build/saani-landings.jsonl` of the main checkout; `saani status` sums it, `saani kpis`
@@ -113,19 +113,23 @@ Two test runs at once slow each other down and break browser tests with timeouts
 whole PC.
 - **No daemon.** Each call writes a job file in the shared git folder (`.git/saani-tests/`), waits until it is the first waiting job, takes
   the runner lock (a file made atomically), runs, and releases it.
-- **Priority:** a landing first (it holds the landing lock), then tier 1, then the full run; same priority by arrival.
+- **Priority:** kind `land` first (the run inside `saani land`, which holds the landing lock), then `landing` (the landing tests run
+  ahead of a landing), then `full`; same priority by arrival. `land` is queued by `saani land` only: `saani test` offers `landing` and
+  `full`.
 - **Dead jobs** (the process is gone) and a runner lock whose holder is gone are dropped by the next caller.
-- **Shared tier 1:** a second tier 1 of the same worktree, commit and command, queued while the first runs, takes the first one's result.
+- **Shared landing tests:** a second `landing` job of the same worktree, commit and command, queued while the first runs, takes the first
+  one's result.
 - **The measure:** one line per job in `build/saani-tests.jsonl` of the main checkout.
 
 ## Test tiers
 | Tier | When | What runs | Setting |
 |---|---|---|---|
-| 0 | while coding an issue | the tests of that issue | the worker's choice |
-| 1 | before each landing | the tests a change can affect | `[tests] tier1` |
-| 2 | before a release, and the PC's CI | everything | `[tests] full` (after `[tests] check`) |
+| fast | while coding an issue | the quick checks and the tests of that issue | the coder's choice (no setting) |
+| landing | before each landing | the tests a change can affect | `[tests] landing` |
+| full | before a release, and the PC's CI | everything | `[tests] full` (after `[tests] check`) |
 
-A project that cannot tell which tests a change affects sets tier 1 to its whole suite; a faster tier 1 is the project's own script.
+A project that cannot tell which tests a change affects sets `landing` to its whole suite; a faster one is the project's own script. The
+old key `[tests] tier1` is still read as `landing`, with a message to rename it.
 
 ## CI within the free minutes
 `saani ci`. The minutes used this month come from GitHub's billing API (every repository of the account: the free minutes are one pool).
@@ -160,7 +164,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 |---|---|---|
 | The owner | at the keyboard | asleep or out |
 | Questions | allowed, one at a time, with a recommendation | none: a refused call is skipped and noted for the report |
-| Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
+| Tests | fast and landing; full before the pull request | landing per landing, full at the end |
 | Deploy | the owner runs it (the Deployer prepares, the owner approves and taps) | never: the owner's "merge and deploy" does |
 | Permissions | Claude Code's own: it asks the owner | the guard (below): allow or refuse at once, never ask |
 
@@ -227,8 +231,8 @@ here-documents: `git commit -F - <<'EOF' ... EOF`, and `"$(cat <<'EOF' ... EOF\n
 
 | Command | Allowed | Refused |
 |---|---|---|
-| `saani` | the plugin's own (`saani` on the PATH, the plugin's `bin/saani`, `python -I <plugin>/saani.py`), each with its own options only (no abbreviations): `start <n>` (`--slug`, `--no-assign`, `--no-comment`), `land` (`--keep`, `--wait`, `--dry-run`, `--worktree` into a worktree, `--no-comment`), `status`, `comment <n> <kind>` (`--text`, `--field`, `--dry-run`), `kpis` (`--since`, `--until`, `--baseline`, `--ref`, `--json`), `ui` (`--port`, `--open`, `--json`), `progress show <file>`, `progress watch <file>` (`--every`), `auto pick` (`--json`, `--limit`, `--only`), `auto status` (`--check`), `auto report` (`--pr N`, `--post`), `ci status`, `ci pr` (`--dry-run`, `--pc`); `test` (`--kind`) only with the project's test commands | another `saani.py`; `auto on`, `auto off`, `auto` itself; `start --hotfix`, `progress run` (it runs any command and writes where `--out` says), `merge`, `prune`, `deploy`, `projects`, the other `ci` commands (the owner's) |
-| tests | the project's `[tests] tier1`, `full`, `check`, `{python}` being a real Python (`python`, `python3`, `py` from the PATH, or the interpreter running saani), plus `-q`, `-v`, `-x`, `-s`, `--lf`, `--ff`, `-k`, `-m`, `--tb`, `--maxfail`, `--durations` and test paths inside the run's places | any other option, a test path elsewhere (its `conftest.py` would run) (`--basetemp`, `-p`, `--rootdir`, `-c`, `-o`...), `@file` arguments, any other `python` or a path to one |
+| `saani` | the plugin's own (`saani` on the PATH, the plugin's `bin/saani`, `python -I <plugin>/saani.py`), each with its own options only (no abbreviations): `start <n>` (`--slug`, `--no-assign`, `--no-comment`), `land` (`--keep`, `--wait`, `--dry-run`, `--worktree` into a worktree, `--no-comment`), `status`, `comment <n> <kind>` (`--text`, `--field`, `--dry-run`), `kpis` (`--since`, `--until`, `--baseline`, `--ref`, `--json`), `ui` (`--port`, `--open`, `--json`), `progress show <file>`, `progress watch <file>` (`--every`), `auto pick` (`--json`, `--limit`, `--only`), `auto status` (`--check`), `auto report` (`--pr N`, `--post`), `ci status`, `ci pr` (`--dry-run`, `--pc`); `test` (`--kind landing`, `full` or the old `tier1`) only with the project's test commands | another `saani.py`; `auto on`, `auto off`, `auto` itself; `start --hotfix`, `progress run` (it runs any command and writes where `--out` says), `merge`, `prune`, `deploy`, `projects`, the other `ci` commands (the owner's) |
+| tests | the project's `[tests] landing`, `full`, `check`, `{python}` being a real Python (`python`, `python3`, `py` from the PATH, or the interpreter running saani), plus `-q`, `-v`, `-x`, `-s`, `--lf`, `--ff`, `-k`, `-m`, `--tb`, `--maxfail`, `--durations` and test paths inside the run's places | any other option, a test path elsewhere (its `conftest.py` would run) (`--basetemp`, `-p`, `--rootdir`, `-c`, `-o`...), `@file` arguments, any other `python` or a path to one |
 | `cd` | into a worktree or the run's folder | the worktrees folder itself, anywhere else, `cd -`, options, globs; a `cd` that is not the last part unless `&&` follows it (above) |
 | read-only | `ls`, `cat`, `head`, `tail`, `grep` (`-n -i -l -c -E -F -w -v -q -H -h -o`, `--color=never`, `-e PATTERN`, `-A/-B/-C N`), `wc`, `sort`, `find`, `echo`, `test`, `[`, `pwd`, `diff` of two files (`-u -q --brief`) | `find -delete/-exec/...`, `sort` options off its list (`-o`, `-T`, `--compress-program`...), any other `grep` or `diff` option, recursion in any spelling (`-r`, `-R`, `-d`, `--rec...`; use the Grep tool) |
 | `git` | anywhere, reading: `status`, `diff` (paths inside the run's places), `log`, `show` (no stash, no `<rev>:<path>` of a secret or outside the repository), `rev-parse`, `ls-files`, `branch` listing, `fetch origin` without `:` or `+` refspecs, `worktree list`. Writing, only in a worktree or the run's folder (the folder it runs in, or `-C` into one), never the main checkout: `add` of named files (`-q`, `-v`); `commit` (`--amend` too); `restore` (`--source`, `--staged`, `--worktree`) and `checkout [<ref>] -- <file>` of named files; `switch`/`checkout` of a worker branch (`<type>/<n>-<words>`), a start point only with `-b`/`-c`; `merge origin/<integration>` (and `--no-edit`, `--abort`, `--continue`); `rebase origin/<integration>` (and `--continue/--abort/--skip`); `stash`, `stash push [-q] [-m MSG]`, `stash pop [-q]`, `stash list` | `push` (only `saani land` pushes, as its own process the hook never sees), `reset --hard`, `clean`, `branch -D`, `worktree remove` (`saani prune` does it), force flags, `--no-verify`/`-n`, `-c`, options that run a program, write a file or move the repository (`--output`, `--upload-pack`, `--exec`, `--git-dir`... and their abbreviations), `diff --no-index`; in `add`, `restore` and `checkout`: `-A`, `-u`, `.`, `..`, folders, paths ending in `/`, pathspec patterns (`*`, `?`, `[`, `:magic`), protected or secret files; `stash -u/-a/-p`, `stash show`, `stash apply/drop/clear`; any other merge, anything else |

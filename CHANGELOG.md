@@ -19,6 +19,10 @@
 - An auto run has two parts: `/saani:auto` asks its questions in the owner's session, then prints the command for the away part, a
   headless session (`claude -p "/saani:auto run <id> --folder <path>" --permission-mode auto --permission-prompts none`) where no
   permission prompt can wait for an answer. `/saani:auto run <id> --folder <path>` is the away part.
+- The test tiers are named after their moment (issue #48): **fast** (the coder's quick checks), **landing** (before every landing),
+  **full** (before a release). `[tests] tier1` is now `[tests] landing`; the old key is still read, with a message to rename it.
+  `saani test --kind landing|full`: `tier1` still runs, as `landing`; `land`, the run inside `saani land`, is no longer offered on the
+  command line (it jumped the queue). The guard allows `--kind landing`, `full` and `tier1`.
 - `[board] folders` accepts only `work`, `deploy` and `auto` (issue #47): another key is refused, and the old `longrun` is refused
   with its new name, so a renamed folder is never silently ignored.
 - Fewer approvals (issue #46): `saani status` warns, with the line to add, when the worktrees folder is not in Claude Code's

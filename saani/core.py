@@ -9,16 +9,17 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
                                                     any Type (none: the hotfix default); it warns when production holds merged work that is
                                                     not live yet, it never refuses for that
   saani land [--keep] [--wait MIN] [--dry-run]      from inside a worker's worktree: take the landing lock, merge origin/<integration>,
-         [--worktree PATH]                          rebuild the generated files, tier 1, fast-forward into the integration branch, release
-                                                    the lock, remove the worktree; a hotfix never lands on the integration branch: tier 1
-                                                    against production, the branch pushed and its pull request into production opened
+         [--worktree PATH]                          rebuild the generated files, the landing tests, fast-forward into the integration
+                                                    branch, release the lock, remove the worktree; a hotfix never lands on the integration
+                                                    branch: the landing tests against production, the branch pushed and its pull request
+                                                    into production opened
   saani auto pick [--json] [--limit N] [--only N..]   the open issues an auto run may take now, in order (saani/auto.py)
   saani auto on|off|status|report ...               an auto run's record, stop rules and report (saani/auto.py)
   saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
                                                     branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
-  saani test [--kind tier1|land|full] -- <cmd...>   run a test command through the test queue (saani/queue.py)
+  saani test [--kind landing|full] -- <cmd...>     run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
 
@@ -30,9 +31,10 @@ Landing, step by step:
 3. `git merge origin/<integration>`; a conflict only in generated files is solved by taking the integration copy, they are rebuilt next;
    any other conflict stops the landing, the lock is released, the worker resolves, commits and lands again;
 4. the generated files are rebuilt (settings `[land] rebuild`) and committed if they changed;
-5. tier 1 (settings `[tests] tier1`), through the test queue with the landing's priority; red stops the landing;
-6. `git push origin HEAD:<integration>`, never forced: on a refusal it merges again and retries, tier 1 again only when the new commits
-   touch the branch's files, at most `push_attempts` times;
+5. the landing tests (settings `[tests] landing`), through the test queue with the landing's priority (kind `land`); red stops the
+   landing;
+6. `git push origin HEAD:<integration>`, never forced: on a refusal it merges again and retries, the landing tests again only when the
+   new commits touch the branch's files, at most `push_attempts` times;
 7. the lock is released, the landing is recorded (build/saani-landings.jsonl of the main checkout), the worktree and its local branch
    are removed (--keep leaves them).
 """
@@ -136,8 +138,9 @@ def split_conflicts(paths):
     return [p for p in paths if p in gen], [p for p in paths if p not in gen]
 
 
-def rerun_tier1(moved, changed):
-    """After the integration branch moved under a landing: tier 1 again only when the new commits touch a file this branch changed."""
+def rerun_landing(moved, changed):
+    """After the integration branch moved under a landing: the landing tests again only when the new commits touch a file this branch
+    changed."""
     return bool((set(moved) & set(changed)) - set(cfg().generated))
 
 
@@ -390,7 +393,7 @@ def cmd_start(args):
         comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name})
     print(f"worktree: {folder}")
     print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
-    print(f"timing:   {report or 'none found: the tier 1 estimate is rougher'}")
+    print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
     need = " and ".join(t + ":" for t in c.trailers)
     if args.hotfix:
         print(f"HOTFIX: commits need {need}; `saani land` pushes the branch and opens the pull request into {c.production} "
@@ -479,14 +482,14 @@ def stop(lock, branch, row, message, code=1):
 
 
 def land_hotfix(args, cwd, branch, number):
-    """A hotfix never reaches the integration branch: tier 1 against production, the branch pushed, the pull request into production
-    opened (or the open one named). No landing lock. CI, merge, deploy and the merge back follow."""
+    """A hotfix never reaches the integration branch: the landing tests against production, the branch pushed, the pull request into
+    production opened (or the open one named). No landing lock. CI, merge, deploy and the merge back follow."""
     c = cfg()
     if args.dry_run:
-        print(f"would run tier 1 against origin/{c.production}, push {branch} and open its pull request into {c.production}")
+        print(f"would run the landing tests against origin/{c.production}, push {branch} and open its pull request into {c.production}")
         return 0
-    if c.tier1 and queued_run("land", [*c.command("tier1"), "--base", f"origin/{c.production}"], cwd) != 0:
-        print("HOTFIX STOPPED: tier 1 is red: fix it on the branch, commit, land again")
+    if c.landing and queued_run("land", [*c.command("landing"), "--base", f"origin/{c.production}"], cwd) != 0:
+        print("HOTFIX STOPPED: the landing tests are red: fix it on the branch, commit, land again")
         return 1
     push = git("push", "-u", "origin", branch, cwd=cwd, check=False)
     if push.returncode != 0:
@@ -544,7 +547,7 @@ def cmd_land(args):
         raise SystemExit(f"{frozen} is frozen: the record of a change is its commit message and the issue comment")
     if args.dry_run:
         print(f"would land {branch} ({len(changed)} files) into {c.integration}: lock, merge {base}, "
-              f"rebuild {', '.join(c.generated) or 'nothing'}, tier 1, push HEAD:{c.integration}, "
+              f"rebuild {', '.join(c.generated) or 'nothing'}, landing tests, push HEAD:{c.integration}, "
               f"{'keep' if args.keep else 'remove'} the worktree")
         return 0
 
@@ -560,16 +563,16 @@ def cmd_land(args):
     row = {"time": datetime.datetime.now().isoformat(timespec="seconds"), "branch": branch, "issue": int(m.group(2)),
            "conflicts": [], "auto_resolved": []}
     try:
-        need_tier1, attempt = True, 0
+        need_tests, attempt = True, 0
         while True:
             git("fetch", "-q", "origin", c.integration, cwd=cwd)
             problem = merge_and_rebuild(cwd, base, row, m.group(2))
             if problem:
                 return stop(lock, branch, row, problem)
             tested = git("rev-parse", base, cwd=cwd)
-            if need_tier1 and c.tier1:
-                if queued_run("land", c.command("tier1"), cwd) != 0:
-                    return stop(lock, branch, row, "tier 1 is red: fix it on the branch, commit, land again")
+            if need_tests and c.landing:
+                if queued_run("land", c.command("landing"), cwd) != 0:
+                    return stop(lock, branch, row, "the landing tests are red: fix it on the branch, commit, land again")
             push = git("push", "origin", f"HEAD:{c.integration}", cwd=cwd, check=False)
             if push.returncode == 0:
                 break
@@ -580,9 +583,10 @@ def cmd_land(args):
                             f"Saani): land again. {(push.stderr or '').strip()[-300:]}")
             git("fetch", "-q", "origin", c.integration, cwd=cwd)
             moved = git("diff", "--name-only", tested, base, cwd=cwd).splitlines()
-            need_tier1 = rerun_tier1(moved, changed)
+            need_tests = rerun_landing(moved, changed)
             print(f"{c.integration} moved during the landing ({len(moved)} files): merging again, "
-                  + ("tier 1 again (the new commits touch this branch's files)" if need_tier1 else "no file in common: no new tier 1"))
+                  + ("the landing tests again (the new commits touch this branch's files)" if need_tests
+                     else "no file in common: no new landing tests"))
         row["result"], row["seconds"] = "landed", round(time.time() - started)
         row["head"] = git("rev-parse", "--short", "HEAD", cwd=cwd)
         release_lock(lock, branch)
@@ -592,7 +596,7 @@ def cmd_land(args):
         raise
     print(f"LANDED: {branch} -> {c.integration} at {row['head']} in {row['seconds']} s"
           + (f"; conflicts: {', '.join(row['conflicts'])}" if row["conflicts"] else ""))
-    restore_generated(cwd)                 # tier 1 may rewrite them with other line endings
+    restore_generated(cwd)                 # the landing tests may rewrite them with other line endings
     if not args.keep:
         home = main_checkout(cwd)
         os.chdir(home)
@@ -611,7 +615,7 @@ def cmd_land(args):
 
 def landing_fields(row):
     c = cfg()
-    tests = "tier 1 green" if c.tier1 else "no tier 1 configured"
+    tests = "landing tests green" if c.landing else "no landing tests configured"
     return {"Commit": row["head"], "Tests": f"{tests}, landed in {row['seconds']} s", "Next": f"goes to {c.production} with the next pull request"}
 
 
@@ -813,12 +817,26 @@ def queued_run(kind, command, cwd):
                      main_checkout(cwd) / "build" / TESTS_LOG)
 
 
+def test_kind(kind):
+    """The queue kind for `saani test --kind`: landing or full; the old name tier1 is read as landing, with a message. `land` is the
+    run inside `saani land` (it holds the landing lock, so it goes first): it is not offered here."""
+    if kind in queue.RENAMED_KINDS:
+        new = queue.RENAMED_KINDS[kind]
+        print(f"saani test: --kind {kind} is now --kind {new} (run as {new})", file=sys.stderr)
+        return new
+    if kind == "land":
+        raise SystemExit("saani test: --kind land is the run inside saani land (it holds the landing lock): use --kind landing")
+    if kind not in queue.KINDS:
+        raise SystemExit(f"saani test: unknown --kind {kind}: one of {', '.join(queue.KINDS)}")
+    return kind
+
+
 def cmd_test(args):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("give the command after --, e.g. saani test -- python -m pytest")
     cwd = pathlib.Path(git("rev-parse", "--show-toplevel", cwd=pathlib.Path.cwd()))
-    return queued_run(args.kind, command, cwd)
+    return queued_run(test_kind(args.kind), command, cwd)
 
 
 def cmd_check_msg(args):
@@ -876,7 +894,8 @@ def add_parsers(sub):
     p.add_argument("--local-only", action="store_true", help="leave GitHub alone")
     p.set_defaults(run=cmd_prune)
     p = sub.add_parser("test", help="run a test command through the test queue, one job at a time")
-    p.add_argument("--kind", choices=sorted(queue.PRIORITY), default="tier1", help="land first, then tier1, then full")
+    p.add_argument("--kind", default="landing", metavar="{landing,full}",
+                   help="landing (the tests before a landing) goes before full; a landing's own run goes first")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(run=cmd_test)
     p = sub.add_parser("check-msg", help="the commit-msg hook")

@@ -15,7 +15,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `hotfix_default_type` | `bug` | the prefix of a hotfix whose issue has no Type |
 | | `labels` | see below | the labels Saani reads and writes |
 | `[commits]` | `trailers` | `["Why", "Undo"]` | the lines each commit on a worker's branch or the integration branch must carry |
-| `[tests]` | `tier1` | `[]` | before every landing: the tests a change can affect (empty: no tests at landing) |
+| `[tests]` | `landing` | `[]` | before every landing: the tests a change can affect (empty: no tests at landing). The old name `tier1` is still read, with a message to rename it; both at once are refused |
 | | `full` | `[]` | everything: before a release, and the PC's CI |
 | | `check` | `[]` | quick checks before the full run on the PC |
 | | `timing_reports` | `[]` | files copied into a new worktree (the first is the newest timing report among worktrees) |

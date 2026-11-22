@@ -63,8 +63,8 @@ def test_the_worktrees_sit_beside_the_main_checkout_unless_a_folder_is_set(tmp_p
 
 
 def test_python_in_a_command_is_the_interpreter_that_runs_saani():
-    cfg = config.Config(tier1=["{python}", "-m", "pytest", "-q"])
-    assert cfg.command("tier1") == [sys.executable, "-m", "pytest", "-q"]
+    cfg = config.Config(landing=["{python}", "-m", "pytest", "-q"])
+    assert cfg.command("landing") == [sys.executable, "-m", "pytest", "-q"]
 
 
 def test_worker_branches_follow_the_issue_types():
@@ -89,3 +89,16 @@ def test_board_folders_accepts_only_work_deploy_and_auto():
         with pytest.raises(SystemExit) as e:
             config.from_toml({"project": {"repo": "acme/webshop"}, "board": {"folders": folders}}, ".")
         assert says in str(e.value), (folders, str(e.value))
+
+
+def test_tests_landing_is_the_key_and_the_old_tier1_is_still_read_with_a_message(capsys):
+    """#48: [tests] tier1 is now [tests] landing; the old key keeps working and says so, both at once are refused."""
+    cmd = ["{python}", "-m", "pytest", "-q"]
+    assert config.from_toml({"project": {"repo": "acme/webshop"}, "tests": {"landing": cmd}}, ".").landing == cmd
+    assert "tier1" not in capsys.readouterr().err
+    config._warned.clear()
+    assert config.from_toml({"project": {"repo": "acme/webshop"}, "tests": {"tier1": cmd}}, ".").landing == cmd
+    assert "[tests] tier1 is now [tests] landing" in capsys.readouterr().err
+    with pytest.raises(SystemExit, match="keep only landing"):
+        config.from_toml({"project": {"repo": "acme/webshop"}, "tests": {"tier1": cmd, "landing": cmd}}, ".")
+    assert not hasattr(config.Config(), "tier1")

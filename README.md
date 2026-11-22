@@ -108,7 +108,7 @@ cd ~/projects/webshop
 saani start 42        # worktree ../webshop-wt/42-<slug> on feat/42-<slug>, from origin/dev
 cd ../webshop-wt/42-*
 # ... Claude (or you) codes and commits, with "refs #42", Why: and Undo:
-saani land            # lock → merge dev → rebuild → tier-1 tests → push → clean up
+saani land            # lock → merge dev → rebuild → landing tests → push → clean up
 ```
 Or let Claude take the whole backlog while you're away: in Claude Code, `/saani:auto` (or `/saani:auto 12 15` for selected issues).
 It asks its questions first, then gives you the command that runs the rest headless (`claude -p ... --permission-mode auto
@@ -125,10 +125,10 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani comment <n> <kind> [--text T] [--field K=V]` | `/saani:comment 42 blocked --text ...` | a status comment on an issue and its label (`start`, `land`, `ci pr` and `ci merged` post theirs by themselves) |
-| `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |
+| `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, landing tests, push, clean up |
 | `saani merge [PR] [--deploy] [--dry-run]` | `/saani:merge`, `/saani:merge --deploy` | merge the green dev -> main pull request an auto run left (merge commit; refused unless mergeable and its CI is green on the exact head), relabel, remove the finished auto runs; `--deploy` then runs `saani deploy`. Saying "merge" or "merge and deploy" in a session means this |
 | `saani deploy [--dry-run]` | `/saani:deploy` | the deployer: CI green on the production head (or a merge of a green commit), no issue whose Deploy row says "⛔ Do not deploy", the `[deploy]` checks and dry run, the deploy and its log, then the prod tag moved and the `in-main` issues commented and closed. Owner-typed only |
-| `saani test [--kind tier1\|land\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
+| `saani test [--kind landing\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
 | `saani auto on\|off [--run ID]\|status [--check]\|report [--pr N] [--post]` | (used by `/saani:auto`) | the run's record, stop rules (40 refusals, 10 of the same reason in a row, 10 hours; `status --check` exits 3 at a limit) and report (landed, left, refusals, cost; posted on the pull request) |
 | `saani auto [pick [--json] [--limit N] [--only N ...]]` | (used by `/saani:auto`) | a throwaway worktree for an auto run; `auto pick` lists the issues the run may take now, in order, with the free slots (`[auto] parallel`) and why the others are left |
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |

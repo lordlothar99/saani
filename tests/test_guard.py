@@ -94,7 +94,8 @@ def test_the_security_review_cases(ctx, name, inp, expected):
 # ---------------------------------------------------------------- Bash: allowed
 
 ALLOWED = [
-    "saani status", "saani land --worktree {work}", "saani start 12", "saani test --kind tier1 -- python -m pytest -q",
+    "saani status", "saani land --worktree {work}", "saani start 12", "saani test --kind landing -- python -m pytest -q",
+    "saani test --kind tier1 -- python -m pytest -q", "saani test --kind=landing -- python -m pytest -q",
     "saani test -- npm test", "saani test --kind=full -- python -m pytest -q", "saani comment 12 progress",
     "saani comment 12 progress --text 'half done, the token is not here' --field Step=2", "saani kpis", "saani kpis --since 2026-01-01 --json",
     "saani progress show build/run.txt", "saani progress watch build/run.txt --every 60", "saani ui", "saani ui --port 8772", "saani map",
@@ -196,7 +197,8 @@ DENIED = [
     ("saani land extra", "saani command"), ("saani auto --id x", "saani command"), ("saani auto", "saani command"),
     ("saani kpis --out x", "saani command"), ("saani ui --json=1", "saani command"), ("saani ci pr --head feat/1-x", "saani command"),
     ("saani comment 12", "saani command"), ("saani progress show .env", "secret"), ("saani status -h", "saani command"),
-    ("saani test --kind tier1 --foo -- python -m pytest -q", "saani command"),
+    ("saani test --kind landing --foo -- python -m pytest -q", "saani command"),
+    ("saani test --kind land -- python -m pytest -q", "saani command"), ("saani test --kind=land -- python -m pytest -q", "saani command"),
     ("cd {run} ; rm -rf build", "cd outside the worktrees"), ("cd {run} | ls", "cd outside the worktrees"),
     ("cd {run} || ls", "cd outside the worktrees"), ("cd {run} & ls", "cd outside the worktrees"),
     ("cd {run}\nls", "cd outside the worktrees"), ("cd {work}/nope && ls", "cd outside the worktrees"),
@@ -222,7 +224,7 @@ DENIED = [
     ("python -m pytest -q @args.txt", "test option"), ("saani test -- python -m pytest -q @args.txt", "test option"),
     ("/usr/bin/python -m pytest -q", "not on the list"), ("./python -m pytest -q", "not on the list"),
     ("{work}/python.exe -m pytest -q", "not on the list"),
-    ("saani test -- cat x", "not a test command"), ("saani test --kind tier1 -- bash -c ls", "not a test command"),
+    ("saani test -- cat x", "not a test command"), ("saani test --kind landing -- bash -c ls", "not a test command"),
     ("python -m pytest -q --rootdir=/", "test option"), ("python -m pytest -q -c x.ini", "test option"),
     ("python -m pytest -q -o addopts=-pevil", "test option"), ("python -m pytest -q -qp evil", "test option"),
     ("saani test -- python -m pytest -q -p evil", "test option"),
@@ -536,7 +538,7 @@ def fake_repo(tmp_path, toml=None):
     main = tmp_path / "webshop"
     (main / ".git" / "worktrees" / "12-cart-total").mkdir(parents=True)
     (main / "saani.toml").write_text(toml or '[project]\nrepo = "acme/webshop"\n\n[worktrees]\nfolder = "../webshop-wt"\n\n'
-                                     '[tests]\ntier1 = ["{python}", "-m", "pytest", "-q"]\n', encoding="utf-8")
+                                     '[tests]\nlanding = ["{python}", "-m", "pytest", "-q"]\n', encoding="utf-8")
     work = tmp_path / "webshop-wt" / "12-cart-total"
     work.mkdir(parents=True)
     (work / ".git").write_text(f"gitdir: {fwd(main / '.git' / 'worktrees' / '12-cart-total')}\n")

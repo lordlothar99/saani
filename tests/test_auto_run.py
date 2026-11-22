@@ -35,7 +35,7 @@ def world(tmp_path, monkeypatch):
     (root / "saani.toml").write_text('[project]\nrepo = "acme/webshop"\n', encoding="utf-8")
     wt = tmp_path / "webshop-wt"
     run = worktree(root, wt / "auto-2026-11-22_0800")
-    config.use(config.Config(repo="acme/webshop", owner="someone", root=root, tier1=["{python}", "-c", "pass"]))
+    config.use(config.Config(repo="acme/webshop", owner="someone", root=root, landing=["{python}", "-c", "pass"]))
     monkeypatch.chdir(run)
     return type("World", (), {"root": root, "wt": wt, "run": run, "home": home, "git": root / ".git"})
 

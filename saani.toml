@@ -19,7 +19,7 @@ types = { Task = "task", Feature = "feat", Bug = "bug" }
 trailers = ["Why", "Undo"]
 
 [tests]
-tier1 = ["{python}", "-m", "pytest", "-q"]
+landing = ["{python}", "-m", "pytest", "-q"]
 full = ["{python}", "-m", "pytest", "-q"]
 
 [board]

@@ -106,7 +106,7 @@ def test_a_gh_refusal_stops_post_but_only_warns_in_try_post(monkeypatch, capsys)
 def test_landing_posts_on_dev_with_the_content_it_always_had():
     row = {"head": "abc1234", "seconds": 18}
     assert core.landing_comment(row).splitlines() == ["### ✅ On dev", "| Commit | Tests | Next |", "|---|---|---|",
-                                                      "| abc1234 | tier 1 green, landed in 18 s | goes to main with the next pull request |"]
+                                                      "| abc1234 | landing tests green, landed in 18 s | goes to main with the next pull request |"]
 
 
 def test_start_posts_started_with_the_folder_name_only_unless_no_comment(monkeypatch, tmp_path):

@@ -641,7 +641,7 @@ def saani_start(words, cwd, temp=None):
 
 
 def test_extras(words, ctx):
-    """The words after one of the project's test commands ([tests] tier1/full/check, `{python}` being any Python), or None."""
+    """The words after one of the project's test commands ([tests] landing/full/check, `{python}` being any Python), or None."""
     for test in ctx.tests:
         if len(words) >= len(test) and all(is_python(w) if t == "{python}" else w == t for w, t in zip(words, test)):
             return words[len(test):]
@@ -770,7 +770,7 @@ def saani_command(args, ctx, cwd):
             kind = []
             while rest and rest[0].startswith("--kind"):
                 kind, rest = (kind + rest[:1], rest[1:]) if "=" in rest[0] else (kind + rest[:2], rest[2:])
-        if any(not (w == "--kind" or re.fullmatch(r"(--kind=)?(tier1|land|full)", w)) for w in kind):
+        if any(not (w == "--kind" or re.fullmatch(r"(--kind=)?(landing|full|tier1)", w)) for w in kind):
             return deny("saani command", "saani test with an option other than --kind", "saani")
         return test_command(rest, ctx, cwd, "saani")
     if sub == "auto" and args[1:2] in (["on"], ["off"]):
@@ -1383,7 +1383,7 @@ def register(session_id, options, cwd, run_id, folder):
     if not (inside(folder, wt) and folder != wt):
         return None
     return turn_on(session_id, run_id, main, wt, folder, deploy=opts["deploy"], repo=cfg.repo, integration=cfg.integration,
-                   production=cfg.production, tests=[cfg.tier1, cfg.full, cfg.check], worker_branch=cfg.worker_branch.pattern)
+                   production=cfg.production, tests=[cfg.landing, cfg.full, cfg.check], worker_branch=cfg.worker_branch.pattern)
 
 
 def post_tool_use(event):

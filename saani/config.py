@@ -25,7 +25,7 @@ class Config:
     types: dict = dataclasses.field(default_factory=lambda: {"Task": "task", "Feature": "feat", "Bug": "bug"})
     hotfix_default_type: str = "bug"             # an urgent fix is never refused for a missing issue Type
     trailers: tuple = ("Why", "Undo")            # each commit on a worker's branch or the integration branch carries them
-    tier1: list = dataclasses.field(default_factory=list)       # the tests a change can affect, before every landing
+    landing: list = dataclasses.field(default_factory=list)     # the tests a change can affect, before every landing
     full: list = dataclasses.field(default_factory=list)        # everything, before a release
     check: list = dataclasses.field(default_factory=list)       # quick repository checks run before the full run on the PC
     generated: tuple = ()                        # files rebuilt by `land`, never by hand (a conflict there takes the integration copy)
@@ -87,6 +87,15 @@ class Config:
 
 FOLDER_KEYS = ("work", "deploy", "auto")                     # [board] folders: the folders the map's prompts name
 RENAMED_FOLDERS = {"longrun": "auto"}                       # old keys, refused with the new name
+RENAMED_TESTS = {"tier1": "landing"}                        # old [tests] keys, still read, with a message naming the new one
+_warned = set()
+
+
+def warn(message):
+    """A message on stderr, once per process (a setting still read under its old name)."""
+    if message not in _warned:
+        _warned.add(message)
+        print(message, file=sys.stderr)
 
 
 def from_toml(data, root):
@@ -97,7 +106,8 @@ def from_toml(data, root):
             ("worktrees", "folder"): "worktree_folder",
             ("issues", "types"): "types", ("issues", "hotfix_default_type"): "hotfix_default_type", ("issues", "labels"): "labels",
             ("commits", "trailers"): "trailers",
-            ("tests", "tier1"): "tier1", ("tests", "full"): "full", ("tests", "check"): "check", ("tests", "timing_reports"): "timing_reports",
+            ("tests", "landing"): "landing", ("tests", "full"): "full", ("tests", "check"): "check",
+            ("tests", "timing_reports"): "timing_reports",
             ("land", "generated"): "generated", ("land", "rebuild"): "rebuild", ("land", "frozen"): "frozen",
             ("land", "lock_stale_hours"): "lock_stale_hours", ("land", "push_attempts"): "push_attempts",
             ("deploy", "paths"): "deploy_paths", ("deploy", "command"): "deploy_command", ("deploy", "dry_run"): "deploy_dry_run",
@@ -113,6 +123,12 @@ def from_toml(data, root):
         if not isinstance(values, dict):
             raise SystemExit(f"{FILE}: `{table}` must be a table")
         for key, value in values.items():
+            if table == "tests" and key in RENAMED_TESTS:
+                new = RENAMED_TESTS[key]
+                if new in values:
+                    raise SystemExit(f"{FILE}: [tests] {key} is now [tests] {new}: keep only {new}")
+                warn(f"{FILE}: [tests] {key} is now [tests] {new} (rename the key; read as {new} meanwhile)")
+                key = new
             field = maps.get((table, key))
             if not field:
                 raise SystemExit(f"{FILE}: unknown setting [{table}] {key} (docs/CONFIG.md lists them)")

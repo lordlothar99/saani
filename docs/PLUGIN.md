@@ -31,10 +31,10 @@ Claude Code (the main session, strongest model) runs it; the Coder, Tester, Revi
 | Step | Who | What |
 |---|---|---|
 | 1 | Claude Code | `saani start <n>`; reads the issue; decides alone or delegated (below) |
-| 2 | `saani:coder` | the change in that worktree, tier 0, tier 1 through the queue, one commit with `refs #n` and the trailers |
+| 2 | `saani:coder` | the change in that worktree, the fast checks, the landing tests through the queue, one commit with `refs #n` and the trailers |
 | 3 | `saani:reviewer` | the diff and the issue only, never the coder's reasoning; a list of findings |
 | 4 | `saani:coder` | fixes the findings that are real (Claude Code decides which); a new commit |
-| 5 | Claude Code | `saani land --worktree <path>` (the checks, the lock, tier 1, the push to dev) |
+| 5 | Claude Code | `saani land --worktree <path>` (the checks, the lock, the landing tests, the push to dev) |
 | 6 | `saani:scribe` | a comment on the issue only when `land` has not made it; labels from `saani.toml` |
 
 `saani:tester` drives any run of the tests that Claude Code does not want in its own context (a full run), and `saani:researcher` answers a

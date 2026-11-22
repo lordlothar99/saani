@@ -23,7 +23,7 @@ labels = { in_dev = "in-dev", in_main = "in-main", answer = "help wanted", act =
 trailers = ["Why", "Undo"]       # each commit on a worker's branch or the integration branch carries these lines
 
 [tests]
-tier1 = ["{python}", "-m", "pytest", "-q"]          # before every landing: the tests a change can affect (here: all of them)
+landing = ["{python}", "-m", "pytest", "-q"]        # before every landing: the tests a change can affect (here: all of them)
 full = ["{python}", "-m", "pytest", "-q"]           # before a release, and the PC's CI
 check = []                                          # quick checks before the full run on the PC (lint, repository rules)
 timing_reports = []                                 # e.g. ["build/tests.json"]: copied into new worktrees for test estimates

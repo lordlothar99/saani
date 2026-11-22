@@ -52,11 +52,11 @@ def test_conflicts_in_generated_files_are_solved_by_the_landing_and_the_others_b
     assert others == ["docs/RUNBOOK.md"]
 
 
-def test_when_dev_moves_under_a_landing_tier1_runs_again_only_for_files_in_common():
+def test_when_dev_moves_under_a_landing_its_tests_run_again_only_for_files_in_common():
     """Two landings in a row were once refused because other sessions pushed to dev during tier 1."""
     mine = ["saani/core.py", "docs/SAANI.md", "docs/SPEC.md"]
-    assert not core.rerun_tier1(["infra/diag_x.sh", "docs/SPEC.md"], mine)      # the generated file does not count
-    assert core.rerun_tier1(["docs/SAANI.md"], mine)
+    assert not core.rerun_landing(["infra/diag_x.sh", "docs/SPEC.md"], mine)      # the generated file does not count
+    assert core.rerun_landing(["docs/SAANI.md"], mine)
     assert core.cfg().push_attempts >= 2
 
 
@@ -245,3 +245,14 @@ def test_a_worktrees_folder_inside_the_main_checkout_needs_nothing(project):
 def test_status_never_writes_the_settings(project):
     core.worktrees_warning(project)
     assert not (project.root / ".claude").exists()
+
+
+def test_saani_test_kind_is_landing_or_full_tier1_points_to_landing_and_land_is_not_offered(capsys):
+    """#48: --kind landing (the default) or full; the old tier1 runs as landing with a message; land is saani land's own run."""
+    assert core.test_kind("landing") == "landing" and core.test_kind("full") == "full"
+    assert core.test_kind("tier1") == "landing"
+    assert "--kind tier1 is now --kind landing" in capsys.readouterr().err
+    with pytest.raises(SystemExit, match="use --kind landing"):
+        core.test_kind("land")
+    with pytest.raises(SystemExit, match="unknown --kind fast"):
+        core.test_kind("fast")

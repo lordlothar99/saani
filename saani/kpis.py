@@ -84,12 +84,13 @@ def landing_kpis(rows, since, until):
 
 
 def test_kpis(rows, since, until):
-    """Rows of the test queue log inside the window -> per kind: jobs, failed, median wait and run in seconds."""
+    """Rows of the test queue log inside the window -> per kind (an old `tier1` row counts as `landing`): jobs, failed, median wait and
+    run in seconds."""
     out = {}
     for r in rows:
         if not in_window(r.get("time"), since, until):
             continue
-        k = out.setdefault(r.get("kind", "?"), {"jobs": 0, "failed": 0, "waits": [], "runs": []})
+        k = out.setdefault(queue.kind_of(r.get("kind", "?")), {"jobs": 0, "failed": 0, "waits": [], "runs": []})
         k["jobs"] += 1
         k["failed"] += 1 if r.get("code") not in (0, None) else 0
         k["waits"].append(r.get("wait", 0))

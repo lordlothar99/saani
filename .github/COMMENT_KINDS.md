@@ -24,7 +24,7 @@ on-dev, in-pr, on-main, deployed, linked), as a one-row table of the fields, a b
 ### ✅ On dev
 | Commit | Tests | Next |
 |---|---|---|
-| abc1234 | tier 1: 312 passed (3 min) | goes to main with the next pull request |
+| abc1234 | landing tests: 312 passed (3 min) | goes to main with the next pull request |
 
 - [x] criterion 1
 - [ ] criterion 2 → follow-up #n
