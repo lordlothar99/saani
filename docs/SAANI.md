@@ -166,12 +166,12 @@ asked, what blocks the issue); the map and the long run read it through that one
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),
 landings and conflicts by file, test jobs per kind (median wait and run, failures). The owner's waiting time and interventions
 have no machine record: it says "not measured". It also reads Claude Code's session transcripts (`~/.claude/projects/<folder>/`, or under
-`CLAUDE_CONFIG_DIR`; the folders of the main checkout and of the worktrees, subagents included) and shows "Tokens and cost (estimate)":
+`CLAUDE_CONFIG_DIR`; the folder of the main checkout and those of the worktrees, subagents included, never a sibling project's) and shows "Tokens and cost (estimate)":
 input, output, cache read and cache write tokens and an estimated cost per issue (top 10 by cost), per role (the Architect, or the
 subagent's type: coder, reviewer...) and per model, also in `--json` under `tokens`. Only ids, models, usage numbers, folders, branches,
-times and subagent descriptions are read, never a message's text; a message id counts once. A message belongs to the issue named by its
-worker branch, else by its worktree folder, else by `#n` in its subagent's description, else to "unattributed" (the Architect's overhead).
-The prices are one table in `saani/cost.py` (USD per million tokens, by model family): estimates, to check against the provider's price
+times and subagent descriptions are kept, never a message's text (the lines are parsed whole, only those fields are retained); a message id counts once. A message belongs to the issue named by its
+worker branch (the project's own branch pattern), else by its worktree folder, else by `#n` in its subagent's description, else to "unattributed" (the Architect's overhead).
+The prices are one table in `saani/cost.py` (USD per million tokens, by model id or family; a cache write costs 1.25x the input price for 5 minutes, 2x for 1 hour): estimates, to check against the provider's price
 page; a model without a price shows its tokens and a cost of "?". `--baseline` adds the window of the same length just before (git history only).
 
 ## Models and cost

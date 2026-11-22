@@ -8,8 +8,7 @@ Counted here:
 - commits on origin/<integration> (no merges) and the issues they name (`refs #n`), per day: "issues landed per day";
 - landings (build/saani-landings.jsonl of the main checkout, written by `saani land`): landed, stopped, the ones that met a conflict,
   conflicts per landing, and the conflicts by file;
-- test jobs (build/saani-tests.jsonl, the test queue): per kind, jobs, median wait and median run.
-
+- test jobs (build/saani-tests.jsonl, the test queue): per kind, jobs, median wait and median run;
 - tokens and estimated cost per issue, role and model, from Claude Code's transcripts (saani/cost.py).
 
 Not counted (no machine record; the report says "not measured" and where to take them from): the owner's waiting time and interventions.

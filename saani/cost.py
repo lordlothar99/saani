@@ -19,18 +19,23 @@ import pathlib
 import re
 
 UNATTRIBUTED = "unattributed"
-BRANCH = re.compile(r"^[a-z]+/(\d+)-")
 HASH_NUMBER = re.compile(r"#(\d+)")
 FIELDS = ("input", "output", "cache_read", "cache_write")
 
-# USD per million tokens: input, output, cache read, cache write. ESTIMATES: check against the provider's price page.
-# Keyed by model family prefix; the longest matching prefix wins. A model that matches none is counted in tokens only (cost "?").
+# USD per million tokens: input, output, cache read (source: Anthropic's model table, cached 2026-11-03). ESTIMATES: check against the
+# provider's price page. Keyed by exact model id where listed, by family prefix for other versions; the longest matching prefix wins.
+# A model that matches none is counted in tokens only (cost "?"). A cache write costs 1.25x the input price (5-minute cache) or 2x (1-hour).
 PRICES = {
-    "claude-opus-": (15.0, 75.0, 1.50, 18.75),
-    "claude-sonnet-": (3.0, 15.0, 0.30, 3.75),
-    "claude-haiku-": (1.0, 5.0, 0.10, 1.25),
-    "claude-fable-": (1.0, 5.0, 0.10, 1.25),
+    "claude-opus-": (4.0, 20.0, 0.20),
+    "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-sonnet-": (2.0, 10.0, 0.10),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.10),
+    "claude-haiku-": (0.10, 0.50, 0.01),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+    "claude-fable-": (8.0, 40.0, 0.20),
+    "claude-fable-5-2": (8.0, 40.0, 0.20),
 }
+CACHE_WRITE_5M, CACHE_WRITE_1H = 1.25, 2.0
 
 
 # ---------------------------------------------------------------- pure functions (tested)
@@ -46,18 +51,23 @@ def price_of(model):
 
 
 def cost_of(model, tokens):
-    """Estimated USD of a {input, output, cache_read, cache_write} count, or None for an unknown model."""
+    """Estimated USD of a {input, output, cache_read, cache_write, cache_write_1h} count (the 1-hour part is inside cache_write), or
+    None for an unknown model."""
     p = price_of(model)
     if p is None:
         return None
-    return sum(tokens.get(f, 0) * rate for f, rate in zip(FIELDS, p)) / 1_000_000
+    long = min(tokens.get("cache_write_1h", 0), tokens.get("cache_write", 0))
+    short = tokens.get("cache_write", 0) - long
+    return (tokens.get("input", 0) * p[0] + tokens.get("output", 0) * p[1] + tokens.get("cache_read", 0) * p[2]
+            + short * p[0] * CACHE_WRITE_5M + long * p[0] * CACHE_WRITE_1H) / 1_000_000
 
 
-def issue_of(branch, cwd, wt_name, description=""):
-    """The issue number a message belongs to, or UNATTRIBUTED."""
-    m = BRANCH.match(branch or "")
+def issue_of(branch, cwd, wt_name, description="", worker_branch=None):
+    """The issue number a message belongs to, or UNATTRIBUTED. `worker_branch`: the project's compiled worker-branch pattern
+    (Settings.worker_branch, number in group 2)."""
+    m = worker_branch.match(branch or "") if worker_branch else None
     if m:
-        return int(m.group(1))
+        return int(m.group(2))
     m = re.search(re.escape(wt_name) + r"[\\/](\d+)-", cwd or "") if wt_name else None
     if m:
         return int(m.group(1))
@@ -80,12 +90,14 @@ def in_window(stamp, since, until):
 
 
 def project_folders(projects_dir, main_checkout, wt_dir):
-    """The transcript folders of the project: its main checkout and its worktrees."""
-    prefixes = [slug(main_checkout).lower(), slug(wt_dir).lower()]      # the drive letter's case differs between tools
-    projects_dir = pathlib.Path(projects_dir)
-    if not projects_dir.is_dir():
+    """The transcript folders of the project: the main checkout's (its slug exactly) and the worktrees folder's (its slug exactly, or
+    followed by `-`: a worktree). Sibling projects (`webshop-admin`) are left out. Case-insensitive: the drive letter's case differs."""
+    main, wt = slug(main_checkout).lower(), slug(wt_dir).lower()
+    try:
+        entries = [d for d in pathlib.Path(projects_dir).iterdir() if d.is_dir()]
+    except OSError:
         return []
-    return sorted(d for d in projects_dir.iterdir() if d.is_dir() and any(d.name.lower().startswith(p) for p in prefixes))
+    return sorted(d for d in entries if d.name.lower() in (main, wt) or d.name.lower().startswith(wt + "-"))
 
 
 def read_lines(path):
@@ -111,42 +123,73 @@ def read_meta(jsonl):
     except (OSError, ValueError):
         return None, ""
     d = d if isinstance(d, dict) else {}
-    return d.get("agentType") or None, str(d.get("description") or "")
+    kind, desc = d.get("agentType"), d.get("description")
+    return (kind if isinstance(kind, str) and kind else None), (desc if isinstance(desc, str) else "")
 
 
 def transcripts(folders):
     """[(path, is_subagent)] of every main and subagent transcript in the folders."""
     out = []
     for folder in folders:
-        out += [(p, False) for p in sorted(folder.glob("*.jsonl"))]
-        out += [(p, True) for p in sorted(folder.glob("*/subagents/agent-*.jsonl"))]
+        try:
+            out += [(p, False) for p in sorted(folder.glob("*.jsonl"))]
+            out += [(p, True) for p in sorted(folder.glob("*/subagents/agent-*.jsonl"))]
+        except OSError:
+            continue
     return out
 
 
-def usage_rows(files, wt_name, since, until):
-    """One row per distinct message id: {issue, role, model, input, output, cache_read, cache_write}, inside the window."""
-    seen, rows = set(), []
+def text_of(value):
+    return value if isinstance(value, str) else ""
+
+
+def count(u, key):
+    v = u.get(key)
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else 0
+
+
+def row_of(line, role, description, wt_name, worker_branch):
+    """The usage row of a transcript line, or None when it is not an assistant message with usage and a string id."""
+    msg = line.get("message")
+    if line.get("type") != "assistant" or not isinstance(msg, dict) or not isinstance(msg.get("usage"), dict):
+        return None
+    if not isinstance(msg.get("id"), str) or not msg["id"]:
+        return None
+    u = msg["usage"]
+    made = u.get("cache_creation") if isinstance(u.get("cache_creation"), dict) else {}
+    short, long = count(made, "ephemeral_5m_input_tokens"), count(made, "ephemeral_1h_input_tokens")
+    total = count(u, "cache_creation_input_tokens") or short + long
+    long = min(long, total)
+    return {"id": msg["id"], "issue": issue_of(text_of(line.get("gitBranch")), text_of(line.get("cwd")), wt_name, description, worker_branch),
+            "role": role, "model": text_of(msg.get("model")) or "?",
+            "input": count(u, "input_tokens"), "output": count(u, "output_tokens"), "cache_read": count(u, "cache_read_input_tokens"),
+            "cache_write": total, "cache_write_1h": long}
+
+
+def old_file(path, since):
+    """True when the file was last written before the window starts (it holds nothing of it)."""
+    try:
+        return datetime.date.fromtimestamp(path.stat().st_mtime) < since
+    except (OSError, OverflowError, ValueError):
+        return False
+
+
+def usage_rows(files, wt_name, since, until, worker_branch=None):
+    """One row per distinct message id, inside the window: {issue, role, model, input, output, cache_read, cache_write,
+    cache_write_1h}. Of a message id that repeats, the line with the most output tokens is kept. Rows with no token are dropped."""
+    best = {}
     for path, sub in files:
+        if old_file(path, since):
+            continue
         agent_type, description = read_meta(path) if sub else (None, "")
         role = (role_of(agent_type) if agent_type else "subagent") if sub else "architect"
         for line in read_lines(path):
-            msg = line.get("message")
-            if line.get("type") != "assistant" or not isinstance(msg, dict) or not isinstance(msg.get("usage"), dict):
+            if not in_window(line.get("timestamp"), since, until):
                 continue
-            mid = msg.get("id")
-            if mid in seen or not in_window(line.get("timestamp"), since, until):
-                continue
-            if mid:
-                seen.add(mid)
-            u = msg["usage"]
-
-            def num(k):
-                return u[k] if isinstance(u.get(k), int) else 0
-            rows.append({"issue": issue_of(line.get("gitBranch"), line.get("cwd"), wt_name, description), "role": role,
-                         "model": str(msg.get("model") or "?"),
-                         "input": num("input_tokens"), "output": num("output_tokens"),
-                         "cache_read": num("cache_read_input_tokens"), "cache_write": num("cache_creation_input_tokens")})
-    return rows
+            row = row_of(line, role, description, wt_name, worker_branch)
+            if row and (row["id"] not in best or row["output"] > best[row["id"]]["output"]):
+                best[row["id"]] = row
+    return [r for r in best.values() if r["input"] + r["output"] + r["cache_read"] + r["cache_write"] > 0]
 
 
 def _empty():
@@ -177,7 +220,7 @@ def aggregate(rows, top=10):
 
     def order(t):
         return sorted(t.items(), key=lambda kv: (-kv[1]["cost"], -sum(kv[1][f] for f in FIELDS), str(kv[0])))
-    out = {"estimate": True, "prices_usd_per_million": {k: dict(zip(FIELDS, v)) for k, v in PRICES.items()},
+    out = {"estimate": True, "prices_usd_per_million": {k: dict(zip(("input", "output", "cache_read"), v)) for k, v in PRICES.items()},
            "total": total["all"],
            "per_issue": [dict(issue=k, **v) for k, v in order(issues)[:top]], "issues_total": len(issues),
            "per_role": [dict(role=k, **v) for k, v in order(roles)],
@@ -220,4 +263,4 @@ def claude_dir():
 def read(c, since, until, top=10):
     """The cost report of the project settings `c` over the window."""
     files = transcripts(project_folders(claude_dir() / "projects", c.root, c.wt_dir))
-    return aggregate(usage_rows(files, c.wt_dir.name, since, until), top)
+    return aggregate(usage_rows(files, c.wt_dir.name, since, until, c.worker_branch), top)

@@ -3,7 +3,7 @@ import datetime
 import json
 import pathlib
 
-from saani import cost, kpis
+from saani import config, cost, kpis
 
 D = datetime.date
 SINCE, UNTIL = D(2026, 11, 21), D(2026, 11, 22)
@@ -21,20 +21,24 @@ def write(path, lines):
 
 
 def test_slug_replaces_every_char_outside_letters_and_digits():
-    assert cost.slug(r"c:\Users\x\projects\webshop") == "c--Users-x-projects-webshop"
+    assert cost.slug(r"D:\work\acme\webshop") == "D--work-acme-webshop"
 
 
 def test_price_by_family_prefix_and_unknown_model_has_no_cost():
-    assert cost.cost_of("claude-sonnet-5-5", {"input": 1_000_000, "output": 1_000_000}) == 3.0 + 15.0
-    assert cost.cost_of("claude-opus-9", {"cache_read": 1_000_000, "cache_write": 1_000_000}) == 1.5 + 18.75
+    assert cost.cost_of("claude-sonnet-5-5", {"input": 1_000_000, "output": 1_000_000}) == 2.0 + 10.0
+    assert cost.cost_of("claude-opus-9", {"cache_read": 1_000_000, "cache_write": 1_000_000}) == 0.2 + 4.0 * 1.25      # family fallback, 5m
+    assert cost.cost_of("claude-opus-5-5-2027", {"cache_write": 1_000_000, "cache_write_1h": 1_000_000}) == 8.0         # all 1-hour
+    assert cost.cost_of("claude-fable-5-2", {"input": 1_000_000}) == 8.0
     assert cost.cost_of("gpt-x", {"input": 5}) is None
 
 
 def test_issue_by_branch_then_worktree_folder_then_description_else_unattributed():
-    assert cost.issue_of("feat/42-slug", "/x/webshop-wt/7-y", "webshop-wt", "#9") == 42
-    assert cost.issue_of("dev", r"C:\p\webshop-wt\7-y", "webshop-wt", "#9") == 7
-    assert cost.issue_of("dev", "/p/webshop", "webshop-wt", "#9 rename") == 9
-    assert cost.issue_of("dev", "/p/webshop", "webshop-wt") == cost.UNATTRIBUTED
+    wb = config.Config(repo="acme/webshop").worker_branch
+    assert cost.issue_of("feat/42-slug", "/x/webshop-wt/7-y", "webshop-wt", "#9", wb) == 42
+    assert cost.issue_of("dev", r"D:\p\webshop-wt\7-y", "webshop-wt", "#9", wb) == 7
+    assert cost.issue_of("dev", "/p/webshop", "webshop-wt", "#9 rename", wb) == 9
+    assert cost.issue_of("dev", "/p/webshop", "webshop-wt", "", wb) == cost.UNATTRIBUTED
+    assert cost.issue_of("release/2026-11-22", "/p/webshop", "webshop-wt", "", wb) == cost.UNATTRIBUTED
 
 
 def test_roles():
@@ -62,7 +66,7 @@ def project(tmp_path, monkeypatch):
         json.dumps({"agentType": "saani:coder", "description": "#7 rename"}), encoding="utf-8")
     write(work / "s2.jsonl", [msg("m4", cwd=str(wt / "42-slug"), model="mystery-1", i=50)])
     write(other / "s3.jsonl", [msg("m5", i=777)])
-    return type("C", (), {"root": root, "wt_dir": wt})()
+    return config.Config(repo="acme/webshop", root=root)
 
 
 def test_read_attributes_dedupes_windows_and_prices(tmp_path, monkeypatch):
@@ -71,13 +75,13 @@ def test_read_attributes_dedupes_windows_and_prices(tmp_path, monkeypatch):
     assert r["total"]["messages"] == 4 and r["total"]["input"] == 100 + 1_000_000 + 50
     issues = {e["issue"]: e for e in r["per_issue"]}
     assert set(issues) == {"unattributed", 42, 7}
-    assert issues[42]["cost"] == 15.0 and issues[42]["unpriced"] is True       # opus input, plus a model with no price
-    assert issues[7]["cost"] == 15.0 and issues[7]["unpriced"] is False         # coder, 1M sonnet output
+    assert issues[42]["cost"] == 4.0 and issues[42]["unpriced"] is True        # opus input, plus a model with no price
+    assert issues[7]["cost"] == 10.0 and issues[7]["unpriced"] is False         # coder, 1M sonnet output
     assert [e["issue"] for e in r["per_issue"]][:2] in ([42, 7], [7, 42])
     roles = {e["role"]: e for e in r["per_role"]}
     assert set(roles) == {"architect", "coder"} and roles["coder"]["output"] == 1_000_000
     assert {e["model"] for e in r["per_model"]} == {"claude-sonnet-5-5", "claude-opus-9", "mystery-1"}
-    assert abs(r["total"]["cost"] - (30.0 + 100 * 3 / 1e6 + 10 * 15 / 1e6)) < 1e-4
+    assert abs(r["total"]["cost"] - (14.0 + 100 * 2 / 1e6 + 10 * 10 / 1e6)) < 1e-4
 
 
 def test_no_message_text_is_kept_and_the_top_limits_the_issues(tmp_path, monkeypatch):
@@ -95,7 +99,7 @@ def test_text_shows_the_estimate_and_a_question_mark_for_unknown_models(tmp_path
 
 def test_missing_transcripts_give_an_empty_report(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "nothing"))
-    c = type("C", (), {"root": tmp_path / "webshop", "wt_dir": tmp_path / "webshop-wt"})()
+    c = config.Config(repo="acme/webshop", root=tmp_path / "webshop")
     assert cost.read(c, SINCE, UNTIL)["total"]["messages"] == 0
 
 
@@ -104,9 +108,48 @@ def test_kpis_report_carries_the_tokens():
     assert r["tokens"]["total"]["messages"] == 0 and "Tokens and cost" in kpis.text(r)
 
 
-def test_folders_match_whatever_the_case_of_the_drive_letter(tmp_path):
-    (tmp_path / "c--Users-x-webshop").mkdir()
-    (tmp_path / "c--Users-x-webshop-wt-42-slug").mkdir()
-    (tmp_path / "c--Users-x-other").mkdir()
-    found = cost.project_folders(tmp_path, r"C:\Users\x\webshop", r"C:\Users\x\webshop-wt")
-    assert [d.name for d in found] == ["c--Users-x-webshop", "c--Users-x-webshop-wt-42-slug"]
+def test_folders_are_the_main_checkouts_and_the_worktrees_never_a_sibling_project(tmp_path):
+    for name in ("d--work-webshop", "d--work-webshop-wt", "d--work-webshop-wt-42-slug", "d--work-webshop-admin",
+                 "d--work-webshop-wtools", "d--work-other"):
+        (tmp_path / name).mkdir()
+    found = cost.project_folders(tmp_path, r"D:\work\webshop", r"d:\work\webshop-wt")
+    assert [d.name for d in found] == ["d--work-webshop", "d--work-webshop-wt", "d--work-webshop-wt-42-slug"]
+
+
+def test_odd_lines_do_not_crash_and_empty_rows_are_dropped(tmp_path):
+    f = tmp_path / "s.jsonl"
+    odd = [{"type": "assistant", "timestamp": "2026-11-21T10:00:00Z", "gitBranch": 5, "cwd": ["x"],
+            "message": {"id": 7, "model": "claude-sonnet-5-5", "usage": {"output_tokens": 5}}},                  # id not a string
+           {"type": "assistant", "timestamp": "2026-11-21T10:00:00Z", "gitBranch": 5, "cwd": ["x"],
+            "message": {"id": "a", "model": None, "usage": {"output_tokens": 5, "input_tokens": "x"}}},
+           msg("synthetic", model="<synthetic>"),                                                                   # no token at all
+           [1, 2], "3"]
+    write(f, odd)
+    rows = cost.usage_rows([(f, False)], "webshop-wt", SINCE, UNTIL)
+    assert len(rows) == 1 and rows[0]["model"] == "?" and rows[0]["issue"] == cost.UNATTRIBUTED and rows[0]["output"] == 5
+
+
+def test_a_repeated_message_keeps_its_largest_usage(tmp_path):
+    f = tmp_path / "s.jsonl"
+    write(f, [msg("m", o=3), msg("m", o=40), msg("m", o=9)])
+    rows = cost.usage_rows([(f, False)], "webshop-wt", SINCE, UNTIL)
+    assert [r["output"] for r in rows] == [40]
+
+
+def test_cache_writes_are_priced_by_their_lifetime(tmp_path):
+    f = tmp_path / "s.jsonl"
+    line = msg("m", model="claude-opus-5-5", cw=2_000_000)
+    line["message"]["usage"]["cache_creation"] = {"ephemeral_5m_input_tokens": 1_000_000, "ephemeral_1h_input_tokens": 1_000_000}
+    write(f, [line])
+    row = cost.usage_rows([(f, False)], "webshop-wt", SINCE, UNTIL)[0]
+    assert row["cache_write"] == 2_000_000 and row["cache_write_1h"] == 1_000_000
+    assert cost.cost_of(row["model"], row) == 4.0 * 1.25 + 4.0 * 2.0
+
+
+def test_a_file_last_written_before_the_window_is_not_read(tmp_path):
+    import os
+    f = tmp_path / "s.jsonl"
+    write(f, [msg("m", i=5)])
+    stamp = datetime.datetime(2026, 11, 1).timestamp()
+    os.utime(f, (stamp, stamp))
+    assert cost.usage_rows([(f, False)], "webshop-wt", SINCE, UNTIL) == []
