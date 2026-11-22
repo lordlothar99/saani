@@ -107,7 +107,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 
 | Terminal | Claude Code | What it does |
 |---|---|---|
-| `saani ui [--open]` | `/saani:ui` | opens the board and the status page at `http://127.0.0.1:8771` (this machine only, read-only). `saani board` still works as an alias |
+| `saani ui [--open]` | `/saani:ui` | opens the board at `http://127.0.0.1:8771` (the kanban page is at `/kanban`) (this machine only, read-only). `saani board` still works as an alias |
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani new <n> [--hotfix]` | `/saani:new 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |

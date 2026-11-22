@@ -1,7 +1,7 @@
 """Saani at a glance: a local status page and the board (docs/SAANI.md). Standard library only; read-only (it starts, stops and writes
 nothing); pure functions first (tests/test_board_server.py).
 
-  saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s; /board is the isometric board
+  saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s: / is the isometric board (/board still opens it), /kanban the kanban page
   saani ui --open              the same, and open the board in the browser
   saani ui --json              print the state once and exit
   saani board ...              the same as saani ui (the command's former name, kept as an alias)
@@ -744,10 +744,10 @@ class Handler(BaseHTTPRequestHandler):
         path, _, query = self.path.partition("?")
         params = urllib.parse.parse_qs(query)
         repo = (params.get("project") or [""])[0]           # the selector's choice: owner/name; none: the project the server started in
-        if path in ("/", "/index.html"):
+        if path in ("/kanban", "/kanban/"):
             text = in_project(repo, page)
             body, kind = (text or "").encode("utf-8"), "text/html; charset=utf-8"
-        elif path in ("/board", "/board/"):
+        elif path in ("/", "/index.html", "/board", "/board/"):      # the board is the default page; /board is its old address
             body, kind = board_page().encode("utf-8"), "text/html; charset=utf-8"
         elif path in ("/mock-state.json", "/board/mock-state.json"):
             body, kind = MOCK_FILE.read_bytes(), "application/json"
@@ -804,9 +804,9 @@ def run_command(args):
     threading.Thread(target=sampler, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Saani: {url} (status) and {url}board (board), this PC only; Ctrl+C stops it")
+    print(f"Saani: {url} (board) and {url}kanban (kanban), this PC only; Ctrl+C stops it")
     if args.open:
-        webbrowser.open(url + "board")
+        webbrowser.open(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -9,7 +9,7 @@ argument-hint: "[--port N]"
 **Arguments:** `$ARGUMENTS` (optional, e.g. `--port 8772`).
 
 1. Start `saani ui --open $ARGUMENTS` **in the background** (it is a server and keeps running). It opens the board at
-   `http://127.0.0.1:8771/board` (or the port given) in the browser; only this machine can reach it.
+   `http://127.0.0.1:8771/` (or the port given; the kanban page is `/kanban`) in the browser; only this machine can reach it.
 2. If the port is already taken, the board is probably already running: give the owner the URL instead of starting a second one. One
    board serves every listed project at that one address, with a selector in the header: `saani ui --add <folder>` lists another
    project (a checkout with a saani.toml), `saani ui --remove owner/name` takes one out; the project `saani ui` starts in is listed itself.

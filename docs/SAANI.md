@@ -132,15 +132,16 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 
 ## The status page and the board
 `saani ui` (alias `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
-- **`/`, the status page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
+- **`/kanban`, the kanban page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
   needs and a "Copy prompt" to paste to the Architect; the open pull request with its CI in three colours; the Claude Code sessions of the
   project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in); the
   PC's load.
-- **`/board`, the board:** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
+- **`/`, the board (the default page; `/board` still opens it):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
   (bottom left) to END (top right), with branches (to deploy or to close) and the ways back (tests failed, CI red, needs you, hotfix, not
   planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether a long run can take
   it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, long-run fit, the
   prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+- Both pages have a top bar with the page switch (Board · Kanban) and a refresh, and read the same `/api/state`.
 - The board is one HTML file (`saani/board.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
   `mock-state.json` beside it. Its data: [board-data-contract.md](board-data-contract.md).
 

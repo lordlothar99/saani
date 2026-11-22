@@ -400,3 +400,22 @@ def test_the_deploy_paths_are_read_from_saani_toml():
     from saani import config
     cfg = config.from_toml({"project": {"repo": "acme/webshop"}, "deploy": {"paths": ["server/", "web/"]}}, "x")
     assert cfg.deploy_paths == ("server/", "web/")
+
+
+def test_the_board_is_the_default_page_and_the_kanban_has_its_own_address(monkeypatch):
+    """/ and the old /board are the board, /kanban the kanban page; both pages have the page switch in their top bar."""
+    server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    get = lambda p: urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}{p}").read().decode()
+    try:
+        board, kanban = get("/"), get("/kanban")
+        assert board == get("/board") == get("/index.html") and board.count('id="demo"') == 1
+        assert 'class="pages"' in kanban and 'href="/kanban" aria-current="page"' in kanban and 'href="/">Board</a>' in kanban
+        assert 'id="pages"' in board and 'href="/" aria-current="page">Board</a>' in board and 'href="/kanban">Kanban</a>' in board
+        assert 'id="refresh"' in board and 'id="refresh"' in kanban and 'id="proj"' in board
+        with pytest.raises(urllib.error.HTTPError) as e:
+            get("/nowhere")
+        assert e.value.code == 404
+    finally:
+        server.shutdown()
+    assert '$("#pages").hidden = !live' in fp.BOARD_FILE.read_text(encoding="utf-8")     # the artifact build has no server: no page switch

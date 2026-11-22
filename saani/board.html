@@ -30,6 +30,7 @@ body{background:var(--night);color:var(--bone);font:15px/1.5 var(--body);overflo
 .brand .meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font:500 11px/1 var(--mono);color:var(--dust)}
 .brand .title-row{display:flex;align-items:center;gap:14px}
 .brand .title-row .btn{padding:6px 8px;font-size:10px}
+.pages{display:flex;gap:6px}.pages a{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--sand);text-decoration:none;padding:6px 8px;border:1px solid var(--edge-hi);background:rgba(20,13,8,.5)}.pages a:hover{color:var(--bone);border-color:var(--sand)}.pages a[aria-current]{color:var(--night);background:var(--sand);border-color:var(--sand)}
 .brand .title-row select.btn{cursor:pointer;max-width:220px}
 .brand .title-row select.btn option{background:#140d08;color:var(--sand)}
 .badge{padding:5px 8px;border:1px solid var(--edge-hi);letter-spacing:.08em;text-transform:uppercase;font-size:10px}
@@ -175,7 +176,7 @@ a{color:var(--amber)}
  <radialGradient id="g-glow"><stop offset="0" stop-color="var(--amber)" stop-opacity=".55"/><stop offset="1" stop-color="var(--amber)" stop-opacity="0"/></radialGradient>
 </defs><g id="world"><g id="ground"></g><g id="things"></g><g id="air"></g></g></svg></div>
 
-<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
+<div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><nav id="pages" class="pages" aria-label="Pages" hidden><a href="/" aria-current="page">Board</a><a href="/kanban">Kanban</a></nav><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select><button id="refresh" class="btn" type="button" title="Ask GitHub and the rest again now (the board refreshes by itself every 5 seconds)" hidden>↻ Refresh</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
 
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
@@ -1065,7 +1066,7 @@ function setData(d, live) {
   $("#src").textContent = live ? "Live" : "Sample data"; $("#src").className = "badge " + (live ? "live" : "sample");
   $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : (DATA.sample || {}).note || "Sample data";
   $("#clock").textContent = live ? "updated " + (DATA.time || "") : "snapshot " + ((DATA.sample || {}).taken || "");
-  $("#demo").hidden = live;
+  $("#demo").hidden = live; $("#pages").hidden = !live; $("#refresh").hidden = !live;      // the page switch needs the server: the artifact build has none
   projects(DATA.projects);
 }
 function demoStep() {
@@ -1080,7 +1081,7 @@ function demoStep() {
 function demo(on) { clearInterval(demoTimer); demoTimer = on && !RM ? setInterval(demoStep, 7000) : null; $("#demo").textContent = "Demo traffic: " + (demoTimer ? "on" : "off"); $("#demo").classList.toggle("on", !!demoTimer); }
 // One page, one address: the project shown is the selector's (kept in this browser), asked of the server as ?project=owner/name
 let PROJECT = ""; try { PROJECT = localStorage.getItem("saani-project") || ""; } catch (_) {}
-const stateUrl = () => "/api/state" + (PROJECT ? "?project=" + encodeURIComponent(PROJECT) : "");
+const stateUrl = fresh => "/api/state" + (PROJECT || fresh ? "?" : "") + [PROJECT ? "project=" + encodeURIComponent(PROJECT) : "", fresh ? "fresh=1" : ""].filter(Boolean).join("&");
 function projects(list) {
   const sel = $("#proj"), repos = (list || []).map(p => p.repo);
   if (PROJECT && !repos.includes(PROJECT)) PROJECT = "";                    // a project taken out of the list: back to the first
@@ -1109,6 +1110,11 @@ $("#legend .x").addEventListener("click", () => { $("#legend").open = false; });
 $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip"); if (!b) return; FILTER.chip = FILTER.chip === b.dataset.chip ? "" : b.dataset.chip; render(); });
 $("#demo").addEventListener("click", () => demo(!demoTimer));
 $("#proj").addEventListener("change", e => switchProject(e.target.value));
+$("#refresh").addEventListener("click", async e => {
+  const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…";
+  try { const r = await fetch(stateUrl(true), {cache: "no-store"}); if (r.ok) setData(await r.json(), true); } catch (_) {}
+  b.disabled = false; b.textContent = "↻ Refresh";
+});
 drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 </script>
 
