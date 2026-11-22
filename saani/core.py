@@ -1,19 +1,21 @@
 """Saani's worktrees and landing (docs/SAANI.md): one worktree per task, landing on the integration branch one at a time. Standard library
 only; pure functions first (tests/test_core.py). The settings come from the project's saani.toml (saani/config.py).
 
-  saani new <issue> [--slug words] [--no-assign]   a worktree <wt>/<n>-<slug> on a branch <type>/<n>-<slug> from origin/<integration>
+  saani start <issue> [--slug words] [--no-assign] a worktree <wt>/<n>-<slug> on a branch <type>/<n>-<slug> from origin/<integration>
                                                     (type from the issue's GitHub Type; an issue with no Type is refused); build/ made,
                                                     the last timing report copied in, the issue assigned to the owner (the "in progress"
                                                     sign)
-  saani new <issue> --hotfix                        an urgent fix: the branch <type>/<n>-hotfix-<slug> from the prod tag (what is live),
+  saani start <issue> --hotfix                     an urgent fix: the branch <type>/<n>-hotfix-<slug> from the prod tag (what is live),
                                                     any Type (none: the hotfix default); it warns when production holds merged work that is
                                                     not live yet, it never refuses for that
   saani land [--keep] [--wait MIN] [--dry-run]      from inside a worker's worktree: take the landing lock, merge origin/<integration>,
          [--worktree PATH]                          rebuild the generated files, tier 1, fast-forward into the integration branch, release
                                                     the lock, remove the worktree; a hotfix never lands on the integration branch: tier 1
                                                     against production, the branch pushed and its pull request into production opened
+  saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
+                                                    branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
-  saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished long runs
+  saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
   saani test [--kind tier1|land|full] -- <cmd...>   run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
@@ -173,13 +175,13 @@ def known_worktree(folder, known):
 
 
 def prunable(merged, in_worktrees):
-    """The merged branches that may go: never the integration or production branch, never a long run's branch, never one checked out in
+    """The merged branches that may go: never the integration or production branch, never an auto run's branch, never one checked out in
     a worktree (work may be going on there). Sorted, each once. Pure."""
     keep = KEPT_BRANCHES | {cfg().integration, cfg().production}
     out = set()
     for b in merged:
         name = b.strip().removeprefix("* ").removeprefix("+ ").removeprefix("origin/")
-        if name and name not in keep and not name.startswith("longrun/") and name not in in_worktrees and "->" not in name:
+        if name and name not in keep and not name.startswith(RUN_BRANCHES) and name not in in_worktrees and "->" not in name:
             out.add(name)
     return sorted(out)
 
@@ -283,7 +285,7 @@ def latest_timing_report(cwd=None):
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 
 
-# ---------------------------------------------------------------- saani new
+# ---------------------------------------------------------------- saani start
 
 def issue_info(number):
     r = subprocess.run(["gh", "api", f"repos/{cfg().repo}/issues/{number}", "--jq",
@@ -306,26 +308,26 @@ def hotfix_base():
     return c.prod_tag, unreleased_warning(ahead)
 
 
-def cmd_longrun(args):
-    """A throwaway worktree for a long run: folder `longrun-<YYYY-MM-DD_HHMM>`, branch `longrun/<YYYY-MM-DD_HHMM>` from the integration
-    branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani new`."""
+def cmd_auto(args):
+    """A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>`, branch `auto/<YYYY-MM-DD_HHMM>` from the integration
+    branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     c = cfg()
     stamp = args.id or time.strftime("%Y-%m-%d_%H%M")
     if not re.fullmatch(r"[0-9A-Za-z_-]+", stamp):
         raise SystemExit(f"run id '{stamp}': letters, digits, - and _ only")
-    folder, name = c.wt_dir / f"longrun-{stamp}", f"longrun/{stamp}"
+    folder, name = c.wt_dir / f"auto-{stamp}", f"auto/{stamp}"
     if folder.exists():
         raise SystemExit(f"{folder} already exists: this run id is taken")
     git("fetch", "-q", "origin", c.integration)
     folder.parent.mkdir(parents=True, exist_ok=True)
     git("worktree", "add", "--no-track", "-b", name, str(folder), f"origin/{c.integration}")
     (folder / "build").mkdir(exist_ok=True)
-    print(f"long run:  {stamp}")
+    print(f"auto run:  {stamp}")
     print(f"worktree:  {folder}")
     print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` and `saani ci merged` remove it once it is finished)")
 
 
-def cmd_new(args):
+def cmd_start(args):
     c = cfg()
     info = issue_info(args.issue)
     git("fetch", "-q", "origin", c.integration)
@@ -488,7 +490,7 @@ def land_hotfix(args, cwd, branch, number):
 def cmd_land(args):
     c = cfg()
     if args.worktree:
-        # A long run cannot change folder: it names the worktree instead, from the main checkout.
+        # An auto run cannot change folder: it names the worktree instead, from the main checkout.
         top = git("rev-parse", "--show-toplevel", cwd=pathlib.Path(args.worktree), check=False)
         cwd = known_worktree(top.stdout.strip(), [p for p, _ in worktrees()]) if top.returncode == 0 else None
         if cwd is None:
@@ -498,7 +500,7 @@ def cmd_land(args):
     branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
     m = c.worker_branch.match(branch)
     if not m:
-        raise SystemExit(f"'{branch}' is not a worker's branch (<type>/<n>-<slug>): land runs inside a worktree made by saani new")
+        raise SystemExit(f"'{branch}' is not a worker's branch (<type>/<n>-<slug>): land runs inside a worktree made by saani start")
     if git("status", "--porcelain", "--untracked-files=no", cwd=cwd):
         raise SystemExit("the worktree has uncommitted changes: commit them (with the trailers) or put them aside first")
     hotfix = is_hotfix(branch)
@@ -617,12 +619,13 @@ def prune_candidates(cwd=None):
     return prunable(local, held), prunable([r for r in remote if r.startswith("origin/")], held)
 
 
-LONGRUN_MAX_HOURS = 12        # the long run's own stop rule is 10 hours: past 12 a run is over
+RUN_BRANCHES = ("auto/", "longrun/")      # "longrun/" is the old name of "auto/": runs made before the rename are still recognised and removed
+AUTO_MAX_HOURS = 12        # the auto run's own stop rule is 10 hours: past 12 a run is over
 
 
-def longrun_started(branch, folder=None):
-    """When a long run began: from its id (`longrun/YYYY-MM-DD_HHMM`), else from its folder's creation time; None when neither is known."""
-    m = re.fullmatch(r"longrun/(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})", branch)
+def auto_started(branch, folder=None):
+    """When an auto run began: from its id (`auto/YYYY-MM-DD_HHMM`), else from its folder's creation time; None when neither is known."""
+    m = re.fullmatch(r"(?:auto|longrun)/(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})", branch)
     if m:
         return datetime.datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}")
     if folder and pathlib.Path(folder).exists():
@@ -630,20 +633,20 @@ def longrun_started(branch, folder=None):
     return None
 
 
-def finished_longruns(before=None, cwd=None):
-    """[(worktree path or None, branch)] of the long runs that are over: the branch is merged into production or the integration branch, the
-    worktree (if any) has nothing uncommitted, and the run started before `before` (default: LONGRUN_MAX_HOURS ago). A long run's own
+def finished_auto_runs(before=None, cwd=None):
+    """[(worktree path or None, branch)] of the auto runs that are over: the branch is merged into production or the integration branch, the
+    worktree (if any) has nothing uncommitted, and the run started before `before` (default: AUTO_MAX_HOURS ago). An auto run's own
     folder holds no commits (each issue has its own worktree), so only its age tells a finished run from one still working."""
     c = cfg()
     merged = set()
     for base in (f"origin/{c.production}", f"origin/{c.integration}"):
         merged |= set(git("branch", "--format=%(refname:short)", "--merged", base, cwd=cwd).splitlines())
-    cutoff = before or datetime.datetime.now() - datetime.timedelta(hours=LONGRUN_MAX_HOURS)
+    cutoff = before or datetime.datetime.now() - datetime.timedelta(hours=AUTO_MAX_HOURS)
     held = {b: p for p, b in worktrees(cwd) if b}
     out = []
-    for branch in sorted(b for b in merged if b.startswith("longrun/")):
+    for branch in sorted(b for b in merged if b.startswith(RUN_BRANCHES)):
         path = held.get(branch)
-        started = longrun_started(branch, path)
+        started = auto_started(branch, path)
         if started is None or started >= cutoff:
             continue
         if path and git("status", "--porcelain", cwd=path):
@@ -652,12 +655,12 @@ def finished_longruns(before=None, cwd=None):
     return out
 
 
-def remove_longruns(found, dry=False, cwd=None):
-    """Removes those long runs: the worktree first (git refuses a dirty one: then the branch stays too), then the branch. Returns the
+def remove_auto_runs(found, dry=False, cwd=None):
+    """Removes those auto runs: the worktree first (git refuses a dirty one: then the branch stays too), then the branch. Returns the
     number removed."""
     done = 0
     for path, branch in found:
-        print(("would remove" if dry else "removing") + f" the long run {branch}" + (f" and its folder {path}" if path else ""))
+        print(("would remove" if dry else "removing") + f" the auto run {branch}" + (f" and its folder {path}" if path else ""))
         if dry:
             continue
         if path and git("worktree", "remove", str(path), cwd=cwd, check=False).returncode != 0:
@@ -670,9 +673,9 @@ def remove_longruns(found, dry=False, cwd=None):
 
 def cmd_prune(args):
     local, remote = prune_candidates()
-    runs = finished_longruns()
+    runs = finished_auto_runs()
     if runs:
-        remove_longruns(runs, args.dry_run)
+        remove_auto_runs(runs, args.dry_run)
     if not local and (args.local_only or not remote):
         if not runs:
             print("nothing to prune: every merged branch is already gone")
@@ -707,9 +710,9 @@ def cmd_status(args):
           f"stopped: {s['stopped']}")
     try:
         local, remote = prune_candidates()
-        runs = finished_longruns()
+        runs = finished_auto_runs()
         if local or remote or runs:
-            print(f"merged branches waiting: {len(local)} local, {len(remote)} on GitHub, {len(runs)} finished long run(s) (saani prune)")
+            print(f"merged branches waiting: {len(local)} local, {len(remote)} on GitHub, {len(runs)} finished auto run(s) (saani prune)")
     except SystemExit:                                   # offline: status still prints the rest
         print("merged branches: unknown (git fetch failed)")
     folder = lock_path().parent / queue.QUEUE_DIR
@@ -757,20 +760,20 @@ def cmd_check_msg(args):
 
 def add_parsers(sub):
     """The subcommands of this module, for saani.py."""
-    p = sub.add_parser("new", help="a worktree and branch for an issue")
+    p = sub.add_parser("start", help="a worktree and branch for an issue")
     p.add_argument("issue", type=int)
     p.add_argument("--slug", help="words for the branch name instead of the issue's title")
     p.add_argument("--no-assign", action="store_true", help="do not assign the issue to the owner")
     p.add_argument("--hotfix", action="store_true", help="an urgent fix: from the prod tag, landed as a pull request into production")
-    p.set_defaults(run=cmd_new)
-    p = sub.add_parser("longrun", help="a throwaway worktree (longrun-<timestamp>) for a long run to work in")
+    p.set_defaults(run=cmd_start)
+    p = sub.add_parser("auto", help="a throwaway worktree (auto-<timestamp>) for an auto run to work in")
     p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM)")
-    p.set_defaults(run=cmd_longrun)
+    p.set_defaults(run=cmd_auto)
     p = sub.add_parser("land", help="land the current worktree's branch into the integration branch")
     p.add_argument("--keep", action="store_true", help="keep the worktree and its branch after landing")
     p.add_argument("--wait", type=float, default=60, help="minutes to wait for the landing lock")
     p.add_argument("--dry-run", action="store_true", help="check and print the plan, change nothing")
-    p.add_argument("--worktree", help="land this worktree instead of the current folder's (a long run cannot change folder)")
+    p.add_argument("--worktree", help="land this worktree instead of the current folder's (an auto run cannot change folder)")
     p.add_argument("--no-comment", action="store_true", help="do not comment the landing on the issue or label it in-dev (print the step instead)")
     p.set_defaults(run=cmd_land)
     p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue")

@@ -1,6 +1,6 @@
 ---
 name: coder
-description: Writes the change for ONE GitHub issue in its own worktree (made by `saani new <n>`), commits it with the project's trailers, and hands back the commit. Use for a coding task the Architect has already scoped. Never lands, pushes or comments.
+description: Writes the change for ONE GitHub issue in its own worktree (made by `saani start <n>`), commits it with the project's trailers, and hands back the commit. Use for a coding task the Architect has already scoped. Never lands, pushes or comments.
 tools: Read, Edit, Write, Glob, Grep, Bash
 model: sonnet
 ---

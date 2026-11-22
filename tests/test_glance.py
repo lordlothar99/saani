@@ -1,23 +1,23 @@
-"""saani/glance.py: the At a glance table of an issue, read the same way for the map and the long run."""
+"""saani/glance.py: the At a glance table of an issue, read the same way for the map and the auto run."""
 from saani import glance
 
 BODY = """## At a glance
 | Field | Value |
 |---|---|
-| Long run | 🟡 Partly: the data model yes; the layout follows the owner's review |
+| Auto | 🟡 Partly: the data model yes; the layout follows the owner's review |
 | Deploy | None (Saani itself is a tool on the owner's PC) |
 | Needs the owner | Act: choose the notification channel |
 | Blocked by | #13, #17 |
 | Parent | #6 |
 
 ## Context
-| Long run | ✅ Yes |
+| Auto | ✅ Yes |
 """
 
 
 def test_the_table_is_read_row_by_row():
     p = glance.parse(BODY)
-    assert p["long_run"] == {"fit": "partly", "why": "the data model yes; the layout follows the owner's review"}
+    assert p["auto"] == {"fit": "partly", "why": "the data model yes; the layout follows the owner's review"}
     assert p["deploy"] is None
     assert p["needs_owner"] == {"kind": "act", "what": "choose the notification channel"}
     assert p["blocked_by"] == {"issues": [13, 17], "date": None, "text": "#13, #17"}
@@ -26,8 +26,9 @@ def test_the_table_is_read_row_by_row():
 
 def test_each_answer_of_each_row_has_its_meaning():
     row = lambda name, value: glance.parse(f"## At a glance\n| Field | Value |\n|---|---|\n| {name} | {value} |\n")
-    assert row("Long run", "✅ Yes")["long_run"]["fit"] == "yes"
-    assert row("Long run", "⛔ No: changes the guard")["long_run"] == {"fit": "no", "why": "changes the guard"}
+    assert row("Auto", "✅ Yes")["auto"]["fit"] == "yes"
+    assert row("Auto", "⛔ No: changes the guard")["auto"] == {"fit": "no", "why": "changes the guard"}
+    assert row("Long run", "🟡 Partly: the old row name")["auto"] == {"fit": "partly", "why": "the old row name"}      # issues written before the rename
     assert row("Deploy", "restart the server")["deploy"] == "restart the server"
     assert row("Needs the owner", "No (decided)")["needs_owner"] == {"kind": "none", "what": ""}
     assert row("Needs the owner", "Answer: which channel?")["needs_owner"] == {"kind": "answer", "what": "which channel?"}

@@ -126,7 +126,7 @@ def test_an_agent_goes_on_the_card_its_branch_folder_or_last_worktree_names():
     assert fp.agent_issue({"branch": "feat/411-powers"}, trees) == 411
     assert fp.agent_issue({"branch": "dev", "folder": "c:/x/webshop-wt/523-page/"}, trees) == 523
     assert fp.agent_issue({"branch": "main", "folder": "c:/x/webshop", "focus": 517}, trees) == 517
-    assert fp.agent_issue({"branch": "longrun/2026-11-21_2300", "folder": "c:/x/webshop-longrun"}, trees) is None
+    assert fp.agent_issue({"branch": "auto/2026-11-21_2300", "folder": "c:/x/webshop-auto"}, trees) is None
 
 
 def test_a_session_keeps_only_the_issue_numbers_of_the_worktrees_its_commands_name():
@@ -529,17 +529,17 @@ def test_both_pages_keep_the_project_in_their_address_and_show_the_waiting_dot()
         assert 'localStorage.setItem("saani-project"' in source and "status===404" in flat
 
 
-GLANCE = {"long_run": {"fit": "partly", "why": "the data model yes"}, "blocked_by": {"issues": [13], "date": None, "text": "#13"}}
+GLANCE = {"auto": {"fit": "partly", "why": "the data model yes"}, "blocked_by": {"issues": [13], "date": None, "text": "#13"}}
 
 
 def test_a_card_carries_what_its_at_a_glance_table_says():
-    """the long-run fit read from the table (source: table), blocked while a named issue is open and not yet on dev, an epic is an anchor."""
+    """the auto fit read from the table (source: table), blocked while a named issue is open and not yet on dev, an epic is an anchor."""
     issue = {"number": 14, "title": "Board data", "labels": [], "state": "OPEN", "glance": GLANCE}
     assert fp.lifecycle(issue, {13, 14}) == {"blocked": True, "anchor": False, "blocked_by": [13],
-                                            "longrun": {"fit": "partly", "why": "the data model yes", "source": "table"}}
+                                            "auto": {"fit": "partly", "why": "the data model yes", "source": "table"}}
     assert fp.lifecycle(issue, {14})["blocked"] is False
     assert fp.lifecycle({"title": "Saani v1 (epic)"}, set())["anchor"] and fp.lifecycle({"title": "Live checks v0.1"}, set())["anchor"]
-    assert "longrun" not in fp.lifecycle({"title": "x"}, set())
+    assert "auto" not in fp.lifecycle({"title": "x"}, set())
     blocker = {"number": 13, "title": "b", "labels": ["in-dev"], "state": "OPEN"}                 # landed on dev: it blocks no more
     board = {c["id"]: c for c in fp.build_board([blocker, issue], [], set(), [], [])}
     assert [(c["number"], c["blocked"]) for c in board["dev"]["cards"] + board["ready"]["cards"]] == [(13, False), (14, False)]
@@ -607,3 +607,27 @@ def test_landing_comments_the_issue_and_labels_it_and_says_so_when_gh_refuses(mo
         raise FileNotFoundError("gh")
     monkeypatch.setattr(core.subprocess, "run", missing)
     assert core.mark_on_dev("14", text) is False
+
+
+def test_a_card_carries_the_issue_type_github_holds(monkeypatch):
+    """`gh issue list --json` has no Type field, so every card showed "No type" although GitHub had one (#38): the Type is read from the REST
+    API, for the open issues (all pages) and the recently closed ones; an issue without a Type, or a refused call, has none."""
+    calls = []
+
+    def fake_run(*args, **kw):
+        calls.append(args)
+        if args[1] == "issue":
+            return json.dumps([{"number": 1, "title": "a", "labels": [], "state": "OPEN"}, {"number": 2, "title": "b", "labels": [], "state": "OPEN"}])
+        return "1\tBug\n3\tTask\n"                          # 2 has no Type; 3 is not in the list
+    monkeypatch.setattr(fp, "run", fake_run)
+    monkeypatch.setattr(fp, "cfg", lambda: type("Cfg", (), {"repo": "acme/webshop"})())
+    rows = fp.gh_issues("--state", "open", "--limit", "300")
+    assert [(r["number"], r["type"]) for r in rows] == [(1, "Bug"), (2, None)]
+    api = next(c for c in calls if c[1] == "api")
+    assert "--paginate" in api and "repos/acme/webshop/issues?state=open&per_page=100" in api
+    fp.gh_issues("--state", "closed", "--search", "closed:>=2026-11-15", "--limit", "40")
+    api = [c for c in calls if c[1] == "api"][-1]
+    url = next(a for a in api if a.startswith("repos/"))
+    assert "--paginate" not in api and "state=closed" in url and "since=2026-11-15T00:00:00Z" in url
+    monkeypatch.setattr(fp, "run", lambda *a, **k: json.dumps([{"number": 1, "title": "a", "labels": [], "state": "OPEN"}]) if a[1] == "issue" else "")
+    assert fp.gh_issues("--state", "open")[0]["type"] is None            # gh refused: no Type, the page falls back on the branch and the labels

@@ -1,5 +1,5 @@
 #!/bin/sh
 # Saani: a commit on a worker's branch (<type>/<n>-...) or on the integration branch needs the trailers Why: and Undo:.
-# Switched on per worktree by `saani new` (git config --worktree core.hooksPath .githooks). In another project, point to your clone:
+# Switched on per worktree by `saani start` (git config --worktree core.hooksPath .githooks). In another project, point to your clone:
 #   exec python -I "$SAANI_HOME/saani.py" check-msg "$1"
 exec python -I saani.py check-msg "$1"

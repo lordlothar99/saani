@@ -1,13 +1,13 @@
 # The Saani plugin for Claude Code
 
-What a Claude Code session needs to work the Saani way in any project: a slash command for each `saani` command and the long-run skill now;
+What a Claude Code session needs to work the Saani way in any project: a slash command for each `saani` command and the auto skill now;
 the worker agents now, hooks later.
 
 | Part | State |
 |---|---|
-| `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:new`, `/saani:land`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `new`, `land` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
+| `skills/<command>/SKILL.md` | `/saani:ui`, `/saani:projects`, `/saani:status`, `/saani:start`, `/saani:land`, `/saani:test`, `/saani:prune`, `/saani:ci`, `/saani:kpis`, `/saani:progress`: each runs that `saani` command and explains the result. `start`, `land` and `prune` change the repo, so they run only when the owner types them (`disable-model-invocation`), and `prune` shows a dry run and asks first. Each skill ends with the same "Running saani" section; a test keeps one skill per command and those sections identical |
 | `bin/saani`, `bin/saani.cmd` | the `saani` command inside Claude Code: `bin/` is on the PATH of Claude's shell while the plugin is enabled, and the launchers run `saani.py` from the plugin's own copy (bash: the first Python 3.11+; Windows: `python`). `.gitattributes` keeps `bin/saani` in LF, or bash fails on Windows checkouts |
-| `skills/longrun/SKILL.md` | `/saani:longrun`, `/saani:longrun 12 15`, `/saani:longrun off`: the checklist of a long run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani longrun`) |
+| `skills/auto/SKILL.md` | `/saani:auto`, `/saani:auto 12 15`, `/saani:auto off`: the checklist of an auto run (the Architect works alone for hours on the open issues, in a throwaway worktree made by `saani auto`) |
 | Claude Code hooks | none yet (they will live in `hooks/hooks.json`). The **git** commit-msg hook is not part of the plugin: it is [.githooks/commit-msg](../.githooks/commit-msg), and needs `SAANI_HOME` because git runs it outside Claude Code |
 | `agents/<role>.md` | the worker agents, used as `saani:<role>` (Claude Code prefixes every plugin agent with the plugin's name, so a project's own `reviewer` stays distinct): `coder`, `tester`, `reviewer`, `scribe`, `researcher`. Each file names its tools and its model. Agents come only through the plugin, never copied into a project's `.claude/agents/` (a copy would lose the prefix); `agents/` holds only agent files, because every `.md` there is loaded as an agent. `sentinel` and `deployer` wait for their issues |
 
@@ -30,7 +30,7 @@ The Architect (the main session, strongest model) runs it; the Coder, Tester, Re
 
 | Step | Who | What |
 |---|---|---|
-| 1 | Architect | `saani new <n>`; reads the issue; decides alone or delegated (below) |
+| 1 | Architect | `saani start <n>`; reads the issue; decides alone or delegated (below) |
 | 2 | `saani:coder` | the change in that worktree, tier 0, tier 1 through the queue, one commit with `refs #n` and the trailers |
 | 3 | `saani:reviewer` | the diff and the issue only, never the coder's reasoning; a list of findings |
 | 4 | `saani:coder` | fixes the findings that are real (the Architect decides which); a new commit |

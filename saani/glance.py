@@ -1,8 +1,9 @@
 """The "At a glance" table of an issue (the issue templates in .github/ISSUE_TEMPLATE, docs/SAANI.md): one pure parser, shared by the map
-and the long run. No network, no settings: it reads the Markdown of an issue body and says what the table says, or nothing."""
+and the auto run. No network, no settings: it reads the Markdown of an issue body and says what the table says, or nothing."""
 import re
 
-ROWS = {"long run": "long_run", "deploy": "deploy", "needs the owner": "needs_owner", "blocked by": "blocked_by", "parent": "parent"}
+ROWS = {"auto": "auto", "long run": "auto",       # "Long run" is the old name of the row: issues written before the rename still read
+        "deploy": "deploy", "needs the owner": "needs_owner", "blocked by": "blocked_by", "parent": "parent"}
 FITS = (("✅", "yes"), ("🟡", "partly"), ("⛔", "no"))
 NONE = {"", "-", "—", "–", "none", "no", "n/a"}
 
@@ -29,15 +30,15 @@ def issue_numbers(text):
 
 def parse(body):
     """What the table of an issue body says. Keys that are not in the table are absent:
-    long_run {fit: yes|partly|no, why}, deploy (text or None), needs_owner {kind: answer|act|none, what}, blocked_by {issues, date, text},
+    auto {fit: yes|partly|no, why}, deploy (text or None), needs_owner {kind: answer|act|none, what}, blocked_by {issues, date, text},
     parent (issue number or None)."""
     rows = {ROWS[k]: v for k, v in table(body).items() if k in ROWS}
     out = {}
-    if "long_run" in rows:
-        v = rows["long_run"]
+    if "auto" in rows:
+        v = rows["auto"]
         fit = next((name for mark, name in FITS if mark in v), None) or next(
             (name for word, name in (("yes", "yes"), ("partly", "partly"), ("no", "no")) if v.lower().startswith(word)), None)
-        out["long_run"] = {"fit": fit, "why": v.split(":", 1)[1].strip() if ":" in v else re.sub(r"^[✅🟡⛔]\s*(yes|partly|no)?\s*", "", v, flags=re.I).strip(" ():")}
+        out["auto"] = {"fit": fit, "why": v.split(":", 1)[1].strip() if ":" in v else re.sub(r"^[✅🟡⛔]\s*(yes|partly|no)?\s*", "", v, flags=re.I).strip(" ():")}
     if "deploy" in rows:
         out["deploy"] = None if rows["deploy"].lower().startswith("none") or rows["deploy"].lower() in NONE else rows["deploy"]
     if "needs_owner" in rows:

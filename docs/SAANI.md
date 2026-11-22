@@ -69,12 +69,12 @@ flowchart TB
 
 | Command | What it does |
 |---|---|
-| `saani new <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment. Warns when the issue has no milestone. |
-| `saani new <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: tier 1 against production, the branch pushed, the pull request into production opened. |
-| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (a long run cannot change folder). |
-| `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished long runs waiting for `prune`, the test queue. |
-| `saani longrun [--id ID]` | A throwaway worktree for a long run: folder `longrun-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `longrun/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
-| `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. A `longrun/*` branch goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
+| `saani start <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment. Warns when the issue has no milestone. |
+| `saani start <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: tier 1 against production, the branch pushed, the pull request into production opened. |
+| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, tier 1, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
+| `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. |
+| `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
+| `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | Runs a test command through the test queue. |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
@@ -128,7 +128,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 - A project whose `[ci] workflow` file is not on GitHub's default branch yet has nothing to run there: `saani ci pr` runs the CI on the PC and says so in the status. `saani ci pr --pc` forces the PC whatever the budget says.
 - On the PC, `saani ci pr` tests the pull request's head in a temporary worktree (`[tests] check`, then `[tests] full` through the test
   queue), removed after. Either way the result is the commit status `[ci] status_context` on the pull request's head.
-- After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran; if not, it runs `[ci] relabel` here, or, with no such command, swaps `in-dev` for `in-main` itself with `gh` on the issues the pull request names (`#n` in its title, body and commits; a pull request that is not merged is refused). It then removes the long runs that began before the merge and are finished, so nothing is left for the owner.
+- After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran; if not, it runs `[ci] relabel` here, or, with no such command, swaps `in-dev` for `in-main` itself with `gh` on the issues the pull request names (`#n` in its title, body and commits; a pull request that is not merged is refused). It then removes the auto runs that began before the merge and are finished, so nothing is left for the owner.
 - Every decision goes to `build/saani-ci.json`.
 
 ## The map and the kanban page
@@ -139,28 +139,28 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
   PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
   (bottom left) to END (top right), with branches (to deploy or to close) and the ways back (tests failed, CI red, needs you, hotfix, not
-  planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether a long run can take
-  it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, long-run fit, the
+  planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether an auto run can take
+  it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, auto fit, the
   prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
 - Both pages have a top bar with the page switch (Map · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
 - The map is one HTML file (`saani/map.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
   `mock-state.json` beside it. Its data: [map-data-contract.md](map-data-contract.md).
 
 ## Two modes
-| | Present | Away (long run) |
+| | Present | Away (auto run) |
 |---|---|---|
 | The owner | at the keyboard | asleep or out |
 | Questions | allowed, one at a time, with a recommendation | none: a refused call is skipped and noted for the report |
 | Tests | tier 0 and tier 1; tier 2 before the pull request | tier 1 per landing, tier 2 at the end |
 | Deploy | the owner runs it (planned: the Deployer asks, the owner taps) | only if the owner started the run so |
 
-The long-run checklist is the plugin's skill (`skills/longrun/SKILL.md`).
+The auto checklist is the plugin's skill (`skills/auto/SKILL.md`).
 
 Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
-(Long run, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
+(Auto, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
 A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
-`🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the long-run fit, what is deployed, what the owner is
-asked, what blocks the issue); the map and the long run read it through that one parser.
+`🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the auto fit, what is deployed, what the owner is
+asked, what blocks the issue); the map and the auto run read it through that one parser.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),

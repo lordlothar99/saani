@@ -1,6 +1,6 @@
 """The saani command: `python -I saani.py <command> ...` from inside a project's git checkout (README.md, docs/SAANI.md).
 
-  new, land, status, prune, test, check-msg     worktrees, landings, the test queue, the commit-msg hook (saani/core.py)
+  start, auto, land, status, prune, test, check-msg     worktrees, landings, the test queue, the commit-msg hook (saani/core.py)
   ci                                            hybrid CI: GitHub Actions within the free minutes, the PC for the rest (saani/ci.py)
   kpis                                          the numbers over a window of days (saani/kpis.py)
   ui (aliases: map, board)                      the local status page and the isometric map (saani/board_server.py)
