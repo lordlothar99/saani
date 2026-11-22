@@ -365,3 +365,13 @@ def test_the_sample_shows_every_zone_and_keeps_out_private_text():
     raw = json.dumps(mock)
     assert "C:\\Users" not in raw and "/Users/" not in raw and "@" not in raw.replace("@pytest", "")
     assert all(set(s) <= {"session", "name", "branch", "model", "state", "age_min", "issue"} for s in mock["crew"])
+
+
+def test_the_status_page_hides_the_configured_labels_not_hardcoded_names(monkeypatch):
+    """With act = "creator-action" the card shows the badge and no chip: the filter reads state.project.labels, which project_info sends."""
+    html = fp.page()
+    assert "/^in-|^help wanted$|^owner-action$/" not in html
+    assert "LABELS=(s.project&&s.project.labels)||{}" in html and "LABELS.act||\"owner-action\"" in html and "lifecycleLabel(l)" in html
+    from saani import config
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", labels={**config.Config().labels, "act": "creator-action"}))
+    assert fp.project_info()["labels"]["act"] == "creator-action"

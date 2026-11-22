@@ -186,12 +186,14 @@ async function copy(text,btn,label="Copy prompt"){try{await navigator.clipboard.
 function agentLine(a){const running=a.subagents.filter(s=>s.state!=="done");
  return el("div",{class:"agent "+a.state},el("div",{class:"who"},el("span",{class:"dot"}),a.name+" · "+a.state+(a.model?" · "+model(a.model):"")),
   running.map(s=>el("div",{class:"sub"},"↳ "+s.type+": "+s.description)))}
+let LABELS={};   // the project's configured label names ([issues] labels), sent in state.project.labels
+function lifecycleLabel(l){const n=[LABELS.in_dev||"in-dev",LABELS.in_main||"in-main",LABELS.answer||"help wanted",LABELS.act||"owner-action"];return n.includes(l)}
 function card(c){const live=c.agents.some(a=>a.state==="working");const w=c.worktree;
  const btn=c.prompt?el("button",{class:"copy",type:"button",title:c.prompt},"Copy prompt"):null;if(btn)btn.onclick=()=>copy(c.prompt,btn);
  return el("div",{class:"card"+(live?" live":"")},
   el("div",{class:"num"},link(c.number),c.milestone?el("span",{class:"chip ms"},c.milestone):null),
   el("div",{class:"title"},c.title),
-  el("div",{class:"chips"},c.need?el("span",{class:"need "+c.need},c.need==="answer"?"your answer":"your action"):null,(c.labels||[]).filter(l=>!/^in-|^help wanted$|^owner-action$/.test(l)).map(l=>el("span",{class:"chip"},l))),
+  el("div",{class:"chips"},c.need?el("span",{class:"need "+c.need},c.need==="answer"?"your answer":"your action"):null,(c.labels||[]).filter(l=>!lifecycleLabel(l)).map(l=>el("span",{class:"chip"},l))),
   w?el("div",{class:"wt"},"folder ",el("b",{},w.folder),el("br"),`${w.ahead} commit${w.ahead===1?"":"s"} not on dev yet · ${w.dirty} file${w.dirty===1?"":"s"} being edited`):null,
   (c.runs||[]).map(r=>{const p=pct(r.line);return el("div",{},p!=null?el("div",{class:"bar"},el("i",{style:"width:"+p+"%"})):null,el("div",{class:"runline"},r.line))}),
   c.agents.map(agentLine),btn)}
@@ -270,7 +272,7 @@ function render(s){
  if(L.lock){lk.textContent="joining dev · "+L.lock.branch;lk.className="pill hot"}else{lk.textContent="no task joining dev";lk.className="pill"}
  const cols=s.board||[];const cnt=id=>(cols.find(c=>c.id===id)||{cards:[]}).cards.length;
  $("counts").textContent=`${cnt("you")} wait for you · ${cnt("building")+cnt("testing")} in work`;
- lastCols=cols;drawBoard();drawPC(s.resources);
+ LABELS=(s.project&&s.project.labels)||{};lastCols=cols;drawBoard();drawPC(s.resources);
  const crew=Array.isArray(s.crew)?s.crew:[];$("crew-n").textContent=`Claude Code chats in this project's folders · ${crew.length} · ${crew.filter(a=>a.state==="working").length} working now`;
  $("crew").replaceChildren(...(crew.length?crew.map(a=>{const running=a.subagents.filter(x=>x.state!=="done");
   return el("div",{class:"unit "+a.state},el("b",{},el("span",{class:"dot"}),a.name),el("span",{class:"state"},a.state),
