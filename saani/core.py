@@ -13,6 +13,7 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
                                                     the lock, remove the worktree; a hotfix never lands on the integration branch: tier 1
                                                     against production, the branch pushed and its pull request into production opened
   saani auto pick [--json] [--limit N] [--only N..]   the open issues an auto run may take now, in order (saani/auto.py)
+  saani auto on|off|status|report ...               an auto run's record, stop rules and report (saani/auto.py)
   saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
                                                     branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
@@ -313,6 +314,16 @@ def cmd_auto(args):
     """A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>`, branch `auto/<YYYY-MM-DD_HHMM>` from the integration
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     action = getattr(args, "action", None)
+    for name, only in (("folder", "on"), ("deploy", "on"), ("check", "status"), ("pr", "report"), ("post", "report"), ("run_id", "off")):
+        if getattr(args, name, None) and action != only:
+            raise SystemExit(f"saani auto: --{name.removesuffix('_id')} belongs to `saani auto {only}`")
+    if action in ("on", "off", "status", "report"):
+        if action != "on" and getattr(args, "id", None):
+            raise SystemExit(f"saani auto {action}: --id belongs to `saani auto` and `saani auto on`" + ("; `off` takes --run" if action == "off" else ""))
+        if getattr(args, "json", False) or getattr(args, "limit", None) is not None or getattr(args, "only", None):
+            raise SystemExit("saani auto: --json, --limit and --only belong to `saani auto pick`")
+        from . import auto
+        return auto.cmd_run(args)
     if action != "pick" and (getattr(args, "json", False) or getattr(args, "limit", None) is not None or getattr(args, "only", None)):
         raise SystemExit("saani auto: --json, --limit and --only belong to `saani auto pick`")
     if action == "pick" and args.id:
@@ -590,6 +601,8 @@ def cmd_land(args):
             print(f"removed: {cwd} and the local branch {branch}")
         else:
             print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
+    from . import auto
+    auto.journal(m.group(2), "landed")
     if args.no_comment or not mark_on_dev(m.group(2), row):
         print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
     return 0
@@ -784,8 +797,15 @@ def add_parsers(sub):
     p.add_argument("--no-comment", action="store_true", help="do not post the Started comment on the issue")
     p.set_defaults(run=cmd_start)
     p = sub.add_parser("auto", help="a throwaway worktree (auto-<timestamp>) for an auto run to work in; `auto pick`: the issues to take now")
-    p.add_argument("action", nargs="?", choices=["pick"], help="pick: the eligible issues in the run's order, the free slots, why the others are left")
-    p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM)")
+    p.add_argument("action", nargs="?", choices=["pick", "on", "off", "status", "report"],
+                   help="pick: the eligible issues in the run's order, the free slots, why the others are left; on, off, status, report: the run (saani/auto.py)")
+    p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM); with `on`, the id of the run")
+    p.add_argument("--folder", help="on: the run's folder (default: the current one), inside the worktrees folder")
+    p.add_argument("--deploy", action="store_true", help="on: the owner started the run so that it may deploy")
+    p.add_argument("--run", dest="run_id", help="off: end this run (its guard entries and the record), from a terminal")
+    p.add_argument("--check", action="store_true", help="status: exit 3 when a stop rule is reached")
+    p.add_argument("--pr", type=int, help="report: the pull request the report is for (the merge commands name it)")
+    p.add_argument("--post", action="store_true", help="report: comment the report on the pull request (--pr)")
     p.add_argument("--json", action="store_true", help="pick: as JSON")
     p.add_argument("--limit", type=int, help="pick: at most this many eligible issues")
     p.add_argument("--only", type=int, nargs="+", metavar="N", help="pick: take only these issues (before the overlap check)")

@@ -126,6 +126,9 @@ def post(number, kind, fields=None, text="", io=None, labels=True, once=None, ne
     io.write("gh", "issue", "comment", str(number), "--repo", cfg().repo, "--body", render(kind, fields, text))
     if labels:
         apply_labels(number, kind, io)
+    if kind != "on-dev" and not getattr(io, "dry", False):      # a landing is journaled by `saani land` itself
+        from . import auto
+        auto.journal(number, kind)
     return True
 
 

@@ -35,6 +35,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |
 | `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(3, cores // 4, free RAM in GB // 4), each at least 1 (macOS: cores only); `n >= 1` = fixed; never more than 3 |
+| | `ci_attempts` | `3` | an auto run: the most `saani ci pr` rounds (read why it is red, fix, land, run it again) before the pull request is left open |
 | `[ci]` | `workflow` | `ci.yml` | the GitHub Actions workflow `saani ci pr` starts (it must accept `workflow_dispatch`) |
 | | `free_minutes` | `2000` | free Actions minutes a month for the whole account |
 | | `reserve_minutes` | `50` | kept for the end of the month |

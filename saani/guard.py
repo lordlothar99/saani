@@ -550,7 +550,7 @@ TEST_FLAGS = {"-q", "-qq", "-v", "-vv", "-x", "-s", "-l", "--lf", "--ff", "--sw"
               "--failed-first", "-ra", "-rA", "--color=no", "--color=yes"}
 TEST_VALUED = {"-k", "-m", "--tb", "--maxfail", "--durations"}
 SAANI_OK = {"start", "land", "status", "comment", "kpis", "progress", "ui", "map", "board"}
-AUTO_WORDS = {"on", "off", "status", "pick", "no-action"}
+AUTO_WORDS = {"on", "off", "status", "pick", "report", "no-action"}
 LOCALHOST = {"localhost", "127.0.0.1", "::1"}
 
 

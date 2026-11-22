@@ -54,6 +54,7 @@ port = 8771
 
 [auto]
 parallel = 0                      # issues an auto run keeps in flight: 0 = sized from the cores and free RAM, else n (at most 3)
+ci_attempts = 3                   # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
 
 [ci]
 workflow = "ci.yml"              # the GitHub Actions workflow `saani ci pr` starts (workflow_dispatch)

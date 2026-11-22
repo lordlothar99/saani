@@ -19,6 +19,11 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed.
+4. **Last thing before the run: switch it on.** Once the questions are answered, run `saani auto on --id <id> --folder <run folder>`
+   (`--deploy` only if the owner said, in their own words, that the run may deploy), alone: nothing chained to it, or the guard does not
+   register the session. It prints one line, `saani auto: on <id> folder=<path>`; from then on the guard decides every tool call (no more
+   questions), and `saani auto status` shows the run, its refusals and its limits. The guard refuses `saani auto on` and `saani auto off`
+   inside the run: the run never switches itself off.
 
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
@@ -41,6 +46,9 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
      move on. A partly blocked issue: the repo's part, comment the rest. Never change an issue's milestone.
    - **As soon as one issue lands, pick again.** `saani auto pick --json` is run again whenever a slot frees, never from a list made at the
      start, so an issue created, relabelled or answered during the run is seen. The loop ends when nothing is running and nothing is eligible.
+   - **After each landing: `saani auto status --check`.** Exit 0: go on. Exit 3: a stop rule is reached (40 refusals in total, 10 refusals
+     for the same reason in a row, or 10 hours; `saani auto status` says which): stop taking issues, let the running ones finish or leave
+     them, then go to End, step 5 (the report) with what you have.
    If the change alters what a document describes, the coder updates that document in the same commit (`refs #n`, the trailers).
 2. **Cost.** Keep your own context small: briefs and verdicts, not file dumps; the routine roles run on the cheaper models; read a
    result's summary, not its transcript. `saani kpis` at the end gives the cost per issue, role and model.
@@ -48,14 +56,16 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    never skipped.
 4. **End.** The full run (`[tests] full`); open the ONE integration -> production pull request (milestone set, `refs #n` for every
    in-dev issue); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
-   most 3 attempts, then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
-5. **Report** in the chat and as a comment on the pull request: start, end, duration, id, folder; the issues done; a table of what is
-   pending (issue | question with context | options with pros and cons); what was refused, and which issues waited for overlapping files (best effort: only the paths an issue names between backticks are compared, so an issue that names none never waits); the numbers (`saani kpis`). End with `/saani:merge` (or
-   `/saani:merge --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
+   most `[auto] ci_attempts` attempts (default 3), then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
+5. **Report, then off.** `saani auto report --pr <N> --post` writes `build/saani-auto-<id>.md` in the main checkout and comments it on the
+   pull request; it holds the start, end, duration, id and folder, the issues landed, the issues left with a question or blocked, the
+   refusals by reason, the cost, the timeline and the next step. Add to the chat what only you know: a table of what is pending (issue |
+   question with context | options with pros and cons), and which issues waited for overlapping files (best effort: only the paths an issue names between backticks are compared, so an issue that names none never waits). Then stop: the run is over, and the guard still confines this session. Tell the owner to end it from a terminal with `saani auto off --run <id>` (it also lapses after 12 hours). The report ends
+   with `/saani:merge <N>` (or `/saani:merge <N> --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 
 ## off
-Say what is left, write the report, stop.
+`/saani:auto off`: stop now. Say what is left and run `saani auto report` (with `--pr <N> --post` when there is a pull request). Then tell the owner to end the run from a terminal: `saani auto off --run <id>` (the guard refuses it inside the run).
 
 ## Running saani
 Run `saani` with the Bash tool: the plugin's `bin/` puts it on that shell's PATH. If it is not found, run

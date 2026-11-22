@@ -96,7 +96,7 @@ def test_the_security_review_cases(ctx, name, inp, expected):
 ALLOWED = [
     "saani status", "saani land --worktree {work}", "saani start 12", "saani test --kind tier1 -- python -m pytest -q",
     "saani test -- npm test", "saani comment 12 progress", "saani kpis", "saani progress show", "saani ui", "saani ci status",
-    "saani ci pr", "saani auto --id 2026-01-02_0300", "saani auto status", "saani auto pick", "saani auto no-action",
+    "saani ci pr", "saani auto --id 2026-01-02_0300", "saani auto status", "saani auto status --check", "saani auto report --pr 3 --post", "saani auto pick", "saani auto no-action",
     "python -I {plugin}/saani.py status", "{plugin}/bin/saani status",
     "cd {work}", "cd {run} && saani start 12", "cd {wt}/12-cart-total/src", "cd ../auto-2026-01-02_0300",
     "ls -la", "cat src/app.py", "head -n 5 README.md", "tail -20 build/log.txt", "grep -n total src/app.py", "grep -e x -e y a.txt",

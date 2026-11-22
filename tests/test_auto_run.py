@@ -1,0 +1,351 @@
+"""saani auto on|off|status|report: the run's record, the stop rules, the report and the journal. git and gh are faked; the guard's registry
+(~/.saani/auto) lives under a temporary HOME; the project is the invented acme/webshop."""
+import datetime
+import json
+import os
+import pathlib
+import subprocess
+
+import pytest
+
+from saani import auto, comments, config, core, guard
+
+START = datetime.datetime(2026, 11, 22, 8, 0, tzinfo=datetime.timezone.utc)
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    """A main checkout with a .git folder, a worktrees folder with the run's folder, an empty guard registry."""
+    home = tmp_path / "home"
+    home.mkdir()
+    for var in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(var, str(home))
+    root = tmp_path / "webshop"
+    (root / ".git").mkdir(parents=True)
+    wt = tmp_path / "webshop-wt"
+    run = wt / "auto-2026-11-22_0800"
+    run.mkdir(parents=True)
+    config.use(config.Config(repo="acme/webshop", owner="someone", root=root, tier1=["{python}", "-c", "pass"]))
+    monkeypatch.chdir(run)
+    return type("World", (), {"root": root, "wt": wt, "run": run, "home": home, "git": root / ".git"})
+
+
+def args(**kw):
+    base = {"id": None, "run_id": None, "folder": None, "deploy": False, "check": False, "pr": None, "post": False}
+    return type("A", (), {**base, **kw})()
+
+
+def log_refusals(reasons, run="r1"):
+    for reason in reasons:
+        guard.log_refusal({"id": run}, "Bash", reason, "git")
+
+
+def record(world, started=START, **kw):
+    rec = {"id": "r1", "started": auto.stamp(started), "folder": str(world.run), "deploy": False, "limits": dict(auto.LIMITS), **kw}
+    (world.git / auto.RECORD).write_text(json.dumps(rec), encoding="utf-8")
+    return rec
+
+
+# ---------------------------------------------------------------- on and off
+
+def test_on_writes_the_record_in_the_shared_git_folder(world, capsys):
+    assert auto.cmd_on(args()) == 0
+    rec = json.loads((world.git / auto.RECORD).read_text(encoding="utf-8"))
+    assert rec["id"] == "2026-11-22_0800" and rec["deploy"] is False and rec["limits"] == auto.LIMITS
+    assert rec["folder"] == guard.norm(world.run) and rec["started"].endswith("Z")
+    out = capsys.readouterr().out
+    assert out == f"saani auto: on 2026-11-22_0800 folder={guard.norm(world.run)}\n"      # one line, the guard's cue
+
+
+def test_on_with_id_folder_and_deploy(world, capsys, tmp_path):
+    other = world.wt / "auto-other"
+    other.mkdir()
+    os.chdir(tmp_path)
+    assert auto.cmd_on(args(id="mine", folder=str(other), deploy=True)) == 0
+    rec = auto.read_record()
+    assert rec["id"] == "mine" and rec["deploy"] is True and rec["folder"] == guard.norm(other)
+    assert capsys.readouterr().out == f"saani auto: on mine folder={guard.norm(other)}\n"
+
+
+@pytest.mark.parametrize("bad", [{"id": "a b"}, {"id": "x" * 65}, {"folder": "elsewhere"}])
+def test_on_refuses_a_bad_id_or_a_folder_outside_the_worktrees(world, bad):
+    with pytest.raises(SystemExit):
+        auto.cmd_on(args(**bad))
+    assert auto.read_record() is None
+
+
+def test_on_outside_the_worktrees_folder_is_refused(world, tmp_path):
+    os.chdir(tmp_path)
+    with pytest.raises(SystemExit) as e:
+        auto.cmd_on(args())
+    assert "inside" in str(e.value)
+
+
+def test_a_second_run_is_refused_until_the_first_is_off_or_stale(world):
+    auto.cmd_on(args())
+    with pytest.raises(SystemExit) as e:
+        auto.cmd_on(args(id="again"))
+    assert "off" in str(e.value)
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=guard.MAX_HOURS + 1))      # a crashed run's leftover
+    assert auto.cmd_on(args(id="again")) == 0 and auto.read_record()["id"] == "again"
+
+
+def test_off_removes_the_record_and_prints_the_summary(world, capsys):
+    record(world)
+    log_refusals(["not on the list", "not on the list", "push"])
+    guard.turn_on("sess-1", "r1", world.root, world.wt, folder=world.run)
+    guard.turn_on("sess-2", "r1", world.root, world.wt, folder=world.run)          # a subagent session of the same run
+    guard.turn_on("sess-3", "other", world.root, world.wt, folder=world.run)
+    assert auto.cmd_off(args(run_id=None)) == 0
+    out = capsys.readouterr().out
+    assert "auto run r1" in out and "refusals: 3" in out and "not on the list 2" in out and "is off (2 guard entries removed" in out
+    assert guard.state("sess-1") is None and guard.state("sess-2") is None and guard.state("sess-3")["id"] == "other"
+    assert auto.read_record() is None and not (world.git / auto.RECORD).exists()
+    assert auto.cmd_off(args(run_id=None)) == 0 and "no auto run is on" in capsys.readouterr().out
+
+
+def test_off_run_ends_a_run_without_a_record(world, capsys):
+    guard.turn_on("sess-1", "gone", world.root, world.wt, folder=world.run)
+    assert auto.cmd_off(args(run_id="gone")) == 0
+    assert "(1 guard entry removed; no record of this run here)" in capsys.readouterr().out
+    assert guard.state("sess-1") is None
+    with pytest.raises(SystemExit):
+        auto.cmd_off(args(run_id="a b"))
+
+
+def test_off_run_of_another_run_keeps_the_record(world):
+    record(world)
+    assert auto.cmd_off(args(run_id="elsewhere")) == 0
+    assert auto.read_record()["id"] == "r1"
+
+
+# ---------------------------------------------------------------- status and the stop rules
+
+def test_status_without_a_run(world, capsys):
+    assert auto.cmd_status(args(check=True)) == 0
+    assert "no auto run is on" in capsys.readouterr().out
+
+
+def test_status_says_elapsed_refusals_and_how_close_each_limit_is(world, capsys):
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=2, minutes=5))
+    log_refusals(["a", "b", "b", "b", "c"])
+    log_refusals(["other-run"], run="r2")                     # another run's refusals are not this run's
+    assert auto.cmd_status(args()) == 0
+    out = capsys.readouterr().out
+    assert "elapsed 2 h 05 min" in out and "refusals: 5: b 3, a 1, c 1" in out
+    assert "refusals in total: 5 of 40" in out and "same reason in a row: 3 of 10" in out and "hours: 2.1 of 10" in out
+    assert "REACHED" not in out
+
+
+def test_check_exits_0_below_every_limit(world):
+    record(world, started=auto.utc_now())
+    log_refusals(["a", "b"] * 10)                             # 20 in all, never twice in a row
+    assert auto.cmd_status(args(check=True)) == 0
+
+
+def test_check_exits_3_at_40_refusals_and_says_which(world, capsys):
+    record(world, started=auto.utc_now())
+    log_refusals([f"reason {i % 7}" for i in range(39)])
+    assert auto.cmd_status(args(check=True)) == 0
+    log_refusals(["one more"])
+    assert auto.cmd_status(args(check=True)) == auto.EXIT_LIMIT == 3
+    assert "STOP: refusals in total reached (40 of 40)" in capsys.readouterr().out
+
+
+def test_check_exits_3_when_one_reason_repeats_10_times_in_a_row(world, capsys):
+    record(world, started=auto.utc_now())
+    log_refusals(["push"] * 9 + ["merge"] + ["push"] * 9)       # 19 in all, the longest run is 9
+    assert auto.cmd_status(args(check=True)) == 0
+    log_refusals(["push"])
+    assert auto.cmd_status(args(check=True)) == 3
+    assert "same reason in a row reached (10 of 10)" in capsys.readouterr().out
+
+
+def test_check_exits_3_after_10_hours(world, capsys):
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=9, minutes=59))
+    assert auto.cmd_status(args(check=True)) == 0
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=10, minutes=1))
+    assert auto.cmd_status(args(check=True)) == 3
+    assert "hours reached" in capsys.readouterr().out
+
+
+def test_the_limits_in_the_record_are_the_ones_that_count(world):
+    record(world, started=auto.utc_now(), limits={"refusals": 2, "same_reason": 10, "hours": 10})
+    log_refusals(["a", "b"])
+    assert [k for k, _, _ in auto.reached(auto.read_record())] == ["refusals"]
+
+
+def test_longest_run():
+    assert auto.longest_run([]) == 0 and auto.longest_run(["a"]) == 1
+    assert auto.longest_run(["a", "a", "b", "b", "b", "a"]) == 3
+
+
+def test_the_limits_are_in_one_place():
+    assert auto.LIMITS == {"refusals": 40, "same_reason": 10, "hours": 10}
+    assert guard.MAX_HOURS >= auto.LIMITS["hours"]
+
+
+# ---------------------------------------------------------------- the report
+
+def fake_world(monkeypatch, commits="", titles=None, listing=None, posted=None):
+    def git(*a, cwd=None, check=True):
+        assert a[0] == "log"
+        return subprocess.CompletedProcess(a, 0, stdout=commits, stderr="")
+    monkeypatch.setattr(core, "git", git)
+
+    def gh(*a):
+        if a[:2] == ("issue", "view"):
+            return (titles or {}).get(int(a[2]), "") + "\n"
+        if a[:2] == ("issue", "list"):
+            return json.dumps(listing or [])
+        if a[:2] == ("pr", "comment"):
+            posted.append(a)
+            return ""
+        raise AssertionError(a)
+    monkeypatch.setattr(auto, "gh", gh)
+    monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $1.00")
+
+
+def commit(subject, *refs):
+    return subject + "\x1f" + subject + "\n\n" + "\n".join(f"refs #{n}" for n in refs) + "\nWhy: x\nUndo: y\n\x1e"
+
+
+def test_the_report_has_every_section(world, monkeypatch, capsys):
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=3))
+    start = auto.utc_now() - datetime.timedelta(hours=1)
+    log_refusals(["push", "push", "secrets"])
+    fake_world(monkeypatch, commits=commit("Add the cart", 12) + commit("Fix the total", 15, 12), titles={12: "Cart page", 15: "Total is wrong", 20: "Mail"},
+               listing=[{"number": 20, "title": "Mail", "comments": [
+                   {"body": "### ❓ Question\nwhich?", "createdAt": auto.stamp(start)},
+                   {"body": "### ❓ Question\nold", "createdAt": "2020-01-01T00:00:00Z"}]},
+                        {"number": 21, "title": "Pay", "comments": [{"body": "### ⛔ Blocked\nwaits", "createdAt": auto.stamp(start)}]},
+                        {"number": 22, "title": "Other", "comments": [{"body": "### ▶ Started", "createdAt": auto.stamp(start)}]}])
+    assert auto.cmd_report(args(pr=7)) == 0
+    text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    assert capsys.readouterr().out.startswith(text)
+    assert "# Auto run r1" in text and "| Id | r1 |" in text and "| Duration | 3 h 00 min |" in text and "| Start |" in text and "| End |" in text
+    assert "## Issues landed on the integration branch (2)" in text
+    assert "- #12 Cart page" in text and "- #15 Total is wrong" in text
+    assert "| #20 | question | Mail |" in text and "| #21 | blocked | Pay |" in text and "| #22 |" not in text and text.count("| #20 |") == 1
+    assert "## Refusals by the guard (3)" in text and "- push: 2" in text and "- secrets: 1" in text
+    assert "## Cost" in text and "total: $1.00" in text
+    assert "`/saani:merge 7`" in text and "`/saani:merge 7 --deploy`" in text
+
+
+def test_the_report_without_anything(world, monkeypatch):
+    record(world, started=auto.utc_now())
+    fake_world(monkeypatch)
+    auto.cmd_report(args())
+    text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    assert text.count("- none") == 3 and "(0)" in text and "`/saani:merge`" in text
+
+
+def test_the_git_log_is_asked_for_the_integration_branch_since_the_start(world, monkeypatch):
+    rec = record(world)
+    seen = []
+
+    def git(*a, cwd=None, check=True):
+        seen.append(a)
+        return subprocess.CompletedProcess(a, 0, stdout="", stderr="")
+    monkeypatch.setattr(core, "git", git)
+    auto.landed_issues(rec)
+    assert seen[0][:3] == ("log", "origin/dev", f"--since={rec['started']}")
+
+
+def test_post_comments_the_report_on_the_pull_request(world, monkeypatch):
+    record(world, started=auto.utc_now())
+    posted = []
+    fake_world(monkeypatch, posted=posted)
+    auto.cmd_report(args(pr=7, post=True))
+    assert posted == [("pr", "comment", "7", "--repo", "acme/webshop", "--body-file", str(world.root / "build" / "saani-auto-r1.md"))]
+
+
+def test_post_needs_the_pull_request_and_a_run(world, monkeypatch):
+    with pytest.raises(SystemExit):
+        auto.cmd_report(args())                                  # no run
+    record(world)
+    fake_world(monkeypatch)
+    with pytest.raises(SystemExit) as e:
+        auto.cmd_report(args(post=True))
+    assert "--pr" in str(e.value)
+
+
+def test_a_left_issue_the_journal_knows_is_reported_when_github_cannot_be_read(world, monkeypatch):
+    rec = record(world, started=auto.utc_now())
+    auto.journal(30, "blocked")
+    fake_world(monkeypatch, titles={30: "Dns"})
+    monkeypatch.setattr(auto, "gh", lambda *a: (_ for _ in ()).throw(SystemExit("gh down")) if a[:2] == ("issue", "list") else "Dns\n")
+    assert auto.left_issues(rec, auto.read_journal("r1")) == {30: ("blocked", "Dns")}
+
+
+# ---------------------------------------------------------------- the journal
+
+def test_no_journal_without_a_run(world):
+    auto.journal(5, "landed")
+    assert not (world.root / "build").exists()
+
+
+def test_the_journal_has_a_line_per_comment_and_landing(world, monkeypatch):
+    record(world)
+    posted = []
+
+    class Io:
+        dry = False
+
+        def write(self, *cmd):
+            posted.append(cmd)
+    comments.post(12, "started", io=Io())
+    comments.post(12, "question", io=Io())
+    comments.post(12, "on-dev", io=Io(), labels=False)           # a landing is journaled by saani land, not twice
+    auto.journal(12, "landed")
+    rows = [json.loads(x) for x in (world.root / "build" / "saani-auto-r1.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(r["issue"], r["kind"]) for r in rows] == [(12, "started"), (12, "question"), (12, "landed")]
+    assert all(r["time"].endswith("Z") for r in rows)
+    assert auto.read_journal("r1") == rows
+
+
+def test_a_dry_run_comment_is_not_journaled(world):
+    record(world)
+    comments.post(12, "started", io=comments.Direct(dry=True))
+    assert not (world.root / "build" / "saani-auto-r1.jsonl").exists()
+
+
+def test_a_journal_that_cannot_be_written_never_stops_the_work(world, monkeypatch):
+    record(world)
+    monkeypatch.setattr(auto, "journal_path", lambda run: (_ for _ in ()).throw(OSError("disk full")))
+    auto.journal(1, "landed")
+
+
+# ---------------------------------------------------------------- the command line
+
+def cli(argv):
+    import importlib.util
+    import saani
+    spec = importlib.util.spec_from_file_location("saani_cli", pathlib.Path(saani.__file__).resolve().parents[1] / "saani.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.main(argv)
+
+
+def test_the_actions_are_reached_through_saani_auto(world, capsys):
+    assert cli(["auto", "on", "--id", "cli1", "--deploy"]) == 0
+    assert auto.read_record()["id"] == "cli1" and auto.read_record()["deploy"] is True
+    assert cli(["auto", "status", "--check"]) == 0
+    assert "auto run cli1" in capsys.readouterr().out
+    assert cli(["auto", "off", "--run", "cli1"]) == 0 and auto.read_record() is None
+
+
+@pytest.mark.parametrize("argv", [["auto", "--check"], ["auto", "status", "--post"], ["auto", "on", "--pr", "3"], ["auto", "pick", "--folder", "x"],
+                                  ["auto", "report", "--deploy"], ["auto", "off", "--id", "x"], ["auto", "on", "--run", "x"], ["auto", "status", "--json"]])
+def test_an_option_of_another_action_is_refused(world, argv):
+    with pytest.raises(SystemExit) as e:
+        cli(argv)
+    assert isinstance(e.value.code, str) and "saani auto" in e.value.code
+
+
+def test_the_config_setting_ci_attempts():
+    assert config.Config().ci_attempts == 3
+    assert config.from_toml({"auto": {"ci_attempts": 5}}, "x").ci_attempts == 5
+    for bad in (0, -1, "3", True):
+        with pytest.raises(SystemExit):
+            config.from_toml({"auto": {"ci_attempts": bad}}, "x")
