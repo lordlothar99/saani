@@ -8,7 +8,7 @@
   kpis                                          the numbers over a window of days (saani/kpis.py)
   ui (aliases: map, board)                      the local status page and the isometric map (saani/board_server.py)
   progress                                      a progress bar for a test run in the background (saani/progress.py)
-  guard                                         the plugin's Claude Code PreToolUse hook: JSON on stdin (saani/guard.py)
+  guard                                         the plugin's Claude Code hook (PreToolUse, PostToolUse): JSON on stdin (saani/guard.py)
 
 The settings come from the project's saani.toml (docs/CONFIG.md). Standard library only, Python 3.11 or newer.
 """

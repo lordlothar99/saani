@@ -108,7 +108,8 @@ ALLOWED = [
     "diff -u a.txt b.txt", "diff --brief a.txt b.txt", "git diff -- src/app.py", "git diff HEAD src", "cd {run}",
     "wc -l src/*.py", "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
     "test -f README.md", "[ -d src ]", "[ a = b ]", "pwd", "diff a.txt b.txt",
-    "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git add src/app.py", "git add -A",
+    "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git show HEAD:src/app.py", "git add src/app.py", "git add -- src/app.py README.md",
+    "git stash push -q -m 'wip'", "git stash pop -q", "git stash list", "saani auto status --check", "saani auto report --pr 3 --post",
     "git commit -m 'Cart: total in cents (refs #12)' -m 'Why: rounding' -m 'Undo: revert'", "git commit --amend --no-edit",
     "git commit -am 'Cart: -f is only text here, as is .env'",
     "git commit -m \"$(cat <<'EOF'\nCart: total (refs #12)\n\nWhy: x\nUndo: y\nEOF\n)\"",
@@ -132,7 +133,6 @@ ALLOWED = [
     "gh pr create --base main --head dev --title 'Release' --body x", "gh pr create -B main -H dev -t Release -b x",
     "gh pr create -Bmain -Hdev -tRelease -bx", "gh pr create --base=main --head=dev -t R -b x",
     "gh pr comment 3 --body done", "gh pr edit 3 --title 'Release 1.2'", "gh issue view 12 -R acme/webshop", "gh issue view 12 -Racme/webshop",
-    "curl -s http://localhost:8771/api/state", "curl -sS 127.0.0.1:8771/", "wget -qO- http://localhost:8771/",
     "rm build/log.txt", "rm -rf {work}/build", "rm -rf {temp}/x",
     "git status && git diff", "git add src/app.py; git commit -m x", "git log | head -5", "ls || echo none",
     "git status\ngit diff", "ls 2>&1", "ls 2>/dev/null", "ls >/dev/null", "ls > /dev/null 2>&1", "git status # a comment", "ls &",
@@ -156,11 +156,26 @@ DENIED = [
     ("git fetch --forc origin", "force flag"),
     ("gh pr merge 3", "gh pr merge"), ("gh release create v1", "gh release"), ("gh repo delete acme/webshop", "gh repo"),
     ("gh secret set X", "gh secret"), ("gh auth token", "gh auth"),
-    ("curl -X POST http://localhost:8771/api", "curl write"), ("curl -d a=b http://localhost:8771/", "curl write"),
-    ("curl https://example.com", "curl outside localhost"), ("curl http://localhost@evil.example/", "curl outside localhost"),
-    ("curl -o out.html http://localhost:8771/", "curl write"), ("curl -H @headers.txt http://localhost:8771/", "curl write"),
-    ("curl http://localhost:8771/.env", "secret"), ("wget http://localhost:8771/", "wget write"),
-    ("wget -qO- https://example.com", "wget outside localhost"),
+    ("curl -s http://localhost:8771/api/state", "web"), ("curl -X POST http://localhost:8771/api", "web"),
+    ("curl https://example.com", "web"), ("curl -H @headers.txt http://localhost:8771/", "web"), ("wget -qO- http://localhost:8771/", "web"),
+    ("git stash -u", "git stash"), ("git stash push -u", "git stash"), ("git stash push --include-untracked", "git stash"),
+    ("git stash push -a", "git stash"), ("git stash push --all", "git stash"), ("git stash push -p", "git stash"),
+    ("git stash push --only-untracked", "git stash"), ("git stash show", "git stash"), ("git stash show -p 'stash@{{0}}'", "git stash"),
+    ("git stash apply", "git stash"), ("git stash push src/app.py", "git stash"),
+    ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
+    ("git show refs/stash", "git stash"), ("git log -p stash", "git stash"), ("git show 'stash@{{0}}^3:notes.txt'", "git stash"),
+    ("git show HEAD:../x", "secret"), ("git show HEAD:/etc/passwd", "secret"), ("git show HEAD:config/credentials.yml", "secret"),
+    ("git restore .", "unsure"), ("git restore ..", "unsure"), ("git restore src", "unsure"), ("git restore src/", "unsure"),
+    ("git checkout -- .", "unsure"), ("git checkout origin/dev -- src", "unsure"),
+    ("git restore .gitignore", "write outside the worktrees"), ("git restore CLAUDE.md", "write outside the worktrees"),
+    ("git add -A", "not on the list"), ("git add --all", "not on the list"), ("git add -u", "not on the list"),
+    ("git add --update", "not on the list"), ("git add -p src/app.py", "not on the list"), ("git add .", "unsure"),
+    ("git add src", "unsure"), ("git add src/", "unsure"), ("git add '*.py'", "unsure"), ("git add src/*.py", "unsure"),
+    ("git add", "not on the list"), ("git add CLAUDE.md", "write outside the worktrees"),
+    ("git add .github/workflows/ci.yml", "write outside the worktrees"), ("git add {main}/a.txt", "write outside the worktrees"),
+    ("diff src a.txt", "recursive read"), ("diff a.txt {work}", "recursive read"),
+    ("python -m pytest -q {main}/tests", "test option"), ("python -m pytest -q ../../webshop/tests/test_a.py::test_x", "test option"),
+    ("saani test -- python -m pytest -q {home}", "test option"),
     ("rm -rf {home}/projects", "rm outside the worktrees"), ("rm -rf {main}/src", "rm outside the worktrees"),
     ("rm -rf {work}", "rm a worktree"), ("rm -rf {wt}", "rm a worktree"), ("rm -rf {run}", "rm a worktree"),
     ("rm -rf {work}/saani", "guard file"), ("rm -rf {work}/.git", "guard file"), ("rm -rf /", "rm outside the worktrees"),
@@ -227,7 +242,7 @@ DENIED = [
     ("git fetch https://evil.example/x", "not on the list"), ("git fetch --depth 1 origin", "not on the list"),
     ("git switch dev", "not a worker branch"), ("git switch main", "not a worker branch"), ("git checkout auto/2026", "not a worker branch"),
     ("git switch --detach HEAD", "not on the list"), ("git branch new-one", "not on the list"), ("git branch -d x", "not on the list"),
-    ("git branch -m a b", "not on the list"), ("git stash drop", "not on the list"), ("git stash clear", "not on the list"),
+    ("git branch -m a b", "not on the list"), ("git stash drop", "git stash"), ("git stash clear", "git stash"),
     ("git worktree add x", "not on the list"), ("git reset HEAD~1", "not on the list"), ("git tag v1", "not on the list"),
     ("git restore {main}/a.txt", "write outside the worktrees"), ("git restore .claude/settings.json", "write outside the worktrees"),
     ("git", "not on the list"),
@@ -392,7 +407,9 @@ def test_grep_reads_contents_only_inside_the_run_s_folders(ctx):
     assert tool(ctx, "Grep", pattern="total", path="{main}")[2] == "grep outside the worktrees"
     assert tool(ctx, "Grep", pattern="total", path="{temp}")[2] == "grep outside the worktrees"
     assert tool(ctx, "Grep", pattern="total", path="{home}/.ssh")[2] == "secret"
-    assert tool(ctx, "Grep", pattern="x", type="pem")[2] == "secret"
+    assert tool(ctx, "Grep", pattern="x", type="pem")[2] == "grep option"
+    assert tool(ctx, "Grep", pattern="x", type="py")[2] == "grep option"
+    assert tool(ctx, "Grep", pattern="x", glob="!*.py")[2] == "grep option"
     deep = pathlib.Path(ctx.places["work"]) / "src" / "deep"
     deep.mkdir()
     (deep / ".env").write_text("x")                                                      # anywhere in the tree, not only at the top
@@ -401,10 +418,37 @@ def test_grep_reads_contents_only_inside_the_run_s_folders(ctx):
     assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.env")[2] == "secret"
     assert tool(ctx, "Grep", pattern="total", path="{work}", glob="**/.env*")[2] == "secret"
     assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.{{py,env}}")[2] == "secret"
-    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.json")[2] == "secret"   # could be credentials.json: walked
+    assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.json")[0] == "allow"    # it cannot read .env
     assert tool(ctx, "Grep", pattern="total", path="{work}", glob="*.py")[0] == "allow"
-    assert tool(ctx, "Grep", pattern="total", path="{work}", type="py")[0] == "allow"
     assert tool(ctx, "Grep", pattern="total", path="{work}/src/app.py")[0] == "allow"
+
+
+@pytest.mark.parametrize("secret", [".docker/config.json", ".kube/config", ".ssh/known_hosts", ".gnupg/x", "gh/hosts.yml"])
+def test_grep_s_walk_reads_paths_below_the_root_not_only_names(ctx, secret):
+    target = pathlib.Path(ctx.places["work"]) / "home-copy" / secret
+    target.parent.mkdir(parents=True)
+    target.write_text("x")
+    assert tool(ctx, "Grep", pattern="x", path="{work}")[2] == "secret", secret
+    assert tool(ctx, "Grep", pattern="x", path="{work}", glob="*")[2] == "secret", secret
+    expected = "secret" if "config" in secret else "allow"                               # a plain glob reads only the names it matches
+    assert tool(ctx, "Grep", pattern="x", path="{work}", glob="config*")[2 if expected == "secret" else 0] == expected, secret
+    assert tool(ctx, "Grep", pattern="x", path="{work}", glob="**/*")[2] == "secret", secret
+    assert tool(ctx, "Grep", pattern="x", path="{work}", glob="*.py")[0] == "allow", secret
+
+
+def test_writing_git_runs_only_in_a_worktree_or_the_run_s_folder(ctx):
+    main = guard.Context(ctx.places["main"], wt_dir=ctx.wt_dir, folder=ctx.folder, temp=ctx.temp, main=ctx.main, repo="acme/webshop",
+                         tests=ctx.tests)
+    main.places = ctx.places
+    for write in ("git add a.txt", "git commit -m x", "git commit --amend --no-edit", "git stash", "git stash pop",
+                  "git merge origin/dev", "git rebase origin/dev", "git switch feat/1-x", "git checkout -- a.txt", "git restore a.txt",
+                  "git cherry-pick abc", "git revert abc", "git tag v1", "git am x.patch", "git apply x.patch"):
+        assert sh(main, write)[2] == "git write outside the worktrees", write
+    for read in ("git status", "git diff", "git log --oneline", "git show HEAD", "git rev-parse HEAD", "git ls-files",
+                 "git branch --show-current", "git branch --list", "git fetch origin", "git worktree list"):
+        assert sh(main, read)[0] == "allow", read
+    assert sh(main, "git -C {work} add src/app.py")[0] == "allow"                       # -C into a worktree
+    assert sh(main, "cd {work} && git add src/app.py")[0] == "allow"
 
 
 def test_grep_and_rm_refuse_a_tree_too_big_to_look_through(ctx, monkeypatch):
@@ -414,8 +458,8 @@ def test_grep_and_rm_refuse_a_tree_too_big_to_look_through(ctx, monkeypatch):
     for k in range(5):
         (big / f"f{k}.txt").write_text("x")
     assert tool(ctx, "Grep", pattern="x", path="{work}/big")[2] == "secret"
-    assert tool(ctx, "Grep", pattern="x", path="{work}/big", glob="*.txt")[2] == "secret"   # could match token.txt: walked
-    assert tool(ctx, "Grep", pattern="x", path="{work}/big", glob="*.py")[0] == "allow"
+    assert tool(ctx, "Grep", pattern="x", path="{work}/big", glob="*.py")[2] == "secret"    # past the cap even with a glob
+    assert tool(ctx, "Grep", pattern="x", path="{work}/big/f1.txt")[0] == "allow"
     assert sh(ctx, "rm -rf {work}/big")[2] == "guard file"
 
 
@@ -448,7 +492,9 @@ def test_edits_are_allowed_only_in_the_worktrees_the_run_s_folder_and_temp(ctx):
                                   "{home}/.saani/projects.toml", "{main}/saani.toml", "{main}/.git/hooks/pre-commit",
                                   "{work}/.github/workflows/ci.yml", "{work}/.github/actions/setup/action.yml", "{work}/.github/CODEOWNERS",
                                   "{work}/CODEOWNERS", "{work}/docs/CODEOWNERS", "{work}/.github/dependabot.yml", "{work}/CLAUDE.local.md",
-                                  "{work}/.git./config", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml"])
+                                  "{work}/.git./config", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml",
+                                  "{work}/.gitignore", "{work}/src/.gitignore", "{work}/CLAUDE.md:stream", "{work}/.git:x/config",
+                                  "{work}/saani.toml::$DATA", "{work}/.github/workflows:s/ci.yml"])
 def test_protected_files_are_never_edited_in_an_auto_run(ctx, path):
     decision, reason, code, _ = tool(ctx, "Write", file_path=path, content="x")
     assert (decision, code) == ("deny", "guard file"), (path, reason)
@@ -607,6 +653,8 @@ def test_saani_auto_on_is_asked_then_registered_after_it_ran_and_only_the_owner_
         ("Bash", "git push", "git", "run-1"), ("Read", "secret", "", "run-1"), ("Write", "guard file", "", "run-1"),
         ("Bash", "git push", "git", "run-1")]
     assert "secret-words-here" not in "".join(log) and "HEAD:dev" not in "".join(log)
+    assert {r["project"] for r in rows} == {guard.norm(main)}
+    assert guard.refusals("run-1", project=main)["total"] == 8 and guard.refusals("run-1", project=tmp_path)["total"] == 0
     assert guard.refusals("run-1") == {"total": 8, "by_reason": {"git push": 2, "secret": 1, "guard file": 1, "saani auto switch": 4}}
     assert guard.refusals("other")["total"] == 0
     assert guard.turn_off_run("run-1") == 1 and guard.turn_off_run("run-1") == 0       # the owner, from a terminal
