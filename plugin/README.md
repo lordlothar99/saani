@@ -32,7 +32,7 @@ This repository is also a plugin marketplace (`.claude-plugin/marketplace.json` 
 - The skill is namespaced: **`/saani:longrun`**, not `/longrun`.
 - `plugin.json` pins `version`: bump it at each release, or installed copies keep the old one.
 - Check before a commit: `claude plugin validate .` (marketplace) and `claude plugin validate .\plugin --strict` (plugin).
-- License: PolyForm Noncommercial 1.0.0 ([LICENSE](../LICENSE)), source-available, not OSI open source.
+- License: PolyForm Shield 1.0.0 ([LICENSE](../LICENSE)), source-available, not OSI open source.
 - Worker agents will go in `agents/<name>.md`: every `.md` there is loaded as an agent, so no README in that folder.
 - Sources: https://code.claude.com/docs/en/plugins/marketplace-reference.md, .../manifest-reference.md, .../components.md, .../install.md,
   .../cli-reference.md.

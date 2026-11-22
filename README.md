@@ -116,8 +116,9 @@ Issues and pull requests are welcome. Run the tests with `python -m pytest -q`. 
 `Undo:`. Saani is generic, so code, docs and samples never name a real project (samples use the invented `acme/webshop`).
 
 ## License
-[PolyForm Noncommercial 1.0.0](LICENSE). You can use, study, modify and share Saani for any **noncommercial** purpose, including personal
-projects, research, education, and nonprofit or public organizations. You may not sell it, sell parts of it, or include it in a paid
-product or service. For commercial use, contact the author through GitHub.
+[PolyForm Shield 1.0.0](LICENSE). You can use, study, modify and share Saani for **any purpose**, including at work and on your
+company's or your clients' projects. You may not provide a product or service that **competes with Saani**, free or paid: no selling
+Saani or a fork of it, no hosted "Saani as a service", no product marketed as a substitute for it. For anything else, contact the
+author through GitHub.
 
 This is a source-available license. It is not an OSI-approved open-source license.

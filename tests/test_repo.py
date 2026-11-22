@@ -54,9 +54,9 @@ def test_the_command_starts_and_says_its_version():
 
 
 def test_the_license_is_the_same_everywhere():
-    spdx = "PolyForm-Noncommercial-1.0.0"
-    assert (ROOT / "LICENSE").read_text(encoding="utf-8").startswith("# PolyForm Noncommercial License 1.0.0")
+    spdx = "PolyForm-Shield-1.0.0"
+    assert (ROOT / "LICENSE").read_text(encoding="utf-8").startswith("# PolyForm Shield License 1.0.0")
     assert "Required Notice: Copyright" in (ROOT / "LICENSE").read_text(encoding="utf-8")
     plugin = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
     assert plugin["license"] == spdx
-    assert "PolyForm Noncommercial 1.0.0" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "PolyForm Shield 1.0.0" in (ROOT / "README.md").read_text(encoding="utf-8")
