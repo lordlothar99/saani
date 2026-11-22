@@ -1,4 +1,4 @@
-"""The "At a glance" table of an issue (the issue templates in .github/ISSUE_TEMPLATE, docs/SAANI.md): one pure parser, shared by the board
+"""The "At a glance" table of an issue (the issue templates in .github/ISSUE_TEMPLATE, docs/SAANI.md): one pure parser, shared by the map
 and the long run. No network, no settings: it reads the Markdown of an issue body and says what the table says, or nothing."""
 import re
 

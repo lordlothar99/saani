@@ -1,16 +1,16 @@
 ---
 name: ui
-description: Open the Saani UI - the board, the local read-only status page of the project (issues, worktrees, test queue, Claude sessions). Use when the owner types /saani:ui, or says "show me the UI", "open the board" or asks where things stand at a glance.
+description: Open the Saani UI - the map, the local read-only status page of the project (issues, worktrees, test queue, Claude sessions). Use when the owner types /saani:ui, or says "show me the UI", "open the board" or asks where things stand at a glance.
 argument-hint: "[--port N]"
 ---
 
-# /saani:ui: the board
+# /saani:ui: the map
 
 **Arguments:** `$ARGUMENTS` (optional, e.g. `--port 8772`).
 
-1. Start `saani ui --open $ARGUMENTS` **in the background** (it is a server and keeps running). It opens the board at
+1. Start `saani ui --open $ARGUMENTS` **in the background** (it is a server and keeps running). It opens the map at
    `http://127.0.0.1:8771/` (or the port given; the kanban page is `/kanban`) in the browser; only this machine can reach it.
-2. If the port is already taken by a board, `saani ui` says so and opens it (one board serves every project). The selector in the top bar
+2. If the port is already taken by a map, `saani ui` says so and opens it (one map serves every project). The selector in the top bar
    switches project; `saani projects add <folder>` lists another one (a checkout with a saani.toml), `saani projects remove owner/name`
    takes one out. The project `saani ui` starts in is listed by itself.
 3. Say how to stop it: ask Claude, or close the session. To answer a question about the state without a browser, `saani ui --json`

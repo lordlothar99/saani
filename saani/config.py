@@ -36,8 +36,8 @@ class Config:
     push_attempts: int = 3
     labels: dict = dataclasses.field(default_factory=lambda: {"in_dev": "in-dev", "in_main": "in-main", "answer": "help wanted",
                                                               "act": "owner-action", "idea": "idea"})
-    folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / longrun: the folders named in the board's prompts
-    session_match: str = ""                      # the board lists Claude Code sessions whose project folder name contains this
+    folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / longrun: the folders named in the map's prompts
+    session_match: str = ""                      # the map lists Claude Code sessions whose project folder name contains this
     deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
     board_port: int = 8771
     ci_workflow: str = "ci.yml"

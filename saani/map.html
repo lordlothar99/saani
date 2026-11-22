@@ -1,9 +1,39 @@
 <title>Saani</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Michroma&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- Saani's board: the issues of a project as a desert war-game board seen from above. One source: served by `saani ui` at /board (live /api/state)
+<!-- Saani's map: the issues of a project as a desert war-game board seen from above. One source: served by `saani ui` at /map (live /api/state)
      and published as a private artifact (falls back to mock-state.json beside it; the top menu is the same there, the page switch, project selector and refresh inert). Original desert world: no names, logos, typefaces,
      characters or vehicle designs from any film or book. -->
+<style>
+#veil.open:not(.settled){animation:veilIn .22s ease-out both}
+#veil.open:not(.settled) .panel{animation:panelIn .34s cubic-bezier(.2,.85,.25,1) both}
+#veil.open:not(.settled) .panel .sec{animation:secIn .4s ease-out both;animation-delay:.12s}
+#veil.open:not(.settled) .panel .sec:nth-child(2){animation-delay:.17s}
+#veil.open:not(.settled) .panel .sec:nth-child(3){animation-delay:.22s}
+#veil.open:not(.settled) .panel .sec:nth-child(4){animation-delay:.27s}
+#veil.closing{animation:veilOut .3s ease-in both}
+#veil.closing .panel{animation:panelOut .32s cubic-bezier(.55,0,.7,.4) both}
+#veil.closing .panel .sec{animation:secOut .14s ease-in both}
+@keyframes veilIn{from{background-color:rgba(10,6,3,0)}to{background-color:rgba(10,6,3,.62)}}
+@keyframes veilOut{from{background-color:rgba(10,6,3,.62)}to{background-color:rgba(10,6,3,0)}}
+@keyframes panelIn{from{opacity:0;transform:scale(.3)}60%{opacity:1}to{opacity:1;transform:none}}
+@keyframes panelOut{from{opacity:1;transform:none}70%{opacity:.9}to{opacity:0;transform:scale(.25)}}
+@keyframes secOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(6px)}}
+@keyframes secIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){#veil.open,#veil.open .panel,#veil.open .panel .sec,#veil.closing,#veil.closing .panel,#veil.closing .panel .sec{animation:none}}
+/* The owner, 2026-11-22: switching between the map and the kanban page cross-fades with a slight zoom (View Transitions where the
+   browser has them, a plain fade otherwise); the kanban page carries the same rules */
+@view-transition{navigation:auto}
+::view-transition-old(root){animation:pgOut .3s ease-in both}
+::view-transition-new(root){animation:pgIn .4s cubic-bezier(.2,.8,.25,1) both}
+@keyframes pgOut{to{opacity:0;transform:scale(.97)}}
+@keyframes pgIn{from{opacity:0;transform:scale(1.03)}}
+@keyframes pgFadeIn{from{opacity:0}}
+@keyframes pgFadeOut{to{opacity:0}}
+.pg-enter body{animation:pgFadeIn .35s ease-out both}
+body.pg-leave{animation:pgFadeOut .25s ease-in both}
+@media (prefers-reduced-motion:reduce){::view-transition-old(root),::view-transition-new(root),.pg-enter body,body.pg-leave{animation:none}}
+</style>
 <style>
 /* Layout: a full-screen isometric board (SVG, pan and zoom), the HUD floating at the corners, panels over it. One dusk look, dark. */
 :root{
@@ -167,7 +197,7 @@ a{color:var(--amber)}
 }
 </style>
 
-<div id="stage"><svg id="map" role="img" aria-label="Saani board: each block is an issue, each figure a worker"><defs>
+<div id="stage"><svg id="map" role="img" aria-label="Saani map: each block is an issue, each figure a worker"><defs>
  <linearGradient id="g-sand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--sand-hi)"/><stop offset=".55" stop-color="var(--sand)"/><stop offset="1" stop-color="var(--sand-lo)"/></linearGradient>
  <filter id="f-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
  <marker id="arr-you" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ember)"/></marker>
@@ -985,8 +1015,26 @@ function md(text) {                                      // a small Markdown rea
   flush(); return out.join("");
 }
 let lastFocus = null;
-function openPanel(node) { lastFocus = document.activeElement; const v = $("#veil"); v.innerHTML = ""; v.append(node); v.hidden = false; hideTip(); const x = v.querySelector(".x"); if (x) x.focus(); }
-function closePanel() { $("#veil").hidden = true; $("#veil").innerHTML = ""; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+// The owner, 2026-11-22: the popup grows out of the spot that was clicked, its sections arriving a beat apart, and shrinks back into
+// it when it closes
+let PANEL_FROM = null, closeTimer = 0;
+$("#map").addEventListener("pointerdown", e => { PANEL_FROM = [e.clientX, e.clientY]; }, true);
+function openPanel(node) {
+  lastFocus = document.activeElement; clearTimeout(closeTimer);
+  const v = $("#veil"); v.innerHTML = ""; v.append(node); v.hidden = false; v.classList.remove("closing", "open", "settled"); hideTip();
+  const p = v.querySelector(".panel");
+  if (p && PANEL_FROM) { const r = p.getBoundingClientRect(); p.style.transformOrigin = `${(PANEL_FROM[0] - r.left).toFixed(0)}px ${(PANEL_FROM[1] - r.top).toFixed(0)}px`; }
+  void v.offsetWidth; v.classList.add("open");
+  setTimeout(() => { if (v.classList.contains("open")) v.classList.add("settled"); }, 700);
+  const x = v.querySelector(".x"); if (x) x.focus({preventScroll: true});
+}
+function closePanel() {
+  const v = $("#veil"); if (v.hidden) return;
+  const p = v.querySelector(".panel"); if (p && PANEL_FROM && !p.style.transformOrigin) { const r = p.getBoundingClientRect(); p.style.transformOrigin = `${(PANEL_FROM[0] - r.left).toFixed(0)}px ${(PANEL_FROM[1] - r.top).toFixed(0)}px`; }
+  v.classList.remove("open", "settled"); v.classList.add("closing");
+  closeTimer = setTimeout(() => { v.hidden = true; v.innerHTML = ""; v.classList.remove("closing"); }, RM ? 0 : 310);
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
 $("#veil").addEventListener("pointerdown", e => { if (e.target.id === "veil") closePanel(); });
 function copyButton(getText) {
   const b = el("button", {class: "btn", type: "button"}, "Copy prompt");
@@ -1207,6 +1255,12 @@ $("#refresh").addEventListener("click", async e => {
   b.disabled = false; b.textContent = "↻ Refresh";
 });
 drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
+// the page switch: a fade where the browser has no cross-page View Transitions
+if (!("PageRevealEvent" in window)) {
+  document.documentElement.classList.add("pg-enter");
+  document.addEventListener("click", e => { const a = e.target.closest && e.target.closest(".pages a"); if (!a || a.getAttribute("aria-current") || a.hasAttribute("aria-disabled") || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault(); document.body.classList.add("pg-leave"); setTimeout(() => { location.href = a.href; }, RM ? 0 : 240); });
+}
 </script>
 
 

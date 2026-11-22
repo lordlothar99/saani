@@ -1,10 +1,10 @@
-"""Saani at a glance: a local status page and the board (docs/SAANI.md). Standard library only; read-only (it starts, stops and writes
+"""Saani at a glance: a local status page and the map (docs/SAANI.md). Standard library only; read-only (it starts, stops and writes
 nothing); pure functions first (tests/test_board_server.py).
 
-  saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s: / is the isometric board (/board still opens it), /kanban the kanban page
-  saani ui --open              the same, and open the board in the browser
+  saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s: / is the isometric map (/map, and the old /board, open it too), /kanban the kanban page
+  saani ui --open              the same, and open the map in the browser
   saani ui --json              print the state once and exit
-  saani board ...              the same as saani ui (the command's former name, kept as an alias)
+  saani map / board ...        the same as saani ui (aliases)
 
 The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
@@ -21,7 +21,7 @@ The status page answers four questions, in plain words:
 4. How busy is this PC? CPU, memory, disk and the heaviest programs (Windows CIM through PowerShell; the disk from Python), as a curve.
 Below: the test runs, the landings and where CI would run. The issues come from gh, cached a minute.
 
-/board serves board.html (the isometric board), written without <html>/<head>/<body> because it is also published as an artifact whose
+/map serves map.html (the isometric map), written without <html>/<head>/<body> because it is also published as an artifact whose
 host adds them; here the server adds the same skeleton. It reads /api/state and falls back to /mock-state.json (a synthetic sample).
 """
 import collections
@@ -47,8 +47,8 @@ from . import config, core, glance, progress
 HERE = pathlib.Path(__file__).resolve().parent
 SAANI_PY = HERE.parent / "saani.py"
 PAGE_FILE = HERE / "status.html"
-BOARD_FILE = HERE / "board.html"
-MOCK_FILE = HERE / "samples" / "board-sample.json"
+MAP_FILE = HERE / "map.html"
+MOCK_FILE = HERE / "samples" / "map-sample.json"
 CLAUDE_PROJECTS = pathlib.Path.home() / ".claude" / "projects"
 SESSION_HOURS = 6                      # sessions touched in the last hours are listed
 ACTIVE_SECONDS = 120                   # a file written in the last two minutes: working
@@ -107,7 +107,7 @@ def cfg():
     return config.current()
 
 
-# ---------------------------------------------------------------- the projects the one board can show (a list in the user's home)
+# ---------------------------------------------------------------- the projects the one map can show (a list in the user's home)
 
 _project_lock = threading.RLock()        # the settings are process-wide: one request at a time works inside one project
 _loaded = {}                             # project folder -> its settings
@@ -129,7 +129,7 @@ def read_registry():
 def write_registry(folders):
     path = registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["# The projects the Saani board offers in its selector (saani projects add / remove)", "projects = ["]
+    lines = ["# The projects the Saani map offers in its selector (saani projects add / remove)", "projects = ["]
     lines += [f" {json.dumps(f)}," for f in folders]
     path.write_text("\n".join(lines + ["]", ""]), encoding="utf-8")
 
@@ -283,7 +283,7 @@ def need_of(labels):
 
 
 def column_for(issue, worktree=None, testing=(), closing=()):
-    """The status page column of an issue (see the module's docstring), or None when it stays off the board."""
+    """The status page column of an issue (see the module's docstring), or None when it stays off the map."""
     lab = cfg().labels
     labels = set(issue.get("labels") or [])
     if lab.get("idea", "idea") in labels and not worktree:
@@ -377,7 +377,7 @@ def pr_ci(rollup, head, last_run=None, shas=(), comments=()):
 
 def pr_contents(commits, titles):
     """What a pull request carries: its commits grouped by the issue they refer to (the first #n of the headline), newest issue first,
-    with the issue's title when the board knows it. Merges and rebuilt generated files are left out."""
+    with the issue's title when the map knows it. Merges and rebuilt generated files are left out."""
     groups, order = {}, []
     for c in commits or []:
         head = c.get("messageHeadline") or ""
@@ -531,7 +531,7 @@ def host_allowed(host, port):
 
 
 def project_info():
-    """What the board needs to know about the project: its name, repo, branches and the folders its prompts name."""
+    """What the map needs to know about the project: its name, repo, branches and the folders its prompts name."""
     c = cfg()
     return {"name": c.name, "repo": c.repo, "integration": c.integration, "production": c.production, "folders": c.folders,
             "labels": c.labels}
@@ -835,8 +835,8 @@ def page():
 
 
 def board_page():
-    """The board page with its skeleton, read at every request like page()."""
-    return SKELETON + BOARD_FILE.read_text(encoding="utf-8") + "</body></html>"
+    """The map page with its skeleton, read at every request like page()."""
+    return SKELETON + MAP_FILE.read_text(encoding="utf-8") + "</body></html>"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -850,9 +850,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/kanban", "/kanban/"):
             text = in_project(repo, page)
             body, kind = (text or "").encode("utf-8"), "text/html; charset=utf-8"
-        elif path in ("/", "/index.html", "/board", "/board/"):      # the board is the default page; /board is its old address
+        elif path in ("/", "/index.html", "/map", "/map/", "/board", "/board/"):      # the map is the default page; /board is its old address
             body, kind = board_page().encode("utf-8"), "text/html; charset=utf-8"
-        elif path in ("/mock-state.json", "/board/mock-state.json"):
+        elif path in ("/mock-state.json", "/map/mock-state.json", "/board/mock-state.json"):
             body, kind = MOCK_FILE.read_bytes(), "application/json"
         elif path == "/api/issue":                           # one issue's context, criteria and history, asked for when its panel opens
             number = (params.get("n") or [""])[0]
@@ -883,7 +883,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def projects_command(args):
-    """The list the board's selector reads (~/.saani/projects.toml): list, add FOLDER, remove OWNER/NAME."""
+    """The list the map's selector reads (~/.saani/projects.toml): list, add FOLDER, remove OWNER/NAME."""
     if args.what == "add":
         try:
             folder = config.main_checkout(args.target) if args.target else config.main_checkout()
@@ -911,7 +911,7 @@ def projects_command(args):
 
 
 def already_running(port):
-    """True when a Saani board answers on this port (it is what holds it)."""
+    """True when a Saani map answers on this port (it is what holds it)."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state", timeout=10) as r:
             return "board" in json.loads(r.read())
@@ -926,7 +926,7 @@ def run_command(args):
         safe(sample_resources)
         print(json.dumps(state(), indent=1))
         return 0
-    safe(lambda: register(_home.root))                   # the project it starts in is listed from now on, so any later board offers it
+    safe(lambda: register(_home.root))                   # the project it starts in is listed from now on, so any later map offers it
     port = args.port or cfg().board_port
     url = f"http://127.0.0.1:{port}/"
     try:
@@ -939,7 +939,7 @@ def run_command(args):
             webbrowser.open(f"{url}#{slug(_home.repo)}")
         return 0
     threading.Thread(target=sampler, daemon=True).start()
-    print(f"Saani: {url} (board) and {url}kanban (kanban), this PC only; Ctrl+C stops it")
+    print(f"Saani: {url} (map) and {url}kanban (kanban), this PC only; Ctrl+C stops it")
     if args.open:
         webbrowser.open(f"{url}#{slug(_home.repo)}")
     try:
@@ -950,12 +950,12 @@ def run_command(args):
 
 
 def add_parsers(sub):
-    p = sub.add_parser("ui", aliases=["board"], help="the local status page and the isometric board (this PC only); board: alias of ui")
+    p = sub.add_parser("ui", aliases=["map", "board"], help="the local status page and the isometric map (this PC only); map, board: aliases of ui")
     p.add_argument("--port", type=int)
-    p.add_argument("--open", action="store_true", help="open the board in the browser")
+    p.add_argument("--open", action="store_true", help="open the map in the browser")
     p.add_argument("--json", action="store_true", help="print the state once and exit")
     p.set_defaults(run=run_command)
-    p = sub.add_parser("projects", help="the projects the board offers in its selector: list, add [FOLDER], remove OWNER/NAME")
+    p = sub.add_parser("projects", help="the projects the map offers in its selector: list, add [FOLDER], remove OWNER/NAME")
     p.add_argument("what", nargs="?", choices=["list", "add", "remove"], default="list")
     p.add_argument("target", nargs="?", help="add: the project's folder (default: here); remove: owner/name")
     p.set_defaults(run=projects_command)

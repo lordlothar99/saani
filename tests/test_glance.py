@@ -1,4 +1,4 @@
-"""saani/glance.py: the At a glance table of an issue, read the same way for the board and the long run."""
+"""saani/glance.py: the At a glance table of an issue, read the same way for the map and the long run."""
 from saani import glance
 
 BODY = """## At a glance

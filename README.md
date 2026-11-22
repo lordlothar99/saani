@@ -5,9 +5,9 @@ keeps going while you sleep.**
 
 *Saani* (from Arabic ṣāniʿ, صانع: the maker, the craftsman) is a command-line tool and a Claude Code plugin. It takes a GitHub issue from
 idea to production. Each task gets its own git worktree. Work lands on your integration branch one change at a time. All test runs share
-one queue on your machine. CI fits inside GitHub's free minutes. A local board shows where every issue stands.
+one queue on your machine. CI fits inside GitHub's free minutes. A local map shows where every issue stands.
 
-![The Saani board: each issue is a block moving along a road through the stages of its life, from idea to deployed (synthetic sample data)](docs/images/board.png)
+![The Saani map: each issue is a block moving along a road through the stages of its life, from idea to deployed (synthetic sample data)](docs/images/map.png)
 
 ## Why
 One Claude Code session is fast. Several at once, or one left alone for hours, run into the same problems:
@@ -20,7 +20,7 @@ One Claude Code session is fast. Several at once, or one left alone for hours, r
 | You can't tell why a commit was made or how to undo it | A commit-msg hook requires `Why:` and `Undo:` trailers on every commit |
 | GitHub Actions minutes run out mid-month | `saani ci` runs a job on GitHub while the free minutes last, and on your PC after that |
 | You have to stay at the keyboard | `/saani:longrun` lets Claude work through the open issues for hours, then hand back one pull request and a report |
-| You don't know where things stand | `saani ui` opens the board: every issue, worktree, test job and Claude session on a local page |
+| You don't know where things stand | `saani ui` opens the map: every issue, worktree, test job and Claude session on a local page |
 
 You talk to one Claude Code session, **the Architect**. It plans the work, hands tasks to subagents (**workers**), checks what they return
 and reports back to you. Saani provides the commands and rules that keep this safe.
@@ -107,8 +107,8 @@ In **Claude Code**, type the slash command, or ask in your own words.
 
 | Terminal | Claude Code | What it does |
 |---|---|---|
-| `saani ui [--open]` | `/saani:ui` | opens the board at `http://127.0.0.1:8771` (the kanban page is at `/kanban`) (this machine only, read-only). `saani board` still works as an alias |
-| `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the board's selector offers (`~/.saani/projects.toml`); one board shows them all |
+| `saani ui [--open]` | `/saani:ui` | opens the map at `http://127.0.0.1:8771` (the kanban page is at `/kanban`) (this machine only, read-only). `saani map` and `saani board` work as aliases |
+| `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers (`~/.saani/projects.toml`); one map shows them all |
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani new <n> [--hotfix]` | `/saani:new 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |
@@ -133,7 +133,7 @@ In a long run (`/saani:longrun`), Claude lands each issue itself, because you st
 Details: [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Status
-Early (v0.1 in progress). The command, its config file and the board work, and Saani is developed with itself: this repo has its own
+Early (v0.1 in progress). The command, its config file and the map work, and Saani is developed with itself: this repo has its own
 [saani.toml](saani.toml) and every change goes through `saani new` and `saani land`. The roadmap is in the issues (epic #1).
 
 ## Contributing
