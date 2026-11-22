@@ -34,7 +34,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `pace_slack` | `0.15` | a heavy job goes to the PC when the share of minutes used is ahead of the share of the month passed by more than this |
 | | `status_context` | `saani/ci` | the commit status set on the pull request's head |
 | | `jobs` | `{pr-ci = {minutes = 20, heavy = true}}` | each job's measured cost; `heavy`; `workflow` for a small automatic workflow `ci sync` switches on and off |
-| | `relabel` | `[]` | a command that swaps `in_dev` for `in_main` on the issues a merged pull request carries, given its number |
+| | `relabel` | `[]` | a command that swaps `in_dev` for `in_main` on the issues a merged pull request carries, given its number; empty: `saani ci merged` does the swap itself with `gh` |
 | `[hints]` | `hotfix_after_merge` | a generic sentence | the text of a hotfix pull request's "after the merge" step |
 
 ## Labels

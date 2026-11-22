@@ -113,7 +113,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani new <n> [--hotfix]` | `/saani:new 42` | worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land the current worktree: lock, merge, rebuild, tier-1 tests, push, clean up |
 | `saani test [--kind tier1\|land\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
-| `saani prune [--dry-run]` | `/saani:prune` | delete merged branches (never `dev`, `main`, long-run branches or checked-out ones). Claude shows the list and asks first |
+| `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished long runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |
 | `saani ci status\|sync\|pr\|merged\|place` | `/saani:ci pr` | hybrid CI: GitHub Actions within the free minutes, the PC for the rest |
 | `saani kpis [--baseline]` | `/saani:kpis --baseline` | issues landed per day, conflicts by file, test waits, compared with the previous window |
 | `saani progress run\|show\|watch` | `/saani:progress` | progress bar and time left for a background test run |

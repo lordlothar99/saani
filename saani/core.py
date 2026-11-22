@@ -13,7 +13,7 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
                                                     the lock, remove the worktree; a hotfix never lands on the integration branch: tier 1
                                                     against production, the branch pushed and its pull request into production opened
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
-  saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub
+  saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished long runs
   saani test [--kind tier1|land|full] -- <cmd...>   run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
@@ -322,7 +322,7 @@ def cmd_longrun(args):
     (folder / "build").mkdir(exist_ok=True)
     print(f"long run:  {stamp}")
     print(f"worktree:  {folder}")
-    print(f"branch:    {name} (from origin/{c.integration}; never landed, `saani prune` keeps it; remove with: git worktree remove {folder})")
+    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` and `saani ci merged` remove it once it is finished)")
 
 
 def cmd_new(args):
@@ -617,10 +617,65 @@ def prune_candidates(cwd=None):
     return prunable(local, held), prunable([r for r in remote if r.startswith("origin/")], held)
 
 
+LONGRUN_MAX_HOURS = 12        # the long run's own stop rule is 10 hours: past 12 a run is over
+
+
+def longrun_started(branch, folder=None):
+    """When a long run began: from its id (`longrun/YYYY-MM-DD_HHMM`), else from its folder's creation time; None when neither is known."""
+    m = re.fullmatch(r"longrun/(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})", branch)
+    if m:
+        return datetime.datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}:{m.group(3)}")
+    if folder and pathlib.Path(folder).exists():
+        return datetime.datetime.fromtimestamp(pathlib.Path(folder).stat().st_ctime)
+    return None
+
+
+def finished_longruns(before=None, cwd=None):
+    """[(worktree path or None, branch)] of the long runs that are over: the branch is merged into production or the integration branch, the
+    worktree (if any) has nothing uncommitted, and the run started before `before` (default: LONGRUN_MAX_HOURS ago). A long run's own
+    folder holds no commits (each issue has its own worktree), so only its age tells a finished run from one still working."""
+    c = cfg()
+    merged = set()
+    for base in (f"origin/{c.production}", f"origin/{c.integration}"):
+        merged |= set(git("branch", "--format=%(refname:short)", "--merged", base, cwd=cwd).splitlines())
+    cutoff = before or datetime.datetime.now() - datetime.timedelta(hours=LONGRUN_MAX_HOURS)
+    held = {b: p for p, b in worktrees(cwd) if b}
+    out = []
+    for branch in sorted(b for b in merged if b.startswith("longrun/")):
+        path = held.get(branch)
+        started = longrun_started(branch, path)
+        if started is None or started >= cutoff:
+            continue
+        if path and git("status", "--porcelain", cwd=path):
+            continue
+        out.append((path, branch))
+    return out
+
+
+def remove_longruns(found, dry=False, cwd=None):
+    """Removes those long runs: the worktree first (git refuses a dirty one: then the branch stays too), then the branch. Returns the
+    number removed."""
+    done = 0
+    for path, branch in found:
+        print(("would remove" if dry else "removing") + f" the long run {branch}" + (f" and its folder {path}" if path else ""))
+        if dry:
+            continue
+        if path and git("worktree", "remove", str(path), cwd=cwd, check=False).returncode != 0:
+            print(f"  kept: git would not remove {path}")
+            continue
+        git("branch", "-D", branch, cwd=cwd, check=False)
+        done += 1
+    return done
+
+
 def cmd_prune(args):
     local, remote = prune_candidates()
+    runs = finished_longruns()
+    if runs:
+        remove_longruns(runs, args.dry_run)
     if not local and (args.local_only or not remote):
-        print("nothing to prune: every merged branch is already gone")
+        if not runs:
+            print("nothing to prune: every merged branch is already gone")
         return 0
     if local:
         print(("would delete" if args.dry_run else "deleting") + f" {len(local)} local branch(es): {', '.join(local)}")
@@ -652,8 +707,9 @@ def cmd_status(args):
           f"stopped: {s['stopped']}")
     try:
         local, remote = prune_candidates()
-        if local or remote:
-            print(f"merged branches waiting: {len(local)} local, {len(remote)} on GitHub (saani prune)")
+        runs = finished_longruns()
+        if local or remote or runs:
+            print(f"merged branches waiting: {len(local)} local, {len(remote)} on GitHub, {len(runs)} finished long run(s) (saani prune)")
     except SystemExit:                                   # offline: status still prints the rest
         print("merged branches: unknown (git fetch failed)")
     folder = lock_path().parent / queue.QUEUE_DIR
