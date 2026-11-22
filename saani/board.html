@@ -633,7 +633,7 @@ let DATA = null, LIVE = false, PREV = {}, demoTimer = null;
 function normalize(d) {
   if (d.cards) return d;
   // "Ready" (assigned, nothing blocks it) is the backlog's until an agent session works on it: the Workshops hold only work that is going on
-  const map = {you: "you", ready: "backlog", building: "building", testing: "testing", dev: "dev", main: "deploy", live: "done"};
+  const map = {you: "you", ready: "backlog", building: "building", testing: "testing", dev: "dev", main: "deploy", close: "close", live: "done"};
   const cards = []; let pr = null;
   for (const col of d.board || []) {
     for (const c of col.cards) cards.push({...c, step: col.id === "ready" && (c.agents || []).length ? "started" : map[col.id] || "backlog"});

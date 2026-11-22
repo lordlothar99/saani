@@ -106,8 +106,8 @@ def test_the_roster_lists_defined_planned_and_built_in_subagents_with_what_runs_
 
 
 def test_the_columns_have_short_names_and_their_explanations_are_tooltips():
-    """Ready, Building, Testing, Merged on dev, To deploy, Deployed; the explanations as tooltips."""
-    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "Deployed"]
+    """Ready, Building, Testing, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
+    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "To close", "Deployed"]
     assert "Last 7 days" in fp.COLUMNS[-1][2]
     assert '"data-tip":c.hint' in fp.page() and "content:attr(data-tip)" in fp.page()
 
@@ -375,3 +375,28 @@ def test_the_status_page_hides_the_configured_labels_not_hardcoded_names(monkeyp
     from saani import config
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", labels={**config.Config().labels, "act": "creator-action"}))
     assert fp.project_info()["labels"]["act"] == "creator-action"
+
+
+def test_an_issue_on_production_that_touches_nothing_deployed_is_to_close(monkeypatch):
+    """[deploy] paths names what a served project deploys; an in-main issue whose commits touch none of it is "To close" with a close
+    prompt, the others stay "To deploy"; without paths nothing changes."""
+    from saani import config
+    i = lambda n: {"number": n, "labels": ["in-main"], "state": "OPEN"}
+    assert fp.column_for(i(6), closing={6}) == "close" and fp.column_for(i(7), closing={6}) == "main" and fp.column_for(i(6)) == "main"
+    assert fp.touches_deployed(["server/app.py", "docs/a.md"], ("server/",)) and not fp.touches_deployed(["docs/a.md", "tests/t.py"], ("server/",))
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", deploy_paths=("server/", "web/")))
+    files = {6: "docs/a.md\ntests/t.py\n", 7: "docs/a.md\nserver/app.py\n", 8: ""}
+    monkeypatch.setattr(fp, "run", lambda *a, **k: files[int(a[a.index("-E") + 1].split("#")[1].rstrip("\b\\"))])
+    assert fp.closing_issues([6, 7, 8]) == {6}                                     # no commit found: not claimed to close
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop"))
+    assert fp.closing_issues([6, 7]) == set()
+    board = {c["id"]: c for c in fp.build_board([i(6)], [], set(), [], [], closing={6})}
+    assert [c["number"] for c in board["close"]["cards"]] == [6] and board["main"]["cards"] == []
+    assert "Close #6" in board["close"]["prompt"]
+    assert fp.cfg().deploy_paths == ()
+
+
+def test_the_deploy_paths_are_read_from_saani_toml():
+    from saani import config
+    cfg = config.from_toml({"project": {"repo": "acme/webshop"}, "deploy": {"paths": ["server/", "web/"]}}, "x")
+    assert cfg.deploy_paths == ("server/", "web/")

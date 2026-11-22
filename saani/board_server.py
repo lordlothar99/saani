@@ -61,6 +61,7 @@ COLUMNS = [
     ("testing", "Testing", "Tests run in its folder, or the last check before it lands."),
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request."),
     ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy."),
+    ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it."),
     ("live", "Deployed", f"Last {LIVE_DAYS} days: deployed and closed. Folded by default."),
 ]
 WORKTREE_IN_TEXT = re.compile(r"[\\/]([^\\/\s\"']+-wt)[\\/]+(\d+)-")
@@ -267,7 +268,7 @@ def need_of(labels):
     return None
 
 
-def column_for(issue, worktree=None, testing=()):
+def column_for(issue, worktree=None, testing=(), closing=()):
     """The status page column of an issue (see the module's docstring), or None when it stays off the board."""
     lab = cfg().labels
     labels = set(issue.get("labels") or [])
@@ -280,7 +281,7 @@ def column_for(issue, worktree=None, testing=()):
     if issue.get("state") == "CLOSED":
         return "live"
     if lab.get("in_main", "in-main") in labels:
-        return "main"
+        return "close" if issue["number"] in closing else "main"
     if lab.get("in_dev", "in-dev") in labels:
         return "dev"
     if need_of(labels):
@@ -314,7 +315,8 @@ def column_prompt(column, numbers, pr=None):
     return {"dev": f"Prepare the {c.integration} into {c.production} pull request (it carries {carries}): milestone, CI until green, then "
                    f"tell me what to check before I merge it.",
             "main": f"Give me the deploy command for what is on {c.production} (it carries {carries}): read those issues for deploy "
-                    f"warnings first."}.get(column)
+                    f"warnings first.",
+            "close": f"Close {carries}: nothing of it is deployed (it touches no deploy path). Check each one, comment, and close it."}.get(column)
 
 
 def milestone_key(name):
@@ -390,7 +392,7 @@ def pr_row(raw, titles, last_run=None):
             "contents": pr_contents(commits, titles)}
 
 
-def build_board(issues, worktrees, testing, sessions, runs, pr=None):
+def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
     """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
     by_number = {}
     for i in issues:
@@ -407,7 +409,7 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None):
     columns = {key: [] for key, _, _ in COLUMNS}
     for n, issue in by_number.items():
         w = trees.get(n)
-        col = column_for(issue, w, testing)
+        col = column_for(issue, w, testing, closing)
         if not col:
             continue
         need = need_of(issue.get("labels"))
@@ -419,6 +421,23 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None):
              "prompt": column_prompt(key, [c["number"] for c in columns[key]], pr),
              "pr": {**pr, "inside": sorted(c["number"] for c in columns[key] if c["number"] in carried)} if key == "dev" and pr else None}
             for key, title, hint in COLUMNS]
+
+
+def touches_deployed(files, paths):
+    """True when one of `files` is under one of the `paths` (prefixes) a served project deploys."""
+    return any(f.startswith(tuple(paths)) for f in files)
+
+
+def closing_issues(numbers):
+    """The issues among `numbers` (on production) whose commits touch nothing deployed: they close at merge. Empty without `[deploy] paths`."""
+    paths = cfg().deploy_paths
+    out = set()
+    for n in numbers if paths else ():
+        raw = run("git", "log", f"origin/{cfg().production}", "-E", f"--grep=#{n}\b", "--name-only", "--format=", timeout=60)
+        files = [f for f in raw.splitlines() if f.strip()]
+        if files and not touches_deployed(files, paths):
+            out.add(n)
+    return out
 
 
 def testing_issues(worktrees, runs, landing_issue):
@@ -695,9 +714,12 @@ def state():
     testing = testing_issues(trees, tst["runs"], int(m.group(2)) if m else None)
     titles = {i["number"]: i["title"] for i in iss.get("open", []) + iss.get("closed", [])}
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
+    in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
+    closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
+    closing = closing if isinstance(closing, set) else set()
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name} for c in projects()],
-            "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open")),
+            "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
 
