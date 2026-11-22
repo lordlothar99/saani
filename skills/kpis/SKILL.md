@@ -1,6 +1,6 @@
 ---
 name: kpis
-description: Show the Saani numbers - issues landed per day, conflicts by file, test waits - over a window of days, optionally against the previous window. Use when the owner types /saani:kpis or /saani:kpis --baseline.
+description: Show the Saani numbers - issues landed per day, conflicts by file, test waits, tokens and estimated cost per issue, role and model - over a window of days, optionally against the previous window. Use when the owner types /saani:kpis or /saani:kpis --baseline.
 argument-hint: "[--since date] [--until date] [--baseline]"
 ---
 
