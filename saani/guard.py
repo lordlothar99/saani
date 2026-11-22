@@ -132,8 +132,9 @@ def turn_off_run(run_id):
     return done
 
 
-def refusals(run=None):
-    """{"total": n, "by_reason": {reason: n}} of the refusal log, for the run `run` (None: every line)."""
+def refusals(run=None, project=None):
+    """{"total": n, "by_reason": {reason: n}} of the refusal log, for the run `run` (None: every line) and, when given, the project
+    whose main checkout is `project` (two projects' runs never mix)."""
     out = {"total": 0, "by_reason": {}}
     path = os.path.join(registry(), REFUSALS)
     if not os.path.exists(path):
@@ -145,6 +146,8 @@ def refusals(run=None):
             except ValueError:
                 continue
             if run is not None and row.get("run") != run:
+                continue
+            if project is not None and row.get("project") != norm(project):
                 continue
             reason = row.get("reason", "?")
             out["total"] += 1
@@ -159,8 +162,9 @@ def safe_word(word):
 
 def log_refusal(st, tool, reason, word):
     import datetime
-    row = {"time": datetime.datetime.now().isoformat(timespec="seconds"), "run": (st or {}).get("id"), "tool": str(tool)[:40],
-           "reason": reason, "word": safe_word(word)}
+    project = (st or {}).get("main")
+    row = {"time": datetime.datetime.now().isoformat(timespec="seconds"), "run": (st or {}).get("id"),
+           "project": norm(project) if project else None, "tool": str(tool)[:40], "reason": reason, "word": safe_word(word)}
     try:
         os.makedirs(registry(), exist_ok=True)
         with open(os.path.join(registry(), REFUSALS), "a", encoding="utf-8") as f:
@@ -310,8 +314,8 @@ def secret_name(raw, resolved=None, strict=True):
 
 
 PROTECTED_PARTS = {".git", ".githooks", ".claude"}
-PROTECTED_NAMES = {".mcp.json", "saani.toml", "claude.md", "claude.local.md", "codeowners"}
-WALK_CAP = 5000                     # entries a folder walk looks at; past it the guard cannot tell, so it refuses
+PROTECTED_NAMES = {".mcp.json", "saani.toml", "claude.md", "claude.local.md", "codeowners", ".gitignore"}
+WALK_CAP = 20000                    # entries a folder walk looks at; past it the guard cannot tell, so it refuses
 
 
 def protected(p, ctx):
@@ -319,7 +323,8 @@ def protected(p, ctx):
     (the agents' instructions), .github/workflows/, .github/actions/, CODEOWNERS, .github/dependabot.yml, ~/.saani, and the guard's own
     files (saani/guard.py, saani.toml, hooks/hooks.json, a checkout's top `hooks/` folder). Trailing dots and spaces of a part are ignored
     (Windows drops them: `.git.` is `.git`)."""
-    parts = [x.rstrip(". ") or x for x in re.split(r"[\\/]+", p.lower()) if x]
+    parts = [x if k == 0 and re.fullmatch(r"[a-z]:", x) else (x.split(":")[0].rstrip(". ") or x)
+             for k, x in enumerate(x for x in re.split(r"[\\/]+", p.lower()) if x)]
     if not parts:
         return True
     if PROTECTED_PARTS & set(parts) or parts[-1] in PROTECTED_NAMES:
@@ -413,33 +418,29 @@ def grep_tool(inp, ctx):
             return deny("unreadable path", f"Grep with a {key} that is not text")
     root = ctx.path(inp.get("path") or ".", tilde=True)
     glob_ = inp.get("glob") or ""
-    kind = inp.get("type") or ""
-    if secret_name(inp.get("path") or "", root) or (glob_ and secret_name(glob_)) or (kind and secret_name("x." + kind)):
+    if inp.get("type"):
+        return deny("grep option", "Grep with a type (its file kinds are ripgrep's, the guard does not read them)", how="give a glob, like *.py")
+    if glob_.startswith("!"):
+        return deny("grep option", "Grep with a negated glob (it searches everything else)", how="give a glob of the files to search")
+    if secret_name(inp.get("path") or "", root) or (glob_ and secret_name(glob_)):
         return deny("secret", "Grep in secret files", how=SECRETS_HOW)
     if root == ctx.home or not ctx.in_run(root):
         return deny("grep outside the worktrees", "Grep outside the worktrees folder and the run's folder",
                     how="search inside a worktree, or Read the file")
-    narrow = [g for g in (glob_, f"*.{kind}" if kind else "") if g]
-    if os.path.isdir(root) and (not narrow or any(glob_may_hit_secret(g) for g in narrow)):
-        found = tree_has(root, lambda path, name: secret_name(name), skip=(".git",))
-        if found:
-            return deny("secret", "Grep in a folder tree that holds a secret file (or too big to look through)",
-                        how="give Grep a glob or a type that cannot match a secret name (*.py), or a deeper path")
+    if os.path.isdir(root):
+        # Every file the search could read is looked at, by its path below the root (.docker/config.json, .kube/config, .ssh/...): a
+        # glob narrows it only when it is a plain name pattern (no /, no **, no braces), which ripgrep matches against the file's name.
+        import fnmatch
+        plain = bool(glob_) and not re.search(r"[/\\{}]|\*\*", glob_)
+
+        def hit(path, name):
+            if os.path.isdir(path) or (plain and not fnmatch.fnmatchcase(name, glob_.lower())):
+                return False
+            return secret_name(os.path.relpath(path, root))
+        if tree_has(root, hit, skip=(".git",)):
+            return deny("secret", "Grep in a folder tree that holds a secret file the search could read (or too big to look through)",
+                        how="give Grep a glob of plain names that leaves the secret out (*.py), or a deeper path")
     return allow("Grep inside the run's folders")
-
-
-SECRET_SAMPLES = (".env", ".env.local", ".envrc", "x.pem", "x.key", "x.p12", "x.pfx", "id_rsa", "id_rsa.pub", "id_ed25519", "id_ecdsa",
-                  "id_dsa", "credentials", "credentials.json", "x_credentials.txt", ".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass",
-                  ".git-credentials", "hosts.yml", "secret", "secret.txt", "x_secret.yml", "token", "token.txt", "x_token.json")
-
-
-def glob_may_hit_secret(pattern):
-    """True when a glob could match a secret's name (or uses braces, which the check does not read)."""
-    import fnmatch
-    if "{" in pattern or "}" in pattern or secret_name(pattern):
-        return True
-    base = re.split(r"[\\/]", pattern.lower())[-1] or "*"
-    return any(fnmatch.fnmatchcase(sample, base) for sample in SECRET_SAMPLES)
 
 
 def tree_has(root, test, skip=()):
@@ -607,13 +608,13 @@ SORT_FLAGS = set("bdfghiMnRrsuVz")
 SORT_LONG = {"--numeric-sort", "--reverse", "--unique", "--ignore-case", "--human-numeric-sort", "--version-sort", "--stable",
              "--ignore-leading-blanks", "--general-numeric-sort", "--month-sort", "--dictionary-order", "--random-sort", "--zero-terminated"}
 GIT_READ = {"status", "diff", "log", "show", "rev-parse", "ls-files"}
+GIT_READ_ANYWHERE = GIT_READ | {"fetch", "branch", "worktree", "push", "clean", "reset"}   # the last three are refused with their reasons
 GIT_DANGEROUS = ("output", "output-directory", "upload-pack", "receive-pack", "exec", "exec-path", "ext-diff", "open-files-in-pager",
                  "git-dir", "work-tree", "namespace", "force", "force-with-lease", "force-if-includes", "no-verify", "config-env")
 GIT_SHORT_FORCE = {"add", "checkout", "switch", "branch", "fetch", "worktree", "stash", "restore"}
 TEST_FLAGS = {"-q", "-qq", "-v", "-vv", "-x", "-s", "-l", "--lf", "--ff", "--sw", "--no-header", "--exitfirst", "--last-failed",
               "--failed-first", "-ra", "-rA", "--color=no", "--color=yes"}
 TEST_VALUED = {"-k", "-m", "--tb", "--maxfail", "--durations"}
-LOCALHOST = {"localhost", "127.0.0.1", "::1"}
 
 
 def is_python(word):
@@ -659,7 +660,14 @@ def test_command(words, ctx, cwd, who):
         if w in TEST_VALUED:
             k += 2
             continue
-        if w in TEST_FLAGS or w.split("=", 1)[0] in TEST_VALUED or not w.startswith("-"):
+        if not w.startswith("-"):
+            target = ctx.path(w.split("::", 1)[0], cwd)
+            if not ctx.writable(target):
+                return deny("test option", "a test path outside the run's places (its conftest.py would run)", who,
+                            how="test paths inside the worktree")
+            k += 1
+            continue
+        if w in TEST_FLAGS or w.split("=", 1)[0] in TEST_VALUED:
             k += 1
             continue
         return deny("test option", f"the test option {w[:30]} (options like --basetemp, -p, --rootdir, -c and -o change where tests write "
@@ -725,7 +733,7 @@ def command(part, ctx, cwd):
     if cmd == "gh":
         return gh_command(args, ctx, cwd), cwd
     if cmd in ("curl", "wget"):
-        return fetch_command(cmd, args, ctx, cwd), cwd
+        return deny("web", f"{cmd} in an auto run", cmd, how="use WebFetch to read a page"), cwd
     if cmd == "rm":
         return rm_command(args, ctx, cwd), cwd
     return deny("not on the list", f"the command {safe_word(cmd) or '?'!r} is not on the guard's list", cmd), cwd
@@ -743,6 +751,8 @@ SAANI_SPEC = {
     ("progress", "show"): ({}, [r".+"]),
     ("progress", "watch"): ({"--every": True}, [r".+"]),
     ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+"}, []),
+    ("auto", "status"): ({"--check": False}, []),
+    ("auto", "report"): ({"--pr": True, "--post": False}, []),
     ("ci", "status"): ({}, []),
     ("ci", "pr"): ({"--dry-run": False, "--pc": False}, []),
 }
@@ -829,6 +839,8 @@ def read_only(cmd, args, ctx, cwd):
         verdict, skip = grep_diff_options(cmd, args)
         if verdict:
             return verdict
+        if cmd == "diff" and any(not a.startswith("-") and os.path.isdir(ctx.path(a, cwd)) for a in args):
+            return deny("recursive read", "diff of a folder reads every file in it", cmd, how="diff two named files")
     if scan(ctx, args, cwd, skip):
         return deny("secret", f"{cmd} of a secret file", cmd, how=SECRETS_HOW)
     return None
@@ -947,6 +959,9 @@ def git_command(part, ctx, cwd):
             return deny("git option", f"the git option --{name[:30]} (it runs a program, writes a file or moves the repository)", "git")
         if w == "-f" or (sub in GIT_SHORT_FORCE and re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", w)):
             return deny("force flag", "a force flag", "git")
+    if sub not in GIT_READ_ANYWHERE and not ctx.cd_ok(gcwd):
+        return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
+                    "git", how="cd <worktree> && git ...")
     verdict = git_sub(sub, words, ctx, gcwd, part)
     if verdict:
         return verdict
@@ -956,13 +971,18 @@ def git_command(part, ctx, cwd):
 
 
 def git_paths_writable(paths, ctx, gcwd, sub):
-    """Pathspecs git writes to: plain paths only (no glob characters, quoted or not, no :magic), inside the run's places, not protected."""
+    """Pathspecs git writes to or stages: named files only (no glob characters, quoted or not, no :magic, no `.`, `..`, folder or path
+    ending in /), inside the run's places, not protected, not secret."""
     if not paths:
-        return deny("not on the list", f"git {sub} without a path", "git")
+        return deny("not on the list", f"git {sub} without a file", "git", how="name each file")
     for p in paths:
         if re.search(r"[*?\[]", p) or p.startswith(":"):
             return deny("unsure", f"git {sub} with a pathspec pattern (*, ?, [ or :magic)", "git", how="name each file")
         target = ctx.path(p, gcwd)
+        if p in (".", "..") or p.endswith(("/", "\\")) or os.path.isdir(target):
+            return deny("unsure", f"git {sub} of a folder (it would take every file in it)", "git", how="name each file")
+        if secret_name(p, target, strict=False):
+            return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
         if not ctx.writable(target) or protected(target, ctx):
             return deny("write outside the worktrees", f"git {sub} of a path outside the worktree or protected", "git")
     return None
@@ -982,8 +1002,31 @@ def git_sub(sub, words, ctx, gcwd, part):
             if not ctx.writable(ctx.path(w, gcwd)):
                 return deny("read outside the worktrees", "git diff of a path outside the run's places", "git")
         return None
-    if sub in GIT_READ or sub == "add":
+    if sub == "show" or sub == "log":
+        for w in words:
+            if w.startswith("-"):
+                continue
+            if re.match(r"(refs/)?stash($|@|\^|~)", w) or "stash@" in w:
+                return deny("git stash", f"git {sub} of a stash (it can hold untracked files)", "git")
+            if sub == "show" and ":" in w:
+                path = w.split(":", 1)[1]
+                parts = [x for x in re.split(r"[\\/]+", path) if x]
+                if path.startswith(("/", "\\")) or ".." in parts or (path and secret_name(path, strict=False)):
+                    return deny("secret", "git show <rev>:<path> of a secret or of a path outside the repository", "git",
+                                how=SECRETS_HOW)
         return None
+    if sub in GIT_READ:
+        return None
+    if sub == "add":
+        paths, ended = [], False
+        for w in words:
+            if ended or not w.startswith("-"):
+                paths.append(w)
+            elif w == "--":
+                ended = True
+            elif w not in ("-q", "--quiet", "-v", "--verbose"):
+                return deny("not on the list", f"the git add option {w[:30]} (name each file)", "git", how="git add <file> <file>")
+        return git_paths_writable(paths, ctx, gcwd, sub)
     if sub == "commit":
         if any(re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", w) for w in words):
             return deny("no-verify", "git commit -n skips the commit-msg hook", "git")
@@ -1062,7 +1105,11 @@ def git_sub(sub, words, ctx, gcwd, part):
             return deny("not on the list", "git branch other than listing", "git", how="saani start makes branches, saani prune deletes them")
         return None
     if sub == "stash":
-        return None if words[:1] in ([], ["push"], ["pop"], ["list"], ["show"]) else no
+        if words in ([], ["list"], ["pop"], ["pop"] + ["-q"], ["pop", "--quiet"]):
+            return None
+        if words[:1] == ["push"] and all(w in ("-q", "--quiet", "-m", "--message") for w in words[1:]):
+            return None
+        return deny("git stash", "git stash other than push [-q] [-m MSG], pop [-q] and list (no -u, -a, -p, show)", "git")
     return no
 
 
@@ -1206,47 +1253,6 @@ def gh_command(args, ctx, cwd):
             checked.append(Word(value))
     if scan(ctx, checked, cwd):
         return deny("secret", "gh naming a secret file", "gh", how=SECRETS_HOW)
-    return None
-
-
-def fetch_command(cmd, args, ctx, cwd):
-    """curl (and wget to stdout) to localhost only, GET only."""
-    valued = {"-H", "--header", "-m", "--max-time", "--connect-timeout", "-w", "--write-out", "-A", "--user-agent", "--retry"}
-    flags = {"--silent", "--show-error", "--fail", "--location", "--include", "--head", "--verbose", "--compressed", "--quiet",
-             "--server-response"}
-    short = "sSfLiIv" if cmd == "curl" else "qS"
-    if any(a.startswith("@") or "=@" in a for a in args):
-        return deny(f"{cmd} write", f"{cmd} reading a file (@)", cmd)
-    if scan(ctx, args, cwd):
-        return deny("secret", f"{cmd} naming a secret file", cmd, how=SECRETS_HOW)
-    urls, k = [], 0
-    while k < len(args):
-        w = args[k]
-        if cmd == "wget" and (w in ("-qO-", "-O-") or (w == "-O" and args[k + 1:k + 2] == ["-"])):
-            k += 2 if w == "-O" else 1
-            continue
-        if w in valued and k + 1 < len(args):
-            k += 2
-            continue
-        if w in flags or (re.fullmatch(r"-[a-zA-Z]+", w) and set(w[1:]) <= set(short)):
-            pass
-        elif w.startswith("-"):
-            return deny(f"{cmd} write", f"the {cmd} option {w[:30]} (methods, data, uploads, files and configs are refused)", cmd)
-        else:
-            urls.append(w)
-        k += 1
-    if cmd == "wget" and not any(a in ("-qO-", "-O-", "-O") for a in args):
-        return deny("wget write", "wget that saves a file", cmd, how="use curl to localhost")
-    if not urls:
-        return deny("unsure", f"{cmd} without a URL", cmd)
-    from urllib.parse import urlsplit
-    for url in urls:
-        try:
-            host = urlsplit(url if "://" in url else "http://" + url).hostname
-        except ValueError:
-            host = None
-        if host not in LOCALHOST:
-            return deny(f"{cmd} outside localhost", f"{cmd} to a host other than localhost", cmd, how="use WebFetch to read a page")
     return None
 
 
