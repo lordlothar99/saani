@@ -488,21 +488,34 @@ def end_guard_entries(run_id):
     return len(mine)
 
 
-def cmd_on(args):
+def run_folder(given, action):
+    """The run's folder and id for `saani auto on` and `away`: a worktree of this project inside the worktrees folder (not that folder
+    itself), `--folder` or the current folder; the id is --id's (given by the caller), else the folder's name without `auto-`."""
     from . import guard
     c = cfg()
     cwd = os.getcwd()
-    folder = guard.resolve(args.folder, cwd) if args.folder else guard.norm(cwd)
+    folder = guard.resolve(given, cwd) if given else guard.norm(cwd)
     wt = guard.norm(c.wt_dir)
     if not (guard.inside(folder, wt) and folder != wt and os.path.isdir(folder)):
-        raise SystemExit(f"saani auto on: the run's folder must be a folder inside {c.wt_dir} (made by `saani auto`; "
+        raise SystemExit(f"saani auto {action}: the run's folder must be a folder inside {c.wt_dir} (made by `saani auto`; "
                          "run this from it or pass --folder)")
     dirs = guard.git_dirs(folder)
     if not dirs or guard.norm(os.path.dirname(dirs[1])) != here() or not os.path.isfile(os.path.join(os.path.dirname(dirs[1]), config.FILE)):
-        raise SystemExit(f"saani auto on: the run's folder is not a worktree of this project ({config.FILE} in its main checkout)")
-    run_id = args.id or os.path.basename(folder).removeprefix("auto-")
+        raise SystemExit(f"saani auto {action}: the run's folder is not a worktree of this project ({config.FILE} in its main checkout)")
+    return folder
+
+
+def run_id_of(given, folder, action):
+    run_id = given or os.path.basename(folder).removeprefix("auto-")
     if not valid_id(run_id):
-        raise SystemExit(f"saani auto on: run id '{run_id}': letters, digits, - and _ only, at most 64")
+        raise SystemExit(f"saani auto {action}: run id '{run_id}': letters, digits, - and _ only, at most 64")
+    return run_id
+
+
+def cmd_on(args):
+    from . import guard
+    folder = run_folder(args.folder, "on")
+    run_id = run_id_of(args.id, folder, "on")
     old = read_record()
     now = utc_now()
     if old and (now - parse_stamp(old["started"])).total_seconds() < guard.MAX_HOURS * 3600:
@@ -510,8 +523,15 @@ def cmd_on(args):
     path = record_path()
     if path is None:
         raise SystemExit("saani auto on: not inside a git checkout")
-    rec = {"id": run_id, "started": stamp(now), "folder": str(folder), "deploy": bool(args.deploy), "limits": dict(LIMITS)}
+    here_mode = bool(getattr(args, "here", False))
+    rec = {"id": run_id, "started": stamp(now), "folder": str(folder), "deploy": bool(args.deploy), "limits": dict(LIMITS),
+           "mode": "here" if here_mode else "away"}
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+    if here_mode:
+        # The interactive sub-mode (#50): the record (stop rules, journal, report) without the guard's switch. This line is not the
+        # marker, so the guard leaves the owner's session in present mode: the owner answers the prompts and the questions.
+        print(f"saani auto: here {run_id} folder={folder} (interactive: the guard stays in present mode)")
+        return 0
     # The guard's PostToolUse hook registers the session after this process exits 0 and printed this line: the last line of stdout, on
     # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both).
     print(f"saani auto: on {run_id} folder={folder}")
@@ -730,6 +750,65 @@ def cmd_report(args):
     return 0
 
 
+# ---- away: the run in a headless Claude Code session, started from the owner's session (#50)
+
+def away_command(run_id, folder, only=(), deploy=False, claude="claude"):
+    """The headless session of an away run: it runs the skill's away part (`/saani:auto run ...`), which switches the run on in that
+    session (so the guard registers it, never the owner's session) and does the run. Every permission prompt becomes a refusal Claude
+    reads (`--permission-prompts none`); Claude Code's classifier decides what the guard does not (`--permission-mode auto`)."""
+    prompt = f"/saani:auto run {run_id} --folder {folder}" + (" --deploy" if deploy else "") + "".join(f" {n}" for n in only)
+    return [claude, "-p", prompt, "--permission-mode", "auto", "--permission-prompts", "none"]
+
+
+def start_detached(argv, cwd, log, popen=subprocess.Popen):
+    """Start `argv` so it outlives the session that starts it, its output appended to `log`. Windows: its own console, shown minimized
+    (the owner can see the run is there) and out of the starting session's job when the job allows it; elsewhere: a new session. The
+    process id."""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "ab") as out:
+        common = {"cwd": str(cwd), "stdout": out, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
+        if os.name != "nt":
+            return popen(argv, start_new_session=True, **common).pid
+        info = subprocess.STARTUPINFO()
+        info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        info.wShowWindow = 7                                                    # SW_SHOWMINNOACTIVE: minimized, focus stays put
+        flags = subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+        try:
+            return popen(argv, creationflags=flags | 0x01000000, startupinfo=info, **common).pid   # CREATE_BREAKAWAY_FROM_JOB
+        except OSError:                                                         # the job allows no breakaway: start it inside
+            return popen(argv, creationflags=flags, startupinfo=info, **common).pid
+
+
+def shown(argv):
+    """The command as the owner would type it in PowerShell or bash."""
+    return " ".join(a if re.fullmatch(r"[\w@%+=:,./\-]+", a) else '"' + a.replace('"', '\\"') + '"' for a in argv)
+
+
+def cmd_away(args, which=None, popen=subprocess.Popen):
+    import shutil
+    folder = run_folder(args.folder, "away")
+    run_id = run_id_of(args.id, folder, "away")
+    main = pathlib.Path(cfg().root)                       # the main folder: the project's committed relative settings resolve from it
+    log = main / "build" / f"saani-auto-{run_id}.log"
+    argv = away_command(run_id, folder, args.only or (), bool(args.deploy))
+    exe = (which or shutil.which)("claude")
+    if exe is None:
+        print("saani auto away: `claude` is not on the PATH, so the run cannot start by itself. Start it by hand, in a terminal, from "
+              f"{main}:\n  {shown(argv)}")
+        return 2
+    try:
+        pid = start_detached([exe] + argv[1:], main, log, popen)
+    except OSError as e:
+        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {shown(argv)}")
+        return 2
+    print(f"saani auto: away {run_id} started (process {pid}), in a minimized window" if os.name == "nt" else
+          f"saani auto: away {run_id} started (process {pid})")
+    print(f"  log:    {log}")
+    print("  follow: saani auto status (once the run is on), the log, or /saani:ui")
+    print(f"  end:    saani auto off --run {run_id} (from a terminal)")
+    return 0
+
+
 def cmd_run(args):
-    """`saani auto on|off|status|report`."""
-    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report}[args.action](args)
+    """`saani auto on|off|status|report|away`."""
+    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "away": cmd_away}[args.action](args)

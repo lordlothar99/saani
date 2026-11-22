@@ -152,6 +152,7 @@ def test_the_run_s_own_work_is_allowed_without_a_prompt(ctx, command):
 # ---------------------------------------------------------------- Bash: refused, with the reason that is logged
 
 DENIED = [
+    ("saani auto away", "saani command"), ("saani auto away --id r2 --folder {run}", "saani command"),   # #50: never from inside a run
     ("saani test --worktree {main} -- python -m pytest -q", "cd outside the worktrees"),
     ("saani test --worktree {wt} -- python -m pytest -q", "cd outside the worktrees"),
     ("saani test --worktree {wt}/* -- python -m pytest -q", "cd outside the worktrees"),

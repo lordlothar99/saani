@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- An auto run has two sub-modes (issue #50): `/saani:auto here`, in the owner's session with questions allowed (`saani auto on --here`:
+  the run's record without the guard's switch), and `/saani:auto away`, which asks its questions and then starts the headless session
+  itself (`saani auto away`: detached, a minimized window on Windows, its log in `build/saani-auto-<id>.log`; the command to start by
+  hand when `claude` is not on the PATH). With no sub-mode, `/saani:auto` asks.
 
 ## 0.4.0 (2026-11-23)
 - Plugin 0.4.0: auto runs end to end (the guard, stop rules, a two-part launch with the run headless, `saani merge`, `saani deploy`),

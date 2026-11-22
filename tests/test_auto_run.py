@@ -41,7 +41,7 @@ def world(tmp_path, monkeypatch):
 
 
 def args(**kw):
-    base = {"id": None, "run_id": None, "folder": None, "deploy": False, "check": False, "pr": None, "post": False}
+    base = {"id": None, "run_id": None, "folder": None, "deploy": False, "here": False, "check": False, "pr": None, "post": False}
     return type("A", (), {**base, **kw})()
 
 
@@ -552,3 +552,86 @@ def test_off_run_uses_the_guards_turn_off_run_when_no_other_project_holds_the_id
     guard.turn_on("mine", "r1", world.root, world.wt, folder=world.run)
     assert auto.end_guard_entries("r1") == 1 and seen == ["r1"]               # another project holds the id: filtered here
     assert guard.state("sess-x") is not None
+
+
+# ---------------------------------------------------------------- away: the run in a headless session started from the owner's (#50)
+
+def test_the_away_command_runs_the_skill_s_away_part_with_no_prompt_that_can_wait():
+    argv = auto.away_command("2026-11-22_0800", "/w/webshop-wt/auto-2026-11-22_0800", only=[12, 15], deploy=True)
+    assert argv == ["claude", "-p", "/saani:auto run 2026-11-22_0800 --folder /w/webshop-wt/auto-2026-11-22_0800 --deploy 12 15",
+                    "--permission-mode", "auto", "--permission-prompts", "none"]
+    assert auto.away_command("r1", "/f")[2] == "/saani:auto run r1 --folder /f"
+
+
+def test_away_starts_the_headless_session_detached_from_the_main_checkout_with_its_log(world, capsys):
+    seen = []
+    def popen(argv, **kw):
+        seen.append((argv, kw))
+        return type("P", (), {"pid": 4242})()
+    assert auto.cmd_away(args(only=[12]), which=lambda name: "/bin/claude", popen=popen) == 0
+    argv, kw = seen[0]
+    assert argv[0] == "/bin/claude" and argv[1] == "-p" and argv[2].startswith("/saani:auto run 2026-11-22_0800 --folder ")
+    assert argv[2].endswith(" 12") and argv[3:] == ["--permission-mode", "auto", "--permission-prompts", "none"]
+    assert pathlib.Path(kw["cwd"]).resolve() == world.root.resolve()          # the main folder: the committed relative settings apply
+    assert kw["stdin"] is subprocess.DEVNULL and kw["stderr"] is subprocess.STDOUT
+    assert ("creationflags" in kw) == (os.name == "nt") and kw.get("start_new_session", os.name == "nt")
+    out = capsys.readouterr().out
+    log = world.root / "build" / "saani-auto-2026-11-22_0800.log"
+    assert "saani auto: away 2026-11-22_0800 started (process 4242)" in out and str(log) in out and log.exists()
+    assert "saani auto off --run 2026-11-22_0800" in out and not (world.git / auto.RECORD).exists()   # `on` is the headless session's
+
+
+def test_without_claude_on_the_path_away_prints_the_command_to_start_by_hand(world, capsys):
+    called = []
+    assert auto.cmd_away(args(only=None), which=lambda name: None, popen=lambda *a, **k: called.append(a)) == 2
+    out = capsys.readouterr().out
+    assert not called and "Start it by hand" in out and '"/saani:auto run 2026-11-22_0800 --folder ' in out
+    assert "--permission-prompts none" in out
+
+
+def test_a_session_that_cannot_start_falls_back_to_the_command_by_hand(world, capsys):
+    def popen(argv, **kw):
+        raise OSError("policy")
+    assert auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen) == 2
+    assert "could not start (policy)" in capsys.readouterr().out
+
+
+def test_away_refuses_a_folder_outside_the_worktrees(world, tmp_path):
+    with pytest.raises(SystemExit, match="saani auto away: the run's folder must be a folder inside"):
+        auto.cmd_away(args(only=None, folder=str(tmp_path)), which=lambda name: "claude", popen=None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the job breakaway is Windows only")
+def test_on_windows_a_job_without_breakaway_still_starts_the_session(tmp_path):
+    flags = []
+    def popen(argv, creationflags=0, **kw):
+        flags.append(creationflags)
+        if creationflags & 0x01000000:
+            raise OSError("access denied")
+        return type("P", (), {"pid": 7})()
+    assert auto.start_detached(["claude"], tmp_path, tmp_path / "x.log", popen) == 7
+    assert flags[0] & 0x01000000 and not flags[1] & 0x01000000
+
+
+def test_the_away_options_belong_to_away_and_on_only(world):
+    with pytest.raises(SystemExit, match="--folder belongs to `saani auto on` and `saani auto away`"):
+        core.cmd_auto(type("A", (), {"action": "status", "folder": "x", "id": None, "json": False, "limit": None, "only": None,
+                                    "deploy": False, "check": False, "pr": None, "post": False, "run_id": None})())
+    with pytest.raises(SystemExit, match="--only to `pick` and `away`"):
+        core.cmd_auto(type("A", (), {"action": "status", "folder": None, "id": None, "json": False, "limit": None, "only": [3],
+                                    "deploy": False, "check": False, "pr": None, "post": False, "run_id": None})())
+
+
+def test_on_here_writes_the_record_but_never_the_guard_s_marker(world, capsys):
+    """#50, the interactive sub-mode: the stop rules and the report work, and the owner's session stays in present mode."""
+    assert auto.cmd_on(args(here=True)) == 0
+    out = capsys.readouterr().out
+    assert not guard.MARKER.search(out) and out.startswith("saani auto: here 2026-11-22_0800 folder=")
+    rec = json.loads((world.git / auto.RECORD).read_text(encoding="utf-8"))
+    assert rec["mode"] == "here" and rec["id"] == "2026-11-22_0800"
+
+
+def test_plain_on_is_the_away_mode_and_prints_the_marker(world, capsys):
+    assert auto.cmd_on(args()) == 0
+    assert guard.MARKER.search(capsys.readouterr().out)
+    assert json.loads((world.git / auto.RECORD).read_text(encoding="utf-8"))["mode"] == "away"

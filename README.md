@@ -115,9 +115,10 @@ cd ../webshop-wt/42-*
 # ... Claude (or you) codes and commits, with "refs #42", Why: and Undo:
 saani land            # lock → merge dev → rebuild → landing tests → push → clean up
 ```
-Or let Claude take the whole backlog while you're away: in Claude Code, `/saani:auto` (or `/saani:auto 12 15` for selected issues).
-It asks its questions first, then gives you the command that runs the rest headless (`claude -p ... --permission-mode auto
---permission-prompts none`), so nothing waits for an approval while you're gone.
+Or let Claude take the whole backlog: in Claude Code, `/saani:auto away` (or `/saani:auto away 12 15` for selected issues) asks its
+questions, then starts the run itself in a headless session in the background (`claude -p ... --permission-mode auto
+--permission-prompts none`), so nothing waits for an approval while you're gone. `/saani:auto here` runs it in your session instead, and
+asks you whenever it needs to.
 
 ## Commands
 Each command has two forms. In a **terminal**, run it from your project's folder (with the alias from step 1, or as `python -I path/to/saani.py`).
@@ -134,7 +135,7 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani merge [PR] [--deploy] [--dry-run]` | `/saani:merge`, `/saani:merge --deploy` | merge the green dev -> main pull request an auto run left (merge commit; refused unless mergeable and its CI is green on the exact head), relabel, remove the finished auto runs; `--deploy` then runs `saani deploy`. Saying "merge" or "merge and deploy" in a session means this |
 | `saani deploy [--dry-run]` | `/saani:deploy` | the deployer: CI green on the production head (or a merge of a green commit), no issue whose Deploy row says "⛔ Do not deploy", the `[deploy]` checks and dry run, the deploy and its log, then the prod tag moved and the `in-main` issues commented and closed. Owner-typed only |
 | `saani test [--kind landing\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | run a test command through the machine-wide queue (Claude takes the command from saani.toml) |
-| `saani auto on\|off [--run ID]\|status [--check]\|report [--pr N] [--post]` | (used by `/saani:auto`) | the run's record, stop rules (40 refusals, 10 of the same reason in a row, 10 hours; `status --check` exits 3 at a limit) and report (landed, left, refusals, cost; posted on the pull request) |
+| `saani auto on\|off [--run ID]\|status [--check]\|report [--pr N] [--post]\|away` | (used by `/saani:auto`) | the run's record, stop rules (40 refusals, 10 of the same reason in a row, 10 hours; `status --check` exits 3 at a limit) and report (landed, left, refusals, cost; posted on the pull request) |
 | `saani auto [pick [--json] [--limit N] [--only N ...]]` | (used by `/saani:auto`) | a throwaway worktree for an auto run; `auto pick` lists the issues the run may take now, in order, with the free slots (`[auto] parallel`) and why the others are left |
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |
 | `saani ci status\|sync\|pr\|merged\|place` | `/saani:ci pr` | hybrid CI: GitHub Actions within the free minutes, the PC for the rest |

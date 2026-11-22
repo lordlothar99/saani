@@ -1,26 +1,42 @@
 ---
 name: auto
-description: Run a Saani auto run (Claude Code works for hours alone on the open GitHub issues of the project). Use when the owner types /saani:auto, /saani:auto 12 15 (only those issues), or /saani:auto off.
+description: Run a Saani auto run (Claude Code works for hours on the open GitHub issues of the project), interactive in this session or away in a headless session it starts itself. Use when the owner types /saani:auto, /saani:auto here, /saani:auto away, /saani:auto away 12 15 (only those issues), or /saani:auto off.
 ---
 
 # /saani:auto: a Saani auto run
 
-**Arguments:** `$ARGUMENTS`. Empty: a full run. `off`: the section "off" below. Issue numbers (with or without `#`, separated by
-spaces or commas): only those issues. `run <id> --folder <path>` (then issue numbers, if any): the away part of a run whose questions are
-already answered, in a headless session (section "The two parts" below): skip "Before the run" but its step 4, then do the run.
+**Arguments:** `$ARGUMENTS`. A sub-mode first, then issue numbers (with or without `#`, separated by spaces or commas: only those
+issues; none: a full run):
+- `here`: the **interactive** sub-mode, in this session.
+- `away`: the **away** sub-mode, a headless session this skill starts itself.
+- neither: ask the owner "here or away?" first (AskUserQuestion, one question, recommending `away` when they are about to leave), never
+  guess.
+- `off`: the section "off" below.
+- `run <id> --folder <path> [--deploy]` (then issue numbers, if any): the inside of an away run, typed by `saani auto away` into the
+  headless session, never by the owner: skip "Before the run" but its step 4, then do the run.
 
-## The two parts
-A run has a present part and an away part. **Present**, in the owner's session: the folder, the questions, the id ("Before the run",
-steps 1 to 3). **Away**, in a headless Claude Code session the owner starts from a terminal, in the project's folder (where saani.toml is):
+## The two sub-modes
 
-    claude -p "/saani:auto run <id> --folder <run folder> [issue numbers]" --permission-mode auto --permission-prompts none
+| | **Interactive** (`here`) | **Away** (`away`) |
+|---|---|---|
+| The owner | at the keyboard | gone after the questions |
+| Questions | any time, one at a time, with a recommendation | only before the run; during it none, a question goes in the report |
+| Session | this one | a headless `claude -p` session `saani auto away` starts in the background (a minimized window on Windows), with `--permission-mode auto --permission-prompts none` |
+| Guard | present mode (`saani auto on --here`: the record without the guard's switch): a prompt is answered by the owner | away mode: `saani auto on` runs in the headless session, so only it is registered; allow or refuse, never ask |
+| Stop rules, report, `/saani:merge` | the same | the same |
 
-`--permission-prompts none` turns every permission prompt into a refusal Claude reads, so nothing waits for a human; `--permission-mode
-auto` lets Claude Code's classifier decide what the guard does not (the guard decides every call of a run that is on; the classifier
-covers the moments it cannot, a hook that times out). An interactive session can still stop on a prompt (Claude Code falls back to
-asking after repeated classifier blocks, a background subagent's prompt waits), so the away part runs headless. Give the owner that exact
-command, filled in (the id, the absolute run folder, the issue numbers of the arguments), as the last thing of the present part, and
-stop. Only if the owner says they stay at the keyboard, go on in this session: step 4, then the run.
+**Interactive:** "Before the run" steps 0 to 3, then `saani auto on --here --id <id> --folder <run folder>` (alone, like `on`): the
+run's record, so the stop rules, the journal and the report work, but not the guard's switch, so this session stays in present mode and
+the owner answers the prompts. Then "The run" in this session; ask whenever an answer is needed, one question at a time, with a
+recommendation.
+
+**Away:** "Before the run" steps 0 to 3 here, then start the headless session, alone, from the project's main folder:
+`saani auto away --id <id> --folder <run folder> [--only <issue numbers>] [--deploy]` (`--deploy` only if the owner said, in their own
+words, that the run may deploy). It prints the id, the log (`build/saani-auto-<id>.log`), how to follow the run and how to end it: give
+the owner those lines, and stop. This session stays in present mode. If it exits 2 (no `claude` on the PATH, or the session could not
+start), give the owner the command it printed, to start by hand from a terminal in the project's main folder. Why headless: an
+interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after repeated classifier blocks,
+a background subagent's prompt waits); `--permission-prompts none` turns every prompt into a refusal Claude reads.
 
 The project's own rules (its CLAUDE.md, its saani.toml) win where they differ from this checklist.
 
@@ -28,8 +44,8 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 0. **The worktrees folder, reachable without prompts.** Run `saani status`. If it prints `warning: worktrees folder ... is not in
    permissions.additionalDirectories`, tell the owner, before anything else, the line it gives to add to the project's committed
    `.claude/settings.json` (a relative path, the same for every developer), and why: otherwise a command of the run that writes in a
-   worktree, the coders' included, needs an approval. Never write a settings file yourself: they are the owner's. Go on once they say it is done (the away part is a new session, so
-   it reads it) or that they accept the prompts.
+   worktree, the coders' included, needs an approval. Never write a settings file yourself: they are the owner's. Go on once they say it is done (an away run is a new session, so
+   it reads it; here, it needs a new session) or that they accept the prompts.
 1. **Folder.** An auto run works in its own throwaway worktree, never in the owner's folder: run `saani auto` (it makes
    `auto-<YYYY-MM-DD_HHMM>` beside the other worktrees, on the branch `auto/<YYYY-MM-DD_HHMM>` from the integration branch) and say
    its folder. Run every command of the run from that folder (the session cannot change folder: `cd` in each call), and
@@ -38,8 +54,10 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (`saani auto pick`). For
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those.
-3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then hand over (section "The two parts").
-4. **The away part's first step: switch it on.** In the headless session, the run's id and folder come from the arguments. Once the questions are answered, run `saani auto on --id <id> --folder <run folder>`
+3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then, away: start it (section "The two
+   sub-modes"); here: "The run".
+4. **Away only, the headless session's first step: switch it on.** The run's id and folder come from the arguments (`run <id>
+   --folder <path>`). Once the questions are answered, run `saani auto on --id <id> --folder <run folder>`
    (`--deploy` only if the owner said, in their own words, that the run may deploy), alone: nothing chained to it, or the guard does not
    register the session. The id and the folder are those of step 1 and 3. On success it prints, as its last line, `saani auto: on <id>
    folder=<path>`, and the guard registers the session from it; from then on the guard decides every tool call (no more questions), and
