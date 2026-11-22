@@ -124,6 +124,7 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 - A **small** job runs on GitHub while any minute is left; `saani ci sync` switches the small automatic workflows (those with a `workflow`)
   on or off.
 - A job GitHub **refuses** (no step ran: quota out or billing) falls back to the PC by itself.
+- A project whose `[ci] workflow` file is not on GitHub's default branch yet has nothing to run there: `saani ci pr` runs the CI on the PC and says so in the status. `saani ci pr --pc` forces the PC whatever the budget says.
 - On the PC, `saani ci pr` tests the pull request's head in a temporary worktree (`[tests] check`, then `[tests] full` through the test
   queue), removed after. Either way the result is the commit status `[ci] status_context` on the pull request's head.
 - After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran, or runs `[ci] relabel` here.
