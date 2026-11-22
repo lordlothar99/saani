@@ -3,7 +3,7 @@
 Saani is how an AI workshop builds a GitHub project. The owner talks to one contact, **the Architect** (the main Claude Code session), who
 plans the work, hands parts of it to **workers** (Claude Code subagents, each with a model that fits its job), checks what they bring back
 and reports. Saani is the set of commands, rules and pages that keeps that workshop safe and fast: one worktree per task, landings one at a
-time, one test queue for the whole PC, CI within GitHub's free minutes, long unattended runs, and a board that shows every issue on its way.
+time, one test queue for the whole PC, CI within GitHub's free minutes, long unattended runs, and a map that shows every issue on its way.
 
 The status of each feature lives in its GitHub issue (epic: Saani v1), never in this page. The settings of a project live in its
 `saani.toml` ([CONFIG.md](CONFIG.md)).
@@ -79,8 +79,8 @@ flowchart TB
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). |
 | `saani kpis [--since D] [--until D] [--baseline] [--json]` | The numbers over a window (below). |
-| `saani ui [--open] [--json]` | The local board and kanban page (below): one board for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
-| `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | The projects the board's selector offers, in `~/.saani/projects.toml`. |
+| `saani ui [--open] [--json]` | The local map and kanban page (below): one map for every project in the list below, the one it starts in included. A second `saani ui` finds the running one and opens it. `saani board` is an alias. |
+| `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | The projects the map's selector offers, in `~/.saani/projects.toml`. |
 | `saani progress run\|show\|watch` | A progress bar with the remaining time for a test run in the background. |
 
 ## Landing, in detail
@@ -131,20 +131,20 @@ A project that cannot tell which tests a change affects sets tier 1 to its whole
 - After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran; if not, it runs `[ci] relabel` here, or, with no such command, swaps `in-dev` for `in-main` itself with `gh` on the issues the pull request names (`#n` in its title, body and commits; a pull request that is not merged is refused). It then removes the long runs that began before the merge and are finished, so nothing is left for the owner.
 - Every decision goes to `build/saani-ci.json`.
 
-## The board and the kanban page
-`saani ui` (alias `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
+## The map and the kanban page
+`saani ui` (aliases `saani map`, `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed every 5 s, read-only.
 - **`/kanban`, the kanban page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with what it
   needs and a "Copy prompt" to paste to the Architect; the open pull request with its CI in three colours; the Claude Code sessions of the
   project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in); the
   PC's load.
-- **`/`, the board (the default page; `/board` still opens it):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
+- **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
   (bottom left) to END (top right), with branches (to deploy or to close) and the ways back (tests failed, CI red, needs you, hotfix, not
   planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether a long run can take
   it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, long-run fit, the
   prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
-- Both pages have a top bar with the page switch (Board · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
-- The board is one HTML file (`saani/board.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
-  `mock-state.json` beside it. Its data: [board-data-contract.md](board-data-contract.md).
+- Both pages have a top bar with the page switch (Map · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
+- The map is one HTML file (`saani/map.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
+  `mock-state.json` beside it. Its data: [map-data-contract.md](map-data-contract.md).
 
 ## Two modes
 | | Present | Away (long run) |
@@ -160,7 +160,7 @@ Issues and comments have one shape. A new issue starts from the template of its 
 (Long run, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
 A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Started`, `⚙ Progress`, `❓ Question`, `⛔ Blocked`, `✅ On dev`,
 `🚀 On main`, `✔ Deployed`, `🔗 Linked`). `saani/glance.py` reads the At a glance table (the long-run fit, what is deployed, what the owner is
-asked, what blocks the issue); the board and the long run read it through that one parser.
+asked, what blocks the issue); the map and the long run read it through that one parser.
 
 ## KPIs
 `saani kpis` counts what the repository and the logs know: issues landed per day (from the `refs #n` of the integration branch's commits),
@@ -181,7 +181,7 @@ per issue have no machine record: it says "not measured". `--baseline` adds the 
 ## Choices, and why
 - **Claude Code subagents.** A coding tool with editing, git, tests, review, hooks and permissions per worker.
 - **No cockpit app.** Multi-agent cockpits show many agents to a human who dispatches them; here the Architect dispatches and the owner keeps
-  one conversation. The board is enough for a glance.
+  one conversation. The map is enough for a glance.
 - **Agent teams later.** Claude Code's agent teams are experimental and document no worktree per teammate; they are to be tried on research
   and review only.
 

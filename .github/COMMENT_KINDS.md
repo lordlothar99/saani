@@ -1,6 +1,6 @@
 # Comment kinds
 
-Every comment the Architect (or a worker) writes on an issue starts with one of these headings, so the owner and the board can scan the
+Every comment the Architect (or a worker) writes on an issue starts with one of these headings, so the owner and the map can scan the
 history. Tables and checkboxes over prose.
 
 | Heading | When | Content |
@@ -30,6 +30,6 @@ Context: the release gate reads checks only; a gate comment also counts as green
 | Option | For | Against |
 |---|---|---|
 | Read the gate comment | one source of truth with the release | one more API call |
-| Ignore it | simpler | the board shows a green PR as pending |
+| Ignore it | simpler | the map shows a green PR as pending |
 **Recommendation:** read the gate comment.
 ```

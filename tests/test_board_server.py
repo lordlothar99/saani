@@ -317,7 +317,7 @@ STEPS = {"inbox", "backlog", "you", "started", "building", "testing", "landing",
 
 
 def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
-    """/board is saani/board.html inside a page skeleton (the file has none: the artifact host adds it), and the sample data
+    """/map is saani/map.html inside a page skeleton (the file has none: the artifact host adds it), and the sample data
     it falls back on is served beside it."""
     monkeypatch.setattr(fp, "state", lambda: {"time": "now"})
     server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
@@ -330,7 +330,7 @@ def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
         assert json.loads(urllib.request.urlopen(base + "/mock-state.json").read())["cards"]
     finally:
         server.shutdown()
-    source = fp.BOARD_FILE.read_text(encoding="utf-8")
+    source = fp.MAP_FILE.read_text(encoding="utf-8")
     assert "<html" not in source and "<body" not in source and "<!doctype" not in source.lower()
     assert '"/api/state"' in source and "fetch(stateUrl()" in source and 'fetch("mock-state.json"' in source
 
@@ -365,8 +365,8 @@ def test_one_board_shows_the_listed_projects_and_the_selector_picks_one(monkeypa
 
 
 def test_a_ready_issue_with_no_agent_is_in_the_backlog_not_the_workshops():
-    """the board page puts a Ready card in the backlog until an agent works on it, then in the Workshops."""
-    source = fp.BOARD_FILE.read_text(encoding="utf-8")
+    """the map page puts a Ready card in the backlog until an agent works on it, then in the Workshops."""
+    source = fp.MAP_FILE.read_text(encoding="utf-8")
     assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "backlog"' in source
 
 
@@ -417,22 +417,22 @@ def test_the_deploy_paths_are_read_from_saani_toml():
 
 
 def test_the_board_is_the_default_page_and_the_kanban_has_its_own_address(monkeypatch):
-    """/ and the old /board are the board, /kanban the kanban page; both pages have the page switch in their top bar."""
+    """/, /map and the old /board are the map, /kanban the kanban page; both pages have the page switch in their top bar."""
     server = fp.ThreadingHTTPServer(("127.0.0.1", 0), fp.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     get = lambda p: urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}{p}").read().decode()
     try:
         board, kanban = get("/"), get("/kanban")
-        assert board == get("/board") == get("/index.html") and board.count('id="demo"') == 1
-        assert 'class="pages"' in kanban and 'href="/kanban" aria-current="page"' in kanban and 'href="/">Board</a>' in kanban
-        assert 'id="pages"' in board and 'href="/" aria-current="page">Board</a>' in board and 'href="/kanban">Kanban</a>' in board
+        assert board == get("/map") == get("/board") == get("/index.html") and board.count('id="demo"') == 1
+        assert 'class="pages"' in kanban and 'href="/kanban" aria-current="page"' in kanban and 'href="/">Map</a>' in kanban
+        assert 'id="pages"' in board and 'href="/" aria-current="page">Map</a>' in board and 'href="/kanban">Kanban</a>' in board
         assert 'id="refresh"' in board and 'id="refresh"' in kanban and 'id="proj"' in board
         with pytest.raises(urllib.error.HTTPError) as e:
             get("/nowhere")
         assert e.value.code == 404
     finally:
         server.shutdown()
-    assert '$("#pages").hidden = !live' in fp.BOARD_FILE.read_text(encoding="utf-8")     # the artifact build has no server: no page switch
+    assert '$("#pages").hidden = false' in fp.MAP_FILE.read_text(encoding="utf-8")     # the artifact build shows the same menu, inert (no server)
 
 
 def two_projects(monkeypatch, tmp_path):
@@ -455,7 +455,7 @@ def test_the_projects_list_is_a_toml_file_read_and_written_by_saani(monkeypatch,
     folders = [f"D:{bs}work{bs}webshop", "/work/api", f"D:{bs}wéb{bs}ünï"]
     fp.write_registry(folders)
     assert fp.read_registry() == folders
-    assert fp.registry_path().read_text(encoding="utf-8").startswith("# The projects the Saani board offers")
+    assert fp.registry_path().read_text(encoding="utf-8").startswith("# The projects the Saani map offers")
     fp.registry_path().write_text("projects = [oops", encoding="utf-8")
     assert fp.read_registry() == []
 
@@ -522,7 +522,7 @@ def test_saani_projects_adds_lists_and_removes(monkeypatch, tmp_path, capsys):
 
 
 def test_both_pages_keep_the_project_in_their_address_and_show_the_waiting_dot():
-    for source in (fp.BOARD_FILE.read_text(encoding="utf-8"), fp.PAGE_FILE.read_text(encoding="utf-8")):
+    for source in (fp.MAP_FILE.read_text(encoding="utf-8"), fp.PAGE_FILE.read_text(encoding="utf-8")):
         flat = source.replace(" ", "")
         assert "location.hash.slice(1)" in source and "history.replaceState(null" in source
         assert 'p.waiting?"●"' in flat.replace("●", "●") or "p.waiting?\"●" in flat
@@ -587,7 +587,7 @@ def test_the_issue_detail_is_served_on_demand_and_the_board_asks_for_it(monkeypa
             assert e.value.code == 404
     finally:
         server.shutdown()
-    page = fp.BOARD_FILE.read_text(encoding="utf-8")
+    page = fp.MAP_FILE.read_text(encoding="utf-8")
     assert '"/api/issue?n="' in page and "DETAILS[c.number]" in page and "DATA.milestones" in page and "DATA.hygiene" in page
 
 

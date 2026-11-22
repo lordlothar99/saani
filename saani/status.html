@@ -143,6 +143,18 @@ pre{white-space:pre-wrap;margin:0;font:400 11.5px/1.5 var(--mono);color:var(--du
 @media (max-width:1000px){.top{grid-template-columns:1fr}}
 @media (max-width:640px){.wrap{padding:0 16px 32px}header{grid-template-columns:1fr;padding-top:28px}.hud{justify-content:flex-start}
  .brand h1{font-size:24px;letter-spacing:.32em}.tele{grid-template-columns:1fr}.pc{grid-template-columns:1fr}}
+/* The owner, 2026-11-22: switching between the map and the kanban page cross-fades with a slight zoom (View Transitions where the
+   browser has them, a plain fade otherwise); the kanban page carries the same rules */
+@view-transition{navigation:auto}
+::view-transition-old(root){animation:pgOut .3s ease-in both}
+::view-transition-new(root){animation:pgIn .4s cubic-bezier(.2,.8,.25,1) both}
+@keyframes pgOut{to{opacity:0;transform:scale(.97)}}
+@keyframes pgIn{from{opacity:0;transform:scale(1.03)}}
+@keyframes pgFadeIn{from{opacity:0}}
+@keyframes pgFadeOut{to{opacity:0}}
+.pg-enter body{animation:pgFadeIn .35s ease-out both}
+body.pg-leave{animation:pgFadeOut .25s ease-in both}
+@media (prefers-reduced-motion:reduce){::view-transition-old(root),::view-transition-new(root),.pg-enter body,body.pg-leave{animation:none}}
 </style></head><body>
 <div class="sky"></div>
 <svg class="dunes" viewBox="0 0 1600 600" preserveAspectRatio="none" aria-hidden="true">
@@ -154,7 +166,7 @@ pre{white-space:pre-wrap;margin:0;font:400 11.5px/1.5 var(--mono);color:var(--du
 <canvas id="dust"></canvas><div class="shade"></div>
 <div class="wrap">
 <header>
- <div class="brand"><small>THE ARCHITECT'S WORKSHOP · THIS PC</small><h1>SAANI</h1><nav class="pages" aria-label="Pages"><a href="/">Board</a><a href="/kanban" aria-current="page">Kanban</a></nav></div>
+ <div class="brand"><small>THE ARCHITECT'S WORKSHOP · THIS PC</small><h1>SAANI</h1><nav class="pages" aria-label="Pages"><a href="/">Map</a><a href="/kanban" aria-current="page">Kanban</a></nav></div>
  <div class="hud"><span class="pill" id="clock">--:--:--</span><span class="pill" id="lock">no task joining dev</span><span class="pill" id="counts"></span><select class="pill refresh" id="proj" aria-label="Project" hidden></select><button class="pill refresh" id="refresh" type="button" title="The page refreshes every 5 s. Behind it: the PC every 5 s, the pull request every 30 s, the issues every minute, where CI runs every 10 min. Click: ask GitHub and the PC again now.">↻ Refresh</button></div>
 </header>
 <div class="top">
@@ -320,4 +332,11 @@ $("q").addEventListener("input",e=>{query=e.target.value;try{sessionStorage.setI
 addEventListener("keydown",e=>{if(e.key==="/"&&document.activeElement!==$("q")){e.preventDefault();$("q").focus()}
  else if(e.key==="Escape"&&document.activeElement===$("q")){$("q").value="";query="";try{sessionStorage.removeItem("saani.q")}catch(x){}drawBoard()}});
 dust();tick();setInterval(tick,5000);addEventListener("resize",()=>lastCols.length&&drawBoard());
+const RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// the page switch: a fade where the browser has no cross-page View Transitions
+if (!("PageRevealEvent" in window)) {
+  document.documentElement.classList.add("pg-enter");
+  document.addEventListener("click", e => { const a = e.target.closest && e.target.closest(".pages a"); if (!a || a.getAttribute("aria-current") || a.hasAttribute("aria-disabled") || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault(); document.body.classList.add("pg-leave"); setTimeout(() => { location.href = a.href; }, RM ? 0 : 240); });
+}
 </script></body></html>

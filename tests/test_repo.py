@@ -50,7 +50,7 @@ def test_the_launchers_run_saani_py_from_the_plugin():
     assert "saani.py" in (ROOT / "bin" / "saani.cmd").read_text(encoding="utf-8")
 
 
-def test_ui_and_its_alias_board_print_the_same_state(monkeypatch, capsys):
+def test_ui_and_its_aliases_map_and_board_print_the_same_state(monkeypatch, capsys):
     import importlib.util
     spec = importlib.util.spec_from_file_location("saani_cli", ROOT / "saani.py")
     cli = importlib.util.module_from_spec(spec)
@@ -59,10 +59,10 @@ def test_ui_and_its_alias_board_print_the_same_state(monkeypatch, capsys):
     monkeypatch.setattr(board_server, "sample_resources", lambda: None)
     monkeypatch.setattr(board_server, "state", lambda: {"time": "now", "project": {"repo": "acme/webshop"}})
     printed = []
-    for name in ("ui", "board"):
+    for name in ("ui", "map", "board"):
         assert cli.main([name, "--json"]) == 0
         printed.append(json.loads(capsys.readouterr().out))
-    assert printed[0] == printed[1] == {"time": "now", "project": {"repo": "acme/webshop"}}
+    assert printed[0] == printed[1] == printed[2] == {"time": "now", "project": {"repo": "acme/webshop"}}
 
 
 def test_no_personal_path_ships():
@@ -78,8 +78,8 @@ def test_no_personal_path_ships():
     assert not found, "\n".join(found)
 
 
-def test_the_board_sample_is_an_invented_project():
-    sample = json.loads((ROOT / "saani" / "samples" / "board-sample.json").read_text(encoding="utf-8"))
+def test_the_map_sample_is_an_invented_project():
+    sample = json.loads((ROOT / "saani" / "samples" / "map-sample.json").read_text(encoding="utf-8"))
     text = json.dumps(sample)
     assert "acme" in text or "webshop" in text
 

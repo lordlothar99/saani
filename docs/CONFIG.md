@@ -24,8 +24,8 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `frozen` | `{}` | `path = "mark"`: once the mark is in the first 2,000 characters of that file on the integration branch, no branch may change it |
 | | `lock_stale_hours` | `2` | a landing lock older than this is taken over |
 | | `push_attempts` | `3` | how many times a landing merges again when the integration branch moved under it |
-| `[deploy]` | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the board (empty: everything on production is "To deploy") |
-| `[board]` | `folders` | `{}` | `work`, `deploy`, `longrun`: the folders the board's prompts name (read by `saani ui`; the section keeps the page's name) |
+| `[deploy]` | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
+| `[board]` | `folders` | `{}` | `work`, `deploy`, `longrun`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`) |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |
 | `[ci]` | `workflow` | `ci.yml` | the GitHub Actions workflow `saani ci pr` starts (it must accept `workflow_dispatch`) |
@@ -44,7 +44,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `in_main` | `in-main` | merged into production, not yet deployed and verified |
 | `answer` | `help wanted` | waits for the owner's answer |
 | `act` | `owner-action` | waits for the owner to do something themselves |
-| `idea` | `idea` | a raw idea: off the board, no milestone needed |
+| `idea` | `idea` | a raw idea: off the map, no milestone needed |
 
 ## Logs (in `build/` of the main checkout, never committed)
 | File | Written by |
