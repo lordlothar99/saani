@@ -10,8 +10,10 @@ Counted here:
   conflicts per landing, and the conflicts by file;
 - test jobs (build/saani-tests.jsonl, the test queue): per kind, jobs, median wait and median run.
 
-Not counted (no machine record; the report says "not measured" and where to take them from): the owner's waiting time and interventions,
-and tokens per issue. `--baseline` adds the window of the same length that ends where this one starts (git history only: the logs start
+- tokens and estimated cost per issue, role and model, from Claude Code's transcripts (saani/cost.py).
+
+Not counted (no machine record; the report says "not measured" and where to take them from): the owner's waiting time and interventions.
+`--baseline` adds the window of the same length that ends where this one starts (git history only: the logs start
 with Saani).
 """
 import argparse
@@ -22,14 +24,13 @@ import re
 import statistics
 import subprocess
 
-from . import config, core, queue
+from . import config, core, cost, queue
 
 REF = re.compile(r"\brefs?\s+((?:#\d+[,\s]*(?:and\s+)?)+)", re.IGNORECASE)
 NUMBER = re.compile(r"#(\d+)")
 GENERATED_COMMIT = re.compile(r"^Generated files rebuilt", re.IGNORECASE)
 NOT_MEASURED = {"owner_waiting_time": "the map's 'Waiting for you' zone and the issue comments, by hand",
-                "owner_interventions": "the long-run reports and the chat, by hand",
-                "tokens_per_issue": "the Claude Code usage screen, by hand; no per-issue record yet"}
+                "owner_interventions": "the long-run reports and the chat, by hand"}
 
 
 # ---------------------------------------------------------------- pure functions (tested)
@@ -104,12 +105,14 @@ def baseline_window(since, until):
     return since - datetime.timedelta(days=days), since - datetime.timedelta(days=1)
 
 
-def report(commits, landings, tests, since, until, baseline=False, today=None):
+def report(commits, landings, tests, since, until, baseline=False, today=None, tokens=None):
     out = {"window": {"since": since.isoformat(), "until": until.isoformat()},
            "git": commit_kpis(commits, since, until, today),
            "landings": landing_kpis(landings, since, until),
            "tests": test_kpis(tests, since, until),
            "not_measured": NOT_MEASURED}
+    if tokens is not None:
+        out["tokens"] = tokens
     if baseline:
         b_since, b_until = baseline_window(since, until)
         out["baseline"] = {"window": {"since": b_since.isoformat(), "until": b_until.isoformat()},
@@ -130,6 +133,8 @@ def text(r):
         lines.append("  tests: no test job recorded in the window")
     for name, where in r["not_measured"].items():
         lines.append(f"  {name.replace('_', ' ')}: not measured ({where})")
+    if "tokens" in r:
+        lines.append(cost.text(r["tokens"]))
     if "baseline" in r:
         b = r["baseline"]
         lines.append(f"Baseline, {b['window']['since']} to {b['window']['until']}: {b['git']['commits']} commits, "
@@ -164,7 +169,7 @@ def run_command(a):
     first = baseline_window(since, until)[0] if a.baseline else since
     build = core.main_checkout() / "build"
     r = report(dev_commits(a.ref or f"origin/{c.integration}", first - datetime.timedelta(days=1)), queue.rows(build / core.LANDINGS),
-               queue.rows(build / core.TESTS_LOG), since, until, a.baseline, datetime.date.today())
+               queue.rows(build / core.TESTS_LOG), since, until, a.baseline, datetime.date.today(), cost.read(c, since, until))
     print(json.dumps(r, indent=2) if a.json else text(r))
     return 0
 
