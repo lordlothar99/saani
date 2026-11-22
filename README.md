@@ -102,7 +102,8 @@ machine:
 ```
 `Bash(git -C *)` lets the agents commit in a worktree without asking; it would also let `git -C . push --force` or `reset --hard`
 through (a rule for `git push` does not match `git -C ... push`), so keep the three `ask` rules beside it. Claude Code reads a project's committed settings once you have accepted its trust dialog (the first time you open Claude Code in the
-folder). `saani status` warns, with the exact line, when the worktrees folder is not covered. Saani's agents never `cd` into a worktree:
+folder). Open Claude Code in the project's main folder, never inside a worktree: the relative path is read from the folder the session
+starts in, so from a worktree `../webshop-wt` points to the wrong place and every write there asks again. `saani status` warns, with the exact line, when the worktrees folder is not covered. Saani's agents never `cd` into a worktree:
 Claude Code asks before every `cd <folder> && <command>`, and a subagent's `cd` does not last; they name it instead (`git -C`,
 `saani test --worktree`, `saani land --worktree`).
 
