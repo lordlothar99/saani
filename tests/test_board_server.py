@@ -126,7 +126,7 @@ def test_an_agent_goes_on_the_card_its_branch_folder_or_last_worktree_names():
     assert fp.agent_issue({"branch": "feat/411-powers"}, trees) == 411
     assert fp.agent_issue({"branch": "dev", "folder": "c:/x/webshop-wt/523-page/"}, trees) == 523
     assert fp.agent_issue({"branch": "main", "folder": "c:/x/webshop", "focus": 517}, trees) == 517
-    assert fp.agent_issue({"branch": "longrun/2026-11-21_2300", "folder": "c:/x/webshop-longrun"}, trees) is None
+    assert fp.agent_issue({"branch": "auto/2026-11-21_2300", "folder": "c:/x/webshop-auto"}, trees) is None
 
 
 def test_a_session_keeps_only_the_issue_numbers_of_the_worktrees_its_commands_name():
@@ -529,17 +529,17 @@ def test_both_pages_keep_the_project_in_their_address_and_show_the_waiting_dot()
         assert 'localStorage.setItem("saani-project"' in source and "status===404" in flat
 
 
-GLANCE = {"long_run": {"fit": "partly", "why": "the data model yes"}, "blocked_by": {"issues": [13], "date": None, "text": "#13"}}
+GLANCE = {"auto": {"fit": "partly", "why": "the data model yes"}, "blocked_by": {"issues": [13], "date": None, "text": "#13"}}
 
 
 def test_a_card_carries_what_its_at_a_glance_table_says():
-    """the long-run fit read from the table (source: table), blocked while a named issue is open and not yet on dev, an epic is an anchor."""
+    """the auto fit read from the table (source: table), blocked while a named issue is open and not yet on dev, an epic is an anchor."""
     issue = {"number": 14, "title": "Board data", "labels": [], "state": "OPEN", "glance": GLANCE}
     assert fp.lifecycle(issue, {13, 14}) == {"blocked": True, "anchor": False, "blocked_by": [13],
-                                            "longrun": {"fit": "partly", "why": "the data model yes", "source": "table"}}
+                                            "auto": {"fit": "partly", "why": "the data model yes", "source": "table"}}
     assert fp.lifecycle(issue, {14})["blocked"] is False
     assert fp.lifecycle({"title": "Saani v1 (epic)"}, set())["anchor"] and fp.lifecycle({"title": "Live checks v0.1"}, set())["anchor"]
-    assert "longrun" not in fp.lifecycle({"title": "x"}, set())
+    assert "auto" not in fp.lifecycle({"title": "x"}, set())
     blocker = {"number": 13, "title": "b", "labels": ["in-dev"], "state": "OPEN"}                 # landed on dev: it blocks no more
     board = {c["id"]: c for c in fp.build_board([blocker, issue], [], set(), [], [])}
     assert [(c["number"], c["blocked"]) for c in board["dev"]["cards"] + board["ready"]["cards"]] == [(13, False), (14, False)]

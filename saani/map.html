@@ -232,7 +232,7 @@ a{color:var(--amber)}
 <div class="hud tools" role="search">
  <input id="q" type="search" placeholder="Find: number or words  ( / )" aria-label="Find an issue">
  <select id="ms" aria-label="Milestone"><option value="">All milestones</option></select>
- <select id="lr" aria-label="Long run"><option value="">Long run: any</option><option value="yes">Long run: yes</option><option value="partly">Long run: partly</option><option value="no">Long run: no</option></select>
+ <select id="lr" aria-label="Auto"><option value="">Auto: any</option><option value="yes">Auto: yes</option><option value="partly">Auto: partly</option><option value="no">Auto: no</option></select>
 </div>
 
 <div class="hud summary" id="summary" aria-label="At a glance"></div>
@@ -409,11 +409,11 @@ function mastDish(x, y, h) {
 // Flow runs along x (screen: left and up to right and down); branches spread along y. The road graph (EDGES) shows every move an issue can make.
 const ZONES = [
   {id: "inbox",   stage: "Inbox",           name: "Wayfarers' Tents",  cx: 11,  cy: 15, hint: "New issues waiting for triage: Type, milestone, labels."},
-  {id: "backlog", cmd: "/saani:new <issue>", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 24, hint: "Open and not started: in a milestone, nobody on it yet."},
+  {id: "backlog", cmd: "/saani:start <issue>", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 24, hint: "Open and not started: in a milestone, nobody on it yet."},
   {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 7,  hint: "Waits for your answer or your action. Work comes here from the backlog or from the workshops, and goes back."},
   {id: "works", cmd: "/saani:land when it is committed",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 17, hint: "Started or being built in its own worktree."},
   {id: "camp",    stage: "Camp",            name: "The Hollow",        cx: 47,  cy: 36, hint: "Where workers rest when they are not on a task."},
-  {id: "proving", cmd: "/saani:test (/saani:progress for a long run)", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
+  {id: "proving", cmd: "/saani:test (/saani:progress for a slow run)", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
   {id: "depot", cmd: "/saani:ci pr",   stage: "Integrated",          name: "Caravan Depot",     cx: 70,  cy: 17, hint: "Merged on {int}, waiting for the next release pull request into {prod}."},
   {id: "tower", cmd: "/saani:ci pr, then /saani:ci merged <pr> after the merge",   stage: "Release PR",      name: "The Watchtower",    cx: 82,  cy: 25, hint: "Carried by the open release pull request ({int} → {prod}). The beacon is its CI; red goes back to {int}."},
   {id: "pad", cmd: "/saani:ci merged <pr>",     stage: "To deploy",       name: "Launch Pad",        cx: 95,  cy: 14,  hint: "Released with something to deploy: goes live with the next deploy."},
@@ -707,17 +707,17 @@ function normalize(d) {
   return {...d, cards, pr};
 }
 const LAB = k => ((DATA && DATA.project && DATA.project.labels) || {})[k] || {answer: "help wanted", act: "owner-action"}[k];
-function longrun(c) {
-  if (c.longrun) return c.longrun;
+function autoRun(c) {
+  if (c.auto) return c.auto;
   const L = c.labels || [];
   if (["dev", "pr", "deploy", "close", "done"].includes(c.step)) return null;
   if (c.anchor || c.step === "checks") return {fit: "no", why: "A checklist of the live system: only you can check it."};
   if (L.includes(LAB("answer"))) return {fit: "no", why: "Waits for your answer."};
   if (L.includes(LAB("act"))) return {fit: "no", why: "Needs you to act: an account, a key, a live check or an approval."};
-  if (L.includes("infra")) return {fit: "partly", why: "Touches the server: a long run does the repo part and comments the rest."};
+  if (L.includes("infra")) return {fit: "partly", why: "Touches the server: an auto run does the repo part and comments the rest."};
   return {fit: "yes", why: "Repo only and nothing waits for you."};
 }
-const FIT = {yes: {color: () => C.water, word: "Long run: yes"}, partly: {color: () => C.amber, word: "Long run: partly"}, no: {color: () => C.alert, word: "Long run: no"}};
+const FIT = {yes: {color: () => C.water, word: "Auto: yes"}, partly: {color: () => C.amber, word: "Auto: partly"}, no: {color: () => C.alert, word: "Auto: no"}};
 function folderFor(c) {                                 // the folders come from saani.toml, [board] folders
   const p = DATA.project || {}, f = p.folders || {};
   if (["pr", "deploy"].includes(c.step)) return {path: f.deploy || f.work || "the project's checkout", branch: PROD(), why: "deploys and releases"};
@@ -735,7 +735,7 @@ function promptFor(c) {
   const n = c.number, pr = DATA.pr;
   switch (c.step) {
     case "inbox": return `Triage #${n}: set its Type, milestone and labels, and rewrite it in the issue template.`;
-    case "backlog": return `Start #${n}: saani new, implement it, test it and land it.`;
+    case "backlog": return `Start #${n}: saani start, implement it, test it and land it.`;
     case "pr": return pr ? `How is pull request #${pr.number} going? It carries #${n}. Tell me what to check before I merge it.` : `Prepare the ${INT()} into ${PROD()} pull request (it carries #${n}).`;
     case "deploy": return c.prompt || `Give me the deploy command for what is on ${PROD()} (it carries #${n}): read the issues for deploy warnings first.`;
     case "close": return `#${n} is merged on ${PROD()} and has nothing to deploy: close it citing the merge commit.`;
@@ -876,7 +876,7 @@ function summary(byZone, ws) {
   const pr = DATA.pr, ci = pr ? (pr.ci || {}).state || "none" : null;
   const busy = ws.filter(w => w.state === "working").length;
   const rows = [
-    ["need", C.ember, need, "need you"], ["works", C.amber, prog, "in progress"], ["fit", C.water, DATA.cards.filter(c => (longrun(c) || {}).fit === "yes").length, "a long run can take"],
+    ["need", C.ember, need, "need you"], ["works", C.amber, prog, "in progress"], ["fit", C.water, DATA.cards.filter(c => (autoRun(c) || {}).fit === "yes").length, "an auto run can take"],
     ["tower", pr ? ({green: C.ok, red: C.alert}[ci] || C.amber) : C.faint, pr ? "#" + pr.number : "—", pr ? "release PR · " + ci : "no release PR"],
     ["workers", C.sand, busy, busy === 1 ? "worker busy" : "workers busy"],
   ];
@@ -893,9 +893,9 @@ function matches(c) {
   const q = FILTER.q.trim().toLowerCase();
   if (q && !(String(c.number).startsWith(q.replace("#", "")) || (c.title || "").toLowerCase().includes(q))) return false;
   if (FILTER.ms && (FILTER.ms === "-" ? c.milestone : c.milestone !== FILTER.ms)) return false;
-  if (FILTER.lr && (longrun(c) || {}).fit !== FILTER.lr) return false;
+  if (FILTER.lr && (autoRun(c) || {}).fit !== FILTER.lr) return false;
   if (FILTER.chip === "need" && !c.need) return false;
-  if (FILTER.chip === "fit" && (longrun(c) || {}).fit !== "yes") return false;
+  if (FILTER.chip === "fit" && (autoRun(c) || {}).fit !== "yes") return false;
   if (FILTER.chip === "works" && !["started", "building", "testing", "landing"].includes(c.step)) return false;
   if (FILTER.chip === "tower" && c.step !== "pr") return false;
   return true;
@@ -1074,7 +1074,7 @@ async function fetchDetail(c) {
   } catch (_) {}
 }
 function issuePanel(c) {
-  const d = c.detail || DETAILS[c.number] || {}, fit = longrun(c), f = folderFor(c), prompt = promptFor(c), url = d.url || `https://github.com/${REPO}/issues/${c.number}`;
+  const d = c.detail || DETAILS[c.number] || {}, fit = autoRun(c), f = folderFor(c), prompt = promptFor(c), url = d.url || `https://github.com/${REPO}/issues/${c.number}`;
   const tags = el("div", {class: "chips"},
     el("span", {class: "tag"}, typeInfo(c).word), el("span", {class: "tag"}, STEP_LABEL[c.step] || c.step), el("span", {class: "tag"}, c.milestone || "No milestone"),
     c.need ? el("span", {class: "tag hot"}, c.need === "answer" ? "Needs your answer" : "Needs you to act") : null,
@@ -1087,9 +1087,9 @@ function issuePanel(c) {
       el("ul", {class: "crit"}, d.criteria.map(x => el("li", {class: x.done ? "done" : ""}, el("span", {class: "box"}), el("span", {html: md(x.text).replace(/^<p>|<\/p>$/g, "")}))))) : null);
   const agents = (c.agents || []).map(a => `${a.name || "session"} (${a.state || "?"})`).concat(Object.values(WORKERS).filter(w => w.issue === c.number && w.kind !== "architect" && w.state === "working").map(w => `${w.name} (working)`));
   const right = el("div", {},
-    fit ? el("div", {class: "sec"}, el("h3", {}, "Long run"), el("div", {class: "fit", style: `border-color:${FIT[fit.fit].color()}`},
+    fit ? el("div", {class: "sec"}, el("h3", {}, "Auto"), el("div", {class: "fit", style: `border-color:${FIT[fit.fit].color()}`},
       el("svg", {width: 18, height: 22, viewBox: "0 0 18 22", html: `<line x1="3" y1="2" x2="3" y2="22" stroke="${C.wood}" stroke-width="1.6"/>` + (fit.fit === "no" ? `<rect x="3" y="2" width="12" height="10" fill="${C.alert}"/>` : `<polygon points="3,2 17,7 3,12" fill="${fit.fit === "yes" ? C.water : "none"}" stroke="${FIT[fit.fit].color()}" stroke-width="1.4"/>` + (fit.fit === "partly" ? `<polygon points="3,2 10,4.5 10,9.5 3,12" fill="${C.amber}"/>` : ""))}),
-      el("div", {}, el("strong", {}, FIT[fit.fit].word), el("span", {}, fit.why + (c.longrun ? "" : " Estimated from the labels until the issue carries the At a glance table (the issue templates)."))))) : null,
+      el("div", {}, el("strong", {}, FIT[fit.fit].word), el("span", {}, fit.why + (c.auto ? "" : " Estimated from the labels until the issue carries the At a glance table (the issue templates)."))))) : null,
     el("div", {class: "sec"}, el("h3", {}, "Now"), el("dl", {class: "grid"},
       el("dt", {}, "Step"), el("dd", {}, STEP_LABEL[c.step] || c.step),
       el("dt", {}, "Worktree"), el("dd", {}, c.worktree ? `${c.worktree.folder} · ${c.worktree.ahead} commit(s) ahead${c.worktree.dirty ? ", " + c.worktree.dirty + " changed file(s)" : ""}` : "none"),

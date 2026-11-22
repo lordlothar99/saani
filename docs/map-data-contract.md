@@ -15,7 +15,7 @@ invented project, also served locally at `/mock-state.json`).
 |---|---|
 | `name`, `repo` | the repository's name and `owner/name` (issue links) |
 | `integration`, `production` | the branch names the prompts use |
-| `folders` | `work`, `deploy`, `longrun`: the folder each prompt says to paste it in |
+| `folders` | `work`, `deploy`, `auto`: the folder each prompt says to paste it in |
 | `labels` | the label names (`answer`, `act`, `in_dev`, `in_main`, `idea`) |
 
 ## `cards[]`
@@ -24,7 +24,7 @@ invented project, also served locally at `/mock-state.json`).
 | `number`, `title`, `state`, `labels`, `milestone` | as GitHub | the issue |
 | `step` | string | `inbox`, `backlog`, `you`, `started`, `building`, `testing`, `landing`, `dev`, `pr`, `deploy`, `close`, `checks`, `done` |
 | `need` | `answer` \| `act` \| null | waits for the owner: the glowing ring |
-| `longrun` | `{fit, why, source}` or absent | `fit` is `yes`, `partly` or `no`, `source` is `table`: read from the issue's At a glance table (`saani/glance.py`); absent: the page estimates it from the labels and says so |
+| `auto` | `{fit, why, source}` or absent | `fit` is `yes`, `partly` or `no`, `source` is `table`: read from the issue's At a glance table (`saani/glance.py`); absent: the page estimates it from the labels and says so |
 | `worktree`, `agents`, `runs`, `prompt` | as `/api/state` | the panel's "Now" grid and the default prompt |
 | `detail` | `{summary, criteria[{done, text}], history[{when, kind, text}], url}` or absent | the panel's Context, Acceptance criteria and History: not in `/api/state`, served on demand at `/api/issue?n=<number>` when a panel opens |
 | `blocked`, `blocked_by` | bool, issue numbers | the Blocked by row of the At a glance table names an open issue that is not on dev yet, or a date not yet come |

@@ -58,9 +58,9 @@ TAIL_BYTES = 256 * 1024
 LIVE_DAYS = 7
 COLUMNS = [
     ("you", "Waiting for you", "Your answer or your action. Copy the card's prompt and paste it to the Architect."),
-    ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. The Architect can start it. Command: /saani:new <issue>."),
+    ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. The Architect can start it. Command: /saani:start <issue>."),
     ("building", "Building", "An agent works on it in its own folder (a worktree). Command: /saani:land when it is committed."),
-    ("testing", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a long run)."),
+    ("testing", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a slow run)."),
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
     ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy. Command: /saani:ci merged <pr>."),
     ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it. Command: /saani:ci merged <pr>."),
@@ -308,7 +308,7 @@ def prompt_for(number, column, need=None):
     if column == "you":
         return (f"#{number} waits for my answer: give me the context, the options and your recommendation, one question at a time."
                 if need == "answer" else f"#{number} waits for me to act: tell me exactly what to do, step by step, with ready-to-paste commands.")
-    return {"ready": f"Start #{number}: saani new, implement it, test it and land it.",
+    return {"ready": f"Start #{number}: saani start, implement it, test it and land it.",
             "building": f"Where is #{number}? What is done, what is left, and is anything blocked?",
             "testing": f"How are the tests of #{number} going?"}.get(column)
 
@@ -407,14 +407,14 @@ def pr_row(raw, titles, last_run=None):
 
 
 def lifecycle(issue, open_numbers, today=None):
-    """What the issue's At a glance table adds to its card: the long-run fit (marked as read from the table), whether an open issue or a
+    """What the issue's At a glance table adds to its card: the auto fit (marked as read from the table), whether an open issue or a
     date still blocks it, and whether it is a tracking issue (an epic, the live checks) drawn as an anchor, not a task."""
     g = issue.get("glance") or {}
     out = {"blocked": glance.is_blocked(g, open_numbers, today or datetime.date.today().isoformat()),
            "anchor": bool(re.search(r"\(epic\)|^live checks", issue.get("title", ""), re.I))}
-    fit = (g.get("long_run") or {}).get("fit")
+    fit = (g.get("auto") or {}).get("fit")
     if fit:
-        out["longrun"] = {"fit": fit, "why": g["long_run"].get("why", ""), "source": "table"}
+        out["auto"] = {"fit": fit, "why": g["auto"].get("why", ""), "source": "table"}
     out["blocked_by"] = (g.get("blocked_by") or {}).get("issues", [])
     return out
 

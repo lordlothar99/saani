@@ -36,7 +36,7 @@ lock_stale_hours = 2
 push_attempts = 3
 
 [board]
-folders = { work = "C:/work/webshop", deploy = "C:/work/webshop-main", longrun = "C:/work/webshop-longrun" }
+folders = { work = "C:/work/webshop", deploy = "C:/work/webshop-main", auto = "C:/work/webshop-auto" }
 session_match = "webshop"        # Claude Code sessions whose project folder name contains this are listed
 port = 8771
 

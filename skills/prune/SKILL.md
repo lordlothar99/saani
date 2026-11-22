@@ -1,6 +1,6 @@
 ---
 name: prune
-description: Delete the merged branches of the Saani project, locally and on GitHub (never the integration or production branch or checked-out ones; a long run's branch and folder only once it is finished). Use when the owner types /saani:prune.
+description: Delete the merged branches of the Saani project, locally and on GitHub (never the integration or production branch or checked-out ones; an auto run's branch and folder only once it is finished). Use when the owner types /saani:prune.
 argument-hint: "[--local-only]"
 disable-model-invocation: true
 ---
