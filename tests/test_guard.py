@@ -489,6 +489,19 @@ def test_a_git_bash_glob_is_read_from_its_windows_path(ctx):
     assert sh(ctx, f"cat {work}/*.k?y")[2] == "secret"
 
 
+def test_a_device_is_refused_but_dev_null(ctx):
+    depth = "../" * (len(pathlib.Path(ctx.places["work"]).parts) + 2)
+    for command in ("cat /dev/clipboard", "head -c 9 /dev/clipboard", "cat /dev/../dev/clipboard", "cat /tmp/../dev/clipboard",
+                    f"cat {depth}dev/clipboard", "cat ~/../../../../../../../../../../dev/clipboard", "ls /dev",
+                    "gh issue comment 1 --body-file /dev/clipboard", "git commit -F /dev/clipboard", "cat /DEV/Clipboard"):
+        assert sh(ctx, command)[2] == "device", command
+    assert tool(ctx, "Read", file_path="/dev/clipboard")[2] == "device"
+    assert sh(ctx, "ls > /dev/clipboard")[2] == "unsure"                                 # a redirect: only to /dev/null
+    assert sh(ctx, "cat < /dev/clipboard")[2] == "unsure"
+    assert sh(ctx, "diff a.txt /dev/null")[0] == "allow"
+    assert sh(ctx, "ls > /dev/null 2>&1")[0] == "allow"
+
+
 def test_a_git_bash_drive_path_with_backslashes_is_read_as_its_windows_path(ctx):
     assert sh(ctx, "cat /cygdrive/c/x.txt")[2] == "unsure"
     assert tool(ctx, "Read", file_path="/cygdrive/c/x.txt")[2] == "unsure"

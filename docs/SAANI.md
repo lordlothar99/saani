@@ -264,7 +264,9 @@ as `C:/...`; a `/cygdrive/...` path is refused.
 
 **Network paths** (`\\host\share`, `//host/share`, `\\?\UNC\...`, `\\.\...`) are refused to every tool and in every command before the
 guard looks them up: looking one up would connect to that host (and on Windows send the owner's credentials). The `//host/...` of a URL
-(`https://...`) is only read as text. **The guard's own work is bounded**: a folder walk (Grep, `rm`) or a glob past 20000 entries is
+(`https://...`) is only read as text. **Devices**, `/dev/...` but `/dev/null` (Git Bash's `/dev/clipboard` reads the clipboard), are
+refused as a path in every tool and command, also when `..` from the current folder or from `~` reaches them, and as a redirection
+(only `>/dev/null`). **The guard's own work is bounded**: a folder walk (Grep, `rm`) or a glob past 20000 entries is
 refused, and one deadline of 8 seconds covers the whole decision, every walk and glob of the command together (`too big`; the hook has 15
 seconds).
 

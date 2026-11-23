@@ -245,20 +245,39 @@ def norm(p):
     return os.path.normcase(os.path.realpath(str(p)))
 
 
+def device(p, cwd):
+    """True for a device as Git Bash or a POSIX shell reads the path (/dev/clipboard, /dev/sda, /dev/tcp/..., also reached by `..` from
+    the current folder: /c/x/../../dev), /dev/null aside."""
+    import posixpath
+
+    def gitbash(x):
+        x = x.replace("\\", "/")
+        m = re.match(r"^([A-Za-z]):(.*)", x)
+        return "/" + m.group(1).lower() + m.group(2) if m else x
+    q = gitbash(p)
+    if not q.startswith("/"):
+        q = gitbash(str(cwd)).rstrip("/") + "/" + q
+    q = posixpath.normpath(q).lower()
+    return (q == "/dev" or q.startswith("/dev/")) and q != "/dev/null"
+
+
 def resolve(p, cwd, temp=None, tilde=False):
     """`p` as a normalized absolute path: relative to `cwd`, `..` resolved, Git Bash's /c/... and /tmp read on Windows, case folded on
-    Windows. A network path is refused before any filesystem call (looking it up would connect to that host)."""
+    Windows. A network path is refused before any filesystem call (looking it up would connect to that host), a device (/dev/clipboard)
+    and a /cygdrive path too."""
     p = str(p)
     if re.match(r"^[\\/]cygdrive([\\/]|$)", p, re.I):
         raise Refuse("unsure", "a /cygdrive path (the guard reads Git Bash's /c/..., not Cygwin's mounts)", how="use the C:/... path")
+    if tilde and (p == "~" or p.startswith(("~/", "~\\"))):
+        p = os.path.expanduser("~") + p[1:]
+    if device(p, cwd):
+        raise Refuse("device", "a device path (/dev/clipboard reads the clipboard; only /dev/null is allowed)", how="use a file")
     if WINDOWS:
         m = re.match(r"^/([a-zA-Z])(?=[\\/]|$)", p)                 # Git Bash: /c/Users and /c\Users are both C:\Users
         if m:
             p = m.group(1) + ":" + (p[2:].replace("\\", "/") or "/")
         elif temp and (p == "/tmp" or p.startswith("/tmp/")):
             p = temp + p[4:]
-    if tilde and (p == "~" or p.startswith(("~/", "~\\"))):
-        p = os.path.expanduser("~") + p[1:]
     full = os.path.join(cwd, p)
     if network(full):
         raise Refuse("network path", "a network path (\\\\host\\share, //host/share): the guard does not look it up, that would connect "
