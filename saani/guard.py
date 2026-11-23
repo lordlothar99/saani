@@ -1328,12 +1328,15 @@ def revisions(sub, words, ctx, gcwd):
     def no(what):
         return deny("revision", f"git {sub} with {what[:40]} (only HEAD, HEAD~n, origin/{ctx.integration}, origin/{ctx.production}, worker "
                     "branches and ranges of these; no commit id)", "git", how="name HEAD, origin/<branch> or a worker branch")
-    k, ended = 0, False
+    # git takes the FIRST literal -- (even one that looks like an option's value) as the end of the revisions: with one, every word
+    # before it is read as a revision, never as a path, so no path or glob exemption applies there.
+    dashdash = words.index("--") if "--" in words else None
+    k = 0
     while k < len(words):
         w = words[k]
         nxt = words[k + 1] if k + 1 < len(words) else ""
-        if ended or w == "--":
-            ended = True
+        if dashdash is not None and k >= dashdash:
+            pass                                         # paths, judged by the other rules
         elif w.startswith("--"):
             name, eq, value = w[2:].partition("=")
             if sub == "ls-files" and name and "with-tree".startswith(name):
@@ -1363,12 +1366,12 @@ def revisions(sub, words, ctx, gcwd):
                         break
             elif w in REV_TEXT_VALUED:
                 k += 1
-        elif sub in ("ls-files", "commit", "branch") or getattr(w, "glob", False):
+        elif sub in ("ls-files", "commit", "branch") or (getattr(w, "glob", False) and dashdash is None):
             pass                                         # paths (ls-files, a glob bash expands), refused paths (commit), patterns (branch)
         elif sub == "show" and ":" in w:
             if not allowed_rev(w.split(":", 1)[0], ctx):
                 return no(w)
-        elif not allowed_rev(w, ctx) and not (sub in ("diff", "log") and os.path.lexists(ctx.path(w, gcwd))):
+        elif not allowed_rev(w, ctx) and not (sub in ("diff", "log") and dashdash is None and os.path.lexists(ctx.path(w, gcwd))):
             return no(w)
         k += 1
     return None

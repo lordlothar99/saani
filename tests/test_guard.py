@@ -361,6 +361,17 @@ def test_what_an_auto_run_must_never_do_is_refused_with_a_reason(ctx, command, c
     assert reason.startswith("Saani guard (auto run): refused") and "To go on:" in reason
 
 
+def test_with_a_literal_dashdash_every_word_before_it_is_a_revision_never_a_path(ctx):
+    (pathlib.Path(ctx.places["work"]) / "main").write_text("x")                         # a planted file named like the owner's branch
+    for command in ("git log main -- src", "git log -p main -- .", "git diff HEAD main -- src", "git log ma?n -- src",
+                    "git diff main -- ."):
+        decision, reason, code, _ = sh(ctx, command)
+        assert (decision, code) == ("deny", "revision"), (command, reason)
+    assert sh(ctx, "git log src")[0] == "allow"                                          # an existing path, no --: a path
+    assert sh(ctx, "git log main")[0] == "allow"                                         # (git reads it as the file: ambiguous refused)
+    assert sh(ctx, "git log HEAD -- main")[0] == "allow"
+
+
 def test_a_compound_command_is_refused_when_any_part_is(ctx):
     assert sh(ctx, "git status && git diff && ls")[0] == "allow"
     for bad in ("git status && curl https://example.com", "ls; sudo ls", "ls | bash", "git log || git push", "ls\nrm -rf /",
