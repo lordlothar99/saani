@@ -1255,7 +1255,9 @@ def git_command(part, ctx, cwd):
 # The owner's stash: refs/stash is shared by every worktree (its ^3 holds untracked files). Named as a revision (stash, refs/stash,
 # stash@{n}, stash^3, a..stash, ^stash, any case: refs are files on Windows), found by a :/message search over every ref, or listed by
 # an option that walks every ref or the reflogs.
-STASH_REV = re.compile(r"(?:^|\.\.|\^|=)(?:refs[\\/]+)?stash(?:$|[@^~:{]|\.\.)", re.I)
+STASH_REV = re.compile(r"(?:^|\.\.|\^)(?:refs[\\/]+)?stash(?:$|[@^~:{]|\.\.)", re.I)
+TEXT_OPTIONS = ("grep", "author", "committer", "format", "pretty", "message", "since", "until", "after", "before", "date", "trailer")
+VALUE_LETTERS = set("SGLOnMCBUlI")      # a short option of log/diff that takes the rest of the word as its value (-Sdebug, -Gx, -n5)
 EVERY_REF = ("all", "glob", "reflog", "walk-reflogs", "stdin", "bisect", "alternate-refs", "indexed-objects", "disambiguate")
 REF_PATTERNS = ("branches", "remotes", "tags")
 
@@ -1267,7 +1269,9 @@ def owner_stash(sub, words):
     no = deny("git stash", f"git {sub} reading the owner's stash (refs/stash is shared by every worktree) or walking every ref", "git",
               how="name the revisions (HEAD, origin/<branch>, a commit)")
     for w in words:
-        if STASH_REV.search(w):
+        name, eq, value = w[2:].partition("=") if w.startswith("--") else ("", "", "")
+        text = bool(eq and name) and any(x.startswith(name) for x in TEXT_OPTIONS)     # --grep=stash: a pattern, not a revision
+        if STASH_REV.search(value if eq else w) and not text:
             return no
         if sub not in ("log", "show", "rev-parse", "diff", "commit"):     # (restore/checkout: sources are HEAD or origin/<integration>)
             continue
@@ -1275,11 +1279,14 @@ def owner_stash(sub, words):
             return no
         if sub == "commit":
             continue
-        name, eq, _ = w[2:].partition("=") if w.startswith("--") else ("", "", "")
         if name and (any(x.startswith(name) for x in EVERY_REF) or (eq and any(x.startswith(name) for x in REF_PATTERNS))):
             return no
-        if re.fullmatch(r"-[a-zA-Z]*g[a-zA-Z]*", w):
-            return no
+        if re.match(r"-[a-zA-Z]", w):                   # -g alone or in a cluster of flags; never inside a value (-Sdebug, -Gregister)
+            for ch in w[1:]:
+                if ch == "g":
+                    return no
+                if ch in VALUE_LETTERS or not ch.isalpha():
+                    break
     return None
 
 
