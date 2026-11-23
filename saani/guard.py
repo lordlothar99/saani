@@ -50,7 +50,7 @@ class Refuse(Exception):
         self.code, self.why, self.how = code, why, how
 
 
-BUDGET_SECONDS = 5.0                # the guard's own time for a folder walk or a glob (the hook has 15 s): past it, refused
+BUDGET_SECONDS = 8.0                # the guard's own time for one decision, every walk and glob together (the hook has 15 s): past it, refused
 
 
 def network(p):
@@ -290,6 +290,17 @@ class Context:
         self.worker_branch = re.compile(worker_branch) if isinstance(worker_branch, str) else (
             worker_branch or re.compile(r"^(bug|feat|task)/(\d+)-[a-z0-9-]+$"))
         self.tests = [list(t) for t in tests if t]
+        self.deadline = None                                  # set by decide(): one deadline for the whole decision
+
+    def in_time(self):
+        """Refuses once the decision's time (BUDGET_SECONDS for the whole call, every walk and glob together) is spent."""
+        import time
+        now = time.monotonic()
+        if self.deadline is None:
+            self.deadline = now + BUDGET_SECONDS
+        if now >= self.deadline:
+            raise Refuse("too big", "more to look through than the guard's time for one decision (folder walks, globs)",
+                         how="name the files, or a narrower path or glob")
 
     def path(self, p, cwd=None, tilde=False):
         return resolve(p, cwd or self.cwd, self.temp, tilde)
@@ -413,7 +424,7 @@ def holds_protected(p, ctx):
         return True
     if any(base and inside(base, p) for base in (ctx.wt_dir, ctx.folder, ctx.main, ctx.saani_home, ctx.temp, ctx.home)):
         return True
-    return os.path.isdir(p) and tree_has(p, lambda path, name: protected(path, ctx))
+    return os.path.isdir(p) and tree_has(p, lambda path, name: protected(path, ctx), ctx)
 
 
 # ---------------------------------------------------------------- the decision
@@ -438,6 +449,8 @@ OTHER_TOOLS = {"Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage
 
 def decide(event, ctx):
     """("allow" | "deny", reason, short reason for the log, the refused command's first word) for one PreToolUse event in an auto run."""
+    import time
+    ctx.deadline = time.monotonic() + BUDGET_SECONDS
     try:
         return decide_tool(event, ctx)
     except Refuse as e:
@@ -512,22 +525,22 @@ def grep_tool(inp, ctx):
             if os.path.isdir(path) or (plain and not fnmatch.fnmatchcase(name, glob_.lower())):
                 return False
             return secret_name(os.path.relpath(path, root))
-        if tree_has(root, hit, skip=(".git",)):
+        if tree_has(root, hit, ctx, skip=(".git",)):
             return deny("secret", "Grep in a folder tree that holds a secret file the search could read (or too big to look through)",
                         how="give Grep a glob of plain names that leaves the secret out (*.py), or a deeper path")
     return allow("Grep inside the run's folders")
 
 
-def tree_has(root, test, skip=()):
-    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries, or the walk
-    takes longer than BUDGET_SECONDS."""
-    import time
-    seen, end = 0, time.monotonic() + BUDGET_SECONDS
+def tree_has(root, test, ctx, skip=()):
+    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries. Refused once the
+    decision's time is spent (ctx.in_time)."""
+    seen = 0
     for top, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d.lower() not in skip]
         for name in dirs + files:
             seen += 1
-            if seen > WALK_CAP or time.monotonic() >= end or test(os.path.join(top, name), name.lower()):
+            ctx.in_time()
+            if seen > WALK_CAP or test(os.path.join(top, name), name.lower()):
                 return True
     return False
 
@@ -773,22 +786,22 @@ def secret_word(ctx, word, cwd):
         if not ctx.in_run(pattern):
             raise Refuse("glob outside the worktrees", "a glob outside the worktrees folder and the run's folder",
                          how="name the file, or Read it; globs only inside a worktree")
-        for match in glob_matches(pattern):
+        for match in glob_matches(pattern, ctx):
             if secret_name(match) or not ctx.in_run(norm(match)):
                 return True
     return False
 
 
-def glob_matches(pattern):
+def glob_matches(pattern, ctx):
     """The paths matching the absolute, normalized `pattern`, one path part at a time with * and ? (in any case, hidden names too: never
-    fewer than bash lists). Refused past WALK_CAP entries or BUDGET_SECONDS."""
+    fewer than bash lists). Refused past WALK_CAP entries or once the decision's time is spent."""
     import fnmatch
-    import time
-    end, seen = time.monotonic() + BUDGET_SECONDS, [0]
+    seen = [0]
 
     def tick():
         seen[0] += 1
-        if seen[0] > WALK_CAP or time.monotonic() >= end:
+        ctx.in_time()
+        if seen[0] > WALK_CAP:
             raise Refuse("too big", "a glob that reaches more entries than the guard looks through in its time",
                          how="name the files, or a narrower glob")
     drive, rest = os.path.splitdrive(pattern)
@@ -815,6 +828,7 @@ def glob_matches(pattern):
 def scan(ctx, words, cwd, skip=()):
     """The first word naming a secret, or None (`skip`: indexes of words that are text, not paths)."""
     for k, w in enumerate(words):
+        ctx.in_time()
         if k not in skip and secret_word(ctx, w, cwd):
             return w
     return None

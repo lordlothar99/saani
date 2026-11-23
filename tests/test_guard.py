@@ -640,8 +640,24 @@ def test_a_walk_past_the_guard_s_time_budget_is_refused(ctx, monkeypatch):
     assert tool(ctx, "Grep", pattern="x", path="{work}")[0] == "allow"
     assert sh(ctx, "rm -rf {work}/src")[0] == "allow"
     monkeypatch.setattr(guard, "BUDGET_SECONDS", 0)
-    assert tool(ctx, "Grep", pattern="x", path="{work}")[2] == "secret"                  # the walk ran out of time: refused
-    assert sh(ctx, "rm -rf {work}/src")[2] == "guard file"
+    assert tool(ctx, "Grep", pattern="x", path="{work}")[2] == "too big"                 # the walk ran out of time: refused
+    assert sh(ctx, "rm -rf {work}/src")[2] == "too big"
+
+
+def test_one_deadline_bounds_the_whole_decision_not_each_glob(ctx, monkeypatch):
+    import time
+    work = pathlib.Path(ctx.places["work"])
+    for k in range(20):
+        (work / f"f{k}.txt").write_text("x")
+    words = " ".join(f"f{k}*" for k in range(20))
+    assert sh(ctx, f"cat {words}")[0] == "allow"
+    clock = [time.monotonic()]
+
+    def tick():                                                                          # every look at the clock: one second later
+        clock[0] += 1
+        return clock[0]
+    monkeypatch.setattr(time, "monotonic", tick)
+    assert sh(ctx, f"cat {words}")[2] == "too big"                                        # 20 globs, each well under 8 s, too long together
 
 
 def test_rm_of_a_folder_looks_at_its_whole_tree(ctx):
