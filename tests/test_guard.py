@@ -115,7 +115,8 @@ ALLOWED = [
     "wc -l src/*.py", "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
     "test -f README.md", "[ -d src ]", "[ a = b ]", "pwd", "diff a.txt b.txt",
     "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git show HEAD:src/app.py", "git add src/app.py", "git add -- src/app.py README.md",
-    "git stash list", "saani auto status --check", "saani auto report --pr 3 --post",
+    "git stash list", "saani auto status --check", "git log --stat -3", "git log --oneline --branches", "git show HEAD:docs/stash.md",
+    "git diff HEAD~1 -- src/stash.py", "git switch -c feat/12-stash-fix origin/dev", "saani auto report --pr 3 --post",
     "git commit -m 'Cart: total in cents (refs #12)' -m 'Why: rounding' -m 'Undo: revert'", "git commit --amend --no-edit",
     "git commit -m 'Cart: -f is only text here, as is .env'", "git commit -F msg.txt", "git commit --file=msg.txt -q",
     "git commit -m x -m 'y z'", "git commit --amend -m x", "git commit -s -m x",
@@ -180,6 +181,15 @@ DENIED = [
     ("git stash push -a", "git stash"), ("git stash push --all", "git stash"), ("git stash push -p", "git stash"),
     ("git stash push --only-untracked", "git stash"), ("git stash show", "git stash"), ("git stash show -p 'stash@{{0}}'", "git stash"),
     ("git stash apply", "git stash"), ("git stash push src/app.py", "git stash"),
+    ("git diff HEAD refs/stash^3", "git stash"), ("git log --all -p", "git stash"), ("git log --al -p", "git stash"),
+    ("git diff 'stash@{{0}}'", "git stash"), ("git diff HEAD..stash", "git stash"), ("git log HEAD...STASH", "git stash"),
+    ("git log ^stash HEAD", "git stash"), ("git show 'refs\\stash'", "git stash"), ("git rev-parse stash", "git stash"),
+    ("git rev-parse --all", "git stash"), ("git log -g", "git stash"), ("git log --walk-reflogs", "git stash"),
+    ("git log --reflog", "git stash"), ("git log --glob=refs/st*", "git stash"), ("git log --branches=x*", "git stash"),
+    ("git log --tags=v*", "git stash"), ("git log --remotes=*", "git stash"), ("git log --stdin", "git stash"),
+    ("git show ':/WIP on'", "git stash"), ("git log HEAD..:/fix", "git stash"), ("git diff 'stash^{{tree}}'", "git stash"),
+    ("git restore --source=stash src/app.py", "git stash"), ("git checkout stash -- src/app.py", "git stash"),
+    ("git commit -C stash", "git stash"),
     ("git -C {work} stash pop", "git stash"), ("git stash pop", "git stash"), ("git stash pop -q", "git stash"),      # the owner's stash
     ("git stash", "git stash"), ("git stash push -q -m 'wip'", "git stash"), ("git stash push", "git stash"),        # on top of the owner's
     ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
@@ -395,7 +405,8 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                                   "{work}/.git./config", "{main}/.git/config:x", ".git/config",
                                   "{home}/.bash_history", "{work}/.python_history", "{home}/.gitconfig", "{home}/.config/git/config",
                                   "{home}/.m2/settings.xml", "{work}/.yarnrc.yml", "{home}/AppData/Roaming/pip/pip.ini",
-                                  "{home}/.config/pip/pip.conf", "{home}/.claude.json.backup", "{home}/.npmrc.bak", "{home}/.netrc~"])
+                                  "{home}/.config/pip/pip.conf", "{home}/.claude.json.backup", "{home}/.npmrc.bak", "{home}/.netrc~",
+                                  "{main}/.git/refs/stash", "{main}/.git/logs/refs/stash", "{main}/.git/packed-refs"])
 def test_more_secrets_are_refused_to_read(ctx, name):
     decision, reason, code, _ = tool(ctx, "Read", file_path=name)
     assert (decision, code) == ("deny", "secret"), (name, reason)

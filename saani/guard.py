@@ -356,7 +356,8 @@ def context(cwd, st, session=None):
 STRONG_NAMES = {".netrc", "_netrc", ".npmrc", "npmrc", ".pypirc", ".pgpass", ".envrc", ".git-credentials", "hosts.yml", ".claude.json",
                 "consolehost_history.txt", ".bash_history", ".python_history", ".gitconfig", ".yarnrc.yml", "pip.ini", "pip.conf"}
 STRONG_PREFIXES = (".claude.json", ".npmrc", ".netrc")          # their backups too (.claude.json.backup, .npmrc.bak, .netrc~)
-STRONG_TAILS = ([".config", "git", "config"], [".m2", "settings.xml"])
+STRONG_TAILS = ([".config", "git", "config"], [".m2", "settings.xml"],
+                [".git", "refs", "stash"], [".git", "logs", "refs", "stash"], [".git", "packed-refs"])     # the owner's stash, by its id
 SECRET_DIRS = {".ssh", ".gnupg", ".kube", "psreadline"}
 KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk", ".jks", ".keystore", ".kdbx")
 KEY_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
@@ -1156,6 +1157,9 @@ def git_command(part, ctx, cwd):
             return deny("git option", f"the git option --{name[:30]} (it runs a program, writes a file or moves the repository)", "git")
         if w == "-f" or (sub in GIT_SHORT_FORCE and re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", w)):
             return deny("force flag", "a force flag", "git")
+    verdict = owner_stash(sub, words)
+    if verdict:
+        return verdict
     if sub not in GIT_READ_ANYWHERE and not ctx.cd_ok(gcwd):
         return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
                     "git", how="cd <worktree> && git ...")
@@ -1165,6 +1169,37 @@ def git_command(part, ctx, cwd):
         return verdict
     if scan(ctx, rest, gcwd, text):
         return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
+    return None
+
+
+# The owner's stash: refs/stash is shared by every worktree (its ^3 holds untracked files). Named as a revision (stash, refs/stash,
+# stash@{n}, stash^3, a..stash, ^stash, any case: refs are files on Windows), found by a :/message search over every ref, or listed by
+# an option that walks every ref or the reflogs.
+STASH_REV = re.compile(r"(?:^|\.\.|\^|=)(?:refs[\\/]+)?stash(?:$|[@^~:{]|\.\.)", re.I)
+EVERY_REF = ("all", "glob", "reflog", "walk-reflogs", "stdin", "bisect", "alternate-refs", "indexed-objects")
+REF_PATTERNS = ("branches", "remotes", "tags")
+
+
+def owner_stash(sub, words):
+    """A refusal when a git command would read the owner's stash: a stash revision anywhere, a :/ search, and in the commands that walk
+    revisions (log, show, rev-parse, diff) --all, -g, --walk-reflogs, --reflog, --glob, --stdin..., --branches/--remotes/--tags=<pattern>
+    (and their abbreviations)."""
+    no = deny("git stash", f"git {sub} reading the owner's stash (refs/stash is shared by every worktree) or walking every ref", "git",
+              how="name the revisions (HEAD, origin/<branch>, a commit)")
+    for w in words:
+        if STASH_REV.search(w):
+            return no
+        if sub not in ("log", "show", "rev-parse", "diff", "commit"):     # (restore/checkout: sources are HEAD or origin/<integration>)
+            continue
+        if re.search(r"(?:^|\.\.|\^):/", w):
+            return no
+        if sub == "commit":
+            continue
+        name, eq, _ = w[2:].partition("=") if w.startswith("--") else ("", "", "")
+        if name and (any(x.startswith(name) for x in EVERY_REF) or (eq and any(x.startswith(name) for x in REF_PATTERNS))):
+            return no
+        if re.fullmatch(r"-[a-zA-Z]*g[a-zA-Z]*", w):
+            return no
     return None
 
 
