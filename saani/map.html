@@ -490,7 +490,7 @@ const STEP_LABEL = {inbox: "Inbox · to triage", backlog: "Backlog", you: "Waiti
                     checks: "Live checks", done: "Done"};
 const NEXT = {backlog: "started", started: "building", building: "testing", testing: "dev", dev: "pr", pr: "close", close: "done"};
 // a block's top is its issue Type (GitHub issue types: Bug, Task, Feature); its sides are the same brown for every block
-const TYPE = {bug: {word: "Bug", color: "#d8614a"}, task: {word: "Task", color: "#e3be4f"}, feature: {word: "Feature", color: "#6b9bd6"}};
+const TYPE = {bug: {word: "Bug", color: "#d8614a"}, task: {word: "Task", color: "#e29f42"}, feature: {word: "Feature", color: "#6b9bd6"}};
 const TYPE_NONE = {word: "No type", color: "#d8c6a4"}, SIDE_L = "#6e4a2c", SIDE_R = "#53361f";
 function typeOf(c) {
   // the Type from the state when it carries one, else the worktree branch prefix (bug/, task/, feat/), else the labels
@@ -966,7 +966,7 @@ function blockSVG(c) {
          `<polygon points="${P([A, B, Cc, D])}" fill="${rimC}"/><polygon points="${P(inner)}" fill="${t}"/>` +
          `<polygon points="${P([inner[0], inner[1], L(inner[1], inner[2], .18), L(inner[0], inner[3], .18)])}" fill="#000" opacity=".14"/>` +
          ln(D0, D, 1.4, .6) + ln(C0, Cc, 1.6, .7) + ln(B0, B, 1.4, .6) + ln(D0, C0, 1, .5) + ln(C0, B0, 1, .5) + `</g>`;
-  if (c.need) out += `<polygon points="${P(inner)}" fill="${C.ember}" opacity=".35"/>`;
+  // The owner, 2026-11-22: no tint over the content any more (a container that needs you has its orange ring): a Type has the same colour everywhere
   if (c.step === "building") { const [sx, sy] = iso(0, 0, h + .2); out += `<circle class="spark" cx="${sx}" cy="${sy}" r="3" fill="${C.amber}"/><circle class="spark" cx="${sx + 6}" cy="${sy - 4}" r="2" fill="${C.ember}" style="animation-delay:.4s"/>`; }
   if (c.step === "testing" || (c.runs || []).some(r => r.live)) out += `<ellipse class="swirl" cx="0" cy="${-h * TH / 2}" rx="26" ry="14" fill="none" stroke="${C.ridge}" stroke-width="1.5" stroke-dasharray="4 7"/>`;
   const [lx, ly] = iso(0, 0, h); const label = String(c.number), w = label.length * 6.4 + 8;
