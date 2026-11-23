@@ -259,8 +259,8 @@ files.
 `.yarnrc.yml`, `pip.ini`, `pip.conf`, `.bash_history`, `.python_history`, `~/.claude.json*` and `~/.claude/` (but its `projects/*/memory/` and the session's own saved tool outputs `projects/*/<session>/tool-results/`, never another session's, judged after `..`
 and links are resolved, so neither is a way to the rest of `~/.claude/`), PowerShell's history
 (`PSReadLine/`, `ConsoleHost_history.txt`), anything under `.ssh/`, `.gnupg/`, `.kube/` or `/proc/`, and a file with
-"secret" or "token" in its name (in a shell command, a word with "token" that is not a file, like a branch name, is not one). Paths are compared after `..` is resolved, with `/` and `\`, case-insensitively on Windows, and Git Bash's `/c/...` read
-as `C:/...`.
+"secret" or "token" in its name (in a shell command, a word with "token" that is not a file, like a branch name, is not one). Paths are compared after `..` is resolved, with `/` and `\`, case-insensitively on Windows, and Git Bash's `/c/...` (or `/c\...`) read
+as `C:/...`; a `/cygdrive/...` path is refused.
 
 **Network paths** (`\\host\share`, `//host/share`, `\\?\UNC\...`, `\\.\...`) are refused to every tool and in every command before the
 guard looks them up: looking one up would connect to that host (and on Windows send the owner's credentials). The `//host/...` of a URL

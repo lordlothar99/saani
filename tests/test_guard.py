@@ -489,6 +489,17 @@ def test_a_git_bash_glob_is_read_from_its_windows_path(ctx):
     assert sh(ctx, f"cat {work}/*.k?y")[2] == "secret"
 
 
+def test_a_git_bash_drive_path_with_backslashes_is_read_as_its_windows_path(ctx):
+    assert sh(ctx, "cat /cygdrive/c/x.txt")[2] == "unsure"
+    assert tool(ctx, "Read", file_path="/cygdrive/c/x.txt")[2] == "unsure"
+    if os.name != "nt":
+        return
+    home = ctx.places["home"].replace("/", "\\")
+    gitbash = "/" + home[0].lower() + home[2:]                                           # /c\Users\...\home
+    assert sh(ctx, f"cat '{gitbash}\\.claude\\settings.json'")[2] == "secret"
+    assert tool(ctx, "Read", file_path=gitbash + "\\.claude\\settings.json")[2] == "secret"
+
+
 def test_a_glob_past_the_guard_s_budget_is_refused(ctx, monkeypatch):
     import time
     big = pathlib.Path(ctx.places["work"]) / "big"

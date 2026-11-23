@@ -249,10 +249,12 @@ def resolve(p, cwd, temp=None, tilde=False):
     """`p` as a normalized absolute path: relative to `cwd`, `..` resolved, Git Bash's /c/... and /tmp read on Windows, case folded on
     Windows. A network path is refused before any filesystem call (looking it up would connect to that host)."""
     p = str(p)
+    if re.match(r"^[\\/]cygdrive([\\/]|$)", p, re.I):
+        raise Refuse("unsure", "a /cygdrive path (the guard reads Git Bash's /c/..., not Cygwin's mounts)", how="use the C:/... path")
     if WINDOWS:
-        m = re.match(r"^/([a-zA-Z])(?=/|$)", p)
+        m = re.match(r"^/([a-zA-Z])(?=[\\/]|$)", p)                 # Git Bash: /c/Users and /c\Users are both C:\Users
         if m:
-            p = m.group(1) + ":" + (p[2:] or "/")
+            p = m.group(1) + ":" + (p[2:].replace("\\", "/") or "/")
         elif temp and (p == "/tmp" or p.startswith("/tmp/")):
             p = temp + p[4:]
     if tilde and (p == "~" or p.startswith(("~/", "~\\"))):
