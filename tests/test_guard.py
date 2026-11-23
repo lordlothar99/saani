@@ -1051,7 +1051,7 @@ def test_a_decision_that_blocks_is_cut_off_with_a_deny_within_the_budget(tmp_pat
     import time
     main, work = fake_repo(tmp_path)
     guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
-    monkeypatch.setattr(guard, "BUDGET_SECONDS", 0.3)
+    monkeypatch.setattr(guard, "HARD_STOP_SECONDS", 0.3)
     monkeypatch.setattr(guard.os.path, "realpath", lambda p, *a, **k: time.sleep(5) or p)   # a disconnected drive: every lookup blocks
     monkeypatch.setattr(guard, "log_refusal", lambda *a: None)                            # (its own lookup would block too)
     exits = []
@@ -1085,6 +1085,20 @@ def test_an_oversize_input_is_refused_before_any_work(tmp_path, home, monkeypatc
     out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
     assert out["permissionDecision"] == "deny" and "32 KB" in out["permissionDecisionReason"]
     assert not guard.too_big({"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x" * 100_000}})   # content: not judged
+
+
+def test_a_big_walk_says_too_big_before_the_hard_stop_says_too_slow(tmp_path, home, monkeypatch, capsys):
+    assert guard.BUDGET_SECONDS < guard.HARD_STOP_SECONDS < 15                          # the inner deadline answers first
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
+    monkeypatch.setattr(guard, "BUDGET_SECONDS", 0)
+    monkeypatch.setattr(guard, "context", lambda cwd, st, sid: guard.Context(work, wt_dir=tmp_path / "webshop-wt", session=sid))
+    raw = json.dumps({"session_id": "s-1", "cwd": str(work), "hook_event_name": "PreToolUse", "tool_name": "Grep",
+                      "tool_input": {"pattern": "x", "path": str(work)}}).encode()
+    (work / "a.txt").write_text("x")
+    guard.main(raw)
+    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "more to look through" in out["permissionDecisionReason"]
 
 
 def test_post_tool_use_does_not_go_through_the_decision_thread(tmp_path, home, monkeypatch):

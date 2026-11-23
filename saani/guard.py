@@ -50,7 +50,8 @@ class Refuse(Exception):
         self.code, self.why, self.how = code, why, how
 
 
-BUDGET_SECONDS = 8.0                # the guard's own time for one decision, every walk and glob together (the hook has 15 s): past it, refused
+BUDGET_SECONDS = 7.0                # the guard's own time for one decision, every walk and glob together: past it, refused (too big)
+HARD_STOP_SECONDS = 9.0             # past this the hook denies and ends (too slow), well before its 15 s timeout
 
 
 def network(p):
@@ -1962,10 +1963,10 @@ def main(raw=None):
     import threading
     worker = threading.Thread(target=run, daemon=True)
     worker.start()
-    worker.join(BUDGET_SECONDS)
+    worker.join(HARD_STOP_SECONDS)
     if not result:
         log_refusal(st, event.get("tool_name", "?"), "too slow", "")
-        emit("deny", f"Saani guard (auto run): refused, the guard could not decide within {BUDGET_SECONDS:g} seconds (a path on a slow or "
+        emit("deny", f"Saani guard (auto run): refused, the guard could not decide within {HARD_STOP_SECONDS:g} seconds (a path on a slow or "
                      "disconnected drive?). To go on: use a local path inside the worktree.")
         sys.stdout.flush()
         hard_exit(0)

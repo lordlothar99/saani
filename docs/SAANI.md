@@ -275,8 +275,8 @@ guard looks them up: looking one up would connect to that host (and on Windows s
 (`https://...`) is only read as text. **Devices**, `/dev/...` but `/dev/null` (Git Bash's `/dev/clipboard` reads the clipboard), are
 refused by the path allowlist above (and elsewhere than Windows by their own rule), and as a redirection (only `>/dev/null`). **The
 guard's own work is bounded**: a folder walk (Grep, `rm`) or a glob past 20000 entries is
-refused, and one deadline of 8 seconds covers the whole decision, every walk and glob of the command together (`too big`; the hook has 15
-seconds). The decision also runs under a hard stop: if it has not answered after 8 seconds (a lookup blocked on a slow or disconnected
+refused, and one deadline of 7 seconds covers the whole decision, every walk and glob of the command together (`too big`; the hook has 15
+seconds). The decision also runs under a hard stop: if it has not answered after 9 seconds (a lookup blocked on a slow or disconnected
 drive), the hook answers deny (`too slow`) and ends at once, so Claude Code's own permissions never take over by timeout. A tool call whose command or paths are over 32 KB is refused before any
 work (`too big`; a file's new content, an edit's text and an agent's prompt are not counted: the guard does not judge them).
 
