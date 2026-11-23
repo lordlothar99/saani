@@ -1061,6 +1061,28 @@ def test_a_decision_that_blocks_is_cut_off_with_a_deny_within_the_budget(tmp_pat
     assert out["permissionDecision"] == "deny" and "could not decide" in out["permissionDecisionReason"]
 
 
+def test_a_huge_revision_word_is_decided_fast(ctx):
+    import time
+    began = time.monotonic()
+    for word in ("HEAD" + "~" * 200_000 + "x", "HEAD" + "~" * 200_000, "a.." * 70_000, "-" + "f" * 200_000 + "1"):
+        guard.allowed_rev(word, ctx)
+        guard.flag_cluster(word, "f")
+    assert sh(ctx, "git fetch -" + "f" * 50_000 + "1 origin")[0] == "deny"
+    assert time.monotonic() - began < 1                                                  # linear: no backtracking
+
+
+def test_an_oversize_input_is_refused_before_any_work(tmp_path, home, monkeypatch, capsys):
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
+    monkeypatch.setattr(guard, "decide", lambda *a: pytest.fail("an oversize input reached the decision"))
+    raw = json.dumps({"session_id": "s-1", "cwd": str(work), "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                      "tool_input": {"command": "git log HEAD" + "~" * 40_000}}).encode()
+    assert guard.main(raw) == 0
+    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "32 KB" in out["permissionDecisionReason"]
+    assert not guard.too_big({"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x" * 100_000}})   # content: not judged
+
+
 def test_post_tool_use_does_not_go_through_the_decision_thread(tmp_path, home, monkeypatch):
     monkeypatch.setattr(guard, "hard_exit", lambda code: pytest.fail("PostToolUse was cut off"))
     raw = json.dumps({"session_id": "s-1", "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"},

@@ -1237,7 +1237,7 @@ def git_command(part, ctx, cwd):
             if name.startswith("no-v"):
                 return deny("no-verify", f"git {sub} --no-verify skips the commit-msg hook", "git")
             return deny("git option", f"the git option --{name[:30]} (it runs a program, writes a file or moves the repository)", "git")
-        if w == "-f" or (sub in GIT_SHORT_FORCE and re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", w)):
+        if w == "-f" or (sub in GIT_SHORT_FORCE and flag_cluster(w, "f")):
             return deny("force flag", "a force flag", "git")
     verdict = owner_stash(sub, words)
     if verdict:
@@ -1311,11 +1311,19 @@ def allowed_rev(w, ctx, write=False):
     for sep in ("...", ".."):
         if sep in w:
             a, _, b = w.partition(sep)
-            return bool(a or b) and all(not x or allowed_rev(x, ctx, write) for x in (a, b))
-    base = re.sub(r"(?:[~^]\d*)+$", "", w)
+            return bool(a or b) and all(not x or (".." not in x and allowed_rev(x, ctx, write)) for x in (a, b))
+    m = re.fullmatch(r"([^~^]*)((?:[~^]\d*)*)", w)       # linear: the name, then its ~n/^n suffix (a backtracking re.sub was quadratic)
+    if not m:
+        return False
+    base = m.group(1)
     if base == "HEAD" or base == f"origin/{ctx.integration}" or (not write and base == f"origin/{ctx.production}"):
         return True
     return bool(ctx.worker_branch.match(base.removeprefix("origin/")))
+
+
+def flag_cluster(w, letter):
+    """True for a cluster of short flags (-xyz, ASCII letters only) that holds `letter` (linear, unlike -[a-zA-Z]*x[a-zA-Z]*)."""
+    return len(w) > 1 and w[0] == "-" and w[1:].isascii() and w[1:].isalpha() and letter in w[1:]
 
 
 def revisions(sub, words, ctx, gcwd):
@@ -1473,7 +1481,7 @@ def git_sub(sub, words, ctx, gcwd, part):
                 return deny("not on the list", f"the git add option {w[:30]} (name each file)", "git", how="git add <file> <file>")
         return git_paths_writable(paths, ctx, gcwd, sub)
     if sub == "commit":
-        if any(re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", w) for w in words):
+        if any(flag_cluster(w, "n") for w in words):
             return deny("no-verify", "git commit -n skips the commit-msg hook", "git")
         if part.stdin and not any(words[k:k + 2] == ["-F", "-"] or w in ("--file=-",) or words[k:k + 2] == ["--file", "-"]
                                   for k, w in enumerate(words)):
@@ -1862,6 +1870,20 @@ def post_tool_use(event):
 
 # ---------------------------------------------------------------- the hook
 
+MAX_INPUT = 32 * 1024               # the most of a tool call the guard reads (a Bash command, the paths); text it never judges is not counted
+CONTENT_KEYS = {"content", "old_string", "new_string", "edits", "new_source", "prompt", "description"}
+
+
+def too_big(event):
+    """True when what the guard would read of the tool call (its input but the text it never judges: a file's new content, an edit, an
+    agent's prompt) is over MAX_INPUT, checked before any work starts."""
+    inp = event.get("tool_input")
+    if not isinstance(inp, dict):
+        return len(json.dumps(inp, default=str)) > MAX_INPUT
+    judged = {k: v for k, v in inp.items() if k not in CONTENT_KEYS}
+    return len(json.dumps(judged, default=str)) > MAX_INPUT
+
+
 def hard_exit(code):
     """Ends the hook now, the blocked decision thread with it (os._exit: no cleanup waits on that thread)."""
     os._exit(code)
@@ -1914,6 +1936,11 @@ def main(raw=None):
         log_refusal(st, event.get("tool_name", "?"), "run over", "")
         emit("deny", f"Saani guard (auto run): refused, this auto run is over (its {MAX_HOURS} hours are past). To go on: report and "
                      "stop; the owner ends the run from a terminal: saani auto off --run <id>.")
+        return 0
+    if too_big(event):
+        log_refusal(st, event.get("tool_name", "?"), "too big", "")
+        emit("deny", f"Saani guard (auto run): refused, a tool call whose command or paths are over {MAX_INPUT // 1024} KB (the guard "
+                     "reads only what it can judge in its time). To go on: split the command, or name shorter paths.")
         return 0
     # The decision runs in a thread with a hard stop: a lookup that blocks (a slow or disconnected drive) must not reach the hook's 15 s
     # timeout, after which Claude Code's normal permissions would decide.
