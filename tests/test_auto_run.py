@@ -768,37 +768,19 @@ def test_status_says_when_an_away_run_s_process_is_gone(world, capsys, monkeypat
     record(world, mode="away")
     assert auto.away_gone(auto.read_record()) is None                          # no pid recorded
     auto.pid_path("r1").write_text("4242", encoding="utf-8")
-    monkeypatch.setattr(auto, "process_alive", lambda pid: False)
+    assert auto.away_gone(auto.read_record(), alive=lambda pid: False).startswith("  WARNING")      # the injected check
+    assert auto.away_gone(auto.read_record(), alive=lambda pid: True) is None
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: False)                # the default check is queue.alive
     assert auto.cmd_status(args()) == 0
     out = capsys.readouterr().out
     assert "process (4242) is gone" in out and "saani auto off --run r1" in out and "saani-auto-r1.log" in out
-    monkeypatch.setattr(auto, "process_alive", lambda pid: True)
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: True)
     auto.cmd_status(args())
     assert "is gone" not in capsys.readouterr().out
     record(world, mode="here")                                                 # a here run has no process
-    monkeypatch.setattr(auto, "process_alive", lambda pid: False)
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: False)
     auto.cmd_status(args())
     assert "is gone" not in capsys.readouterr().out
-
-
-def test_process_alive_knows_this_process_and_a_dead_one():
-    assert auto.process_alive(os.getpid()) is True
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
-    dead.wait()
-    assert auto.process_alive(dead.pid) is False
-
-
-def test_tasklist_output_in_another_code_page_does_not_crash_the_liveness_check():
-    def tasklist(out):
-        return lambda *a, **k: type("R", (), {"stdout": out})()
-    found = "claude.exe                   4242 Console   1   120 K ausgeführt".encode("cp850")
-    none = "INFO: Keine Task läuft mit den angegebenen Kriterien. äö".encode("cp850")
-    assert auto.process_alive(4242, tasklist(found), windows=True) is True
-    assert auto.process_alive(4242, tasklist(none), windows=True) is False
-    assert auto.process_alive(42, tasklist(found), windows=True) is False        # a whole word only
-    def broken(*a, **k):
-        raise ValueError("odd")
-    assert auto.process_alive(4242, broken, windows=True) is True                # cannot tell: quiet
 
 
 def test_trust_counts_for_a_parent_folder_and_any_spelling(tmp_path):
