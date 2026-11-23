@@ -21,6 +21,11 @@ def fwd(p):
     return str(p).replace("\\", "/")
 
 
+def ROOT_CODE(code):
+    """The refusal of a path Git Bash maps outside the drives (/, /usr, /proc): on Windows it is refused first, as a POSIX path."""
+    return "posix path" if os.name == "nt" else code
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """A home of its own, so the registry (~/.saani/auto) and ~ are the test's."""
@@ -209,7 +214,7 @@ DENIED = [
     ("saani test -- python -m pytest -q {home}", "test option"),
     ("rm -rf {home}/projects", "rm outside the worktrees"), ("rm -rf {main}/src", "rm outside the worktrees"),
     ("rm -rf {work}", "rm a worktree"), ("rm -rf {wt}", "rm a worktree"), ("rm -rf {run}", "rm a worktree"),
-    ("rm -rf {work}/saani", "guard file"), ("rm -rf {work}/.git", "guard file"), ("rm -rf /", "rm outside the worktrees"),
+    ("rm -rf {work}/saani", "guard file"), ("rm -rf {work}/.git", "guard file"), ("rm -rf /", ROOT_CODE("rm outside the worktrees")),
     ("rm -rf {temp}", "guard file"), ("rm -f src/*.tmp", "unsure"), ("rm -rf *", "unsure"),
     ("sudo ls", "sudo"), ("chmod +x x", "not on the list"), ("bash -c ls", "not on the list"), ("node x.js", "not on the list"),
     ("python -c 'print(1)'", "python"), ("python x.py", "python"), ("python saani.py status", "python"),
@@ -256,7 +261,7 @@ DENIED = [
     ("gh issue edit https://github.com/other/repo/issues/1 --add-label x", "another repository"),
     ("gh pr checks https://github.com/acme/webshop@evil.example/pull/1", "another repository"),
     ("python -m pytest -q @args.txt", "test option"), ("saani test -- python -m pytest -q @args.txt", "test option"),
-    ("/usr/bin/python -m pytest -q", "not on the list"), ("./python -m pytest -q", "not on the list"),
+    ("/usr/bin/python -m pytest -q", ROOT_CODE("not on the list")), ("./python -m pytest -q", "not on the list"),
     ("{work}/python.exe -m pytest -q", "not on the list"),
     ("saani test -- cat x", "not a test command"), ("saani test --kind landing -- bash -c ls", "not a test command"),
     ("python -m pytest -q --rootdir=/", "test option"), ("python -m pytest -q -c x.ini", "test option"),
@@ -329,8 +334,8 @@ DENIED = [
     ("git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\"x", "unsure"), ("echo \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
     ("git log \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"), ("git stash push -m \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
     ("cat - <<'EOF'\nx\nEOF", "unsure"), ("git commit <<'EOF'\nx\nEOF", "unsure"), ("git status <<'EOF'\nx\nEOF", "unsure"),
-    ("git commit -F - <<'EOF'\nx\nEOF\nrm -rf /", "rm outside the worktrees"),
-    ("echo '$(cat <<'EOF'\n'; rm -rf / ; '\nEOF\n)'", "rm outside the worktrees"),    # read as bash reads it: the rm is a command
+    ("git commit -F - <<'EOF'\nx\nEOF\nrm -rf /", ROOT_CODE("rm outside the worktrees")),
+    ("echo '$(cat <<'EOF'\n'; rm -rf / ; '\nEOF\n)'", ROOT_CODE("rm outside the worktrees")),    # read as bash reads it: the rm is a command
 ]
 
 
@@ -399,7 +404,8 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                    ("NotebookEdit", "notebook_path"), ("Glob", "path"), ("Glob", "pattern"), ("LS", "path"), ("Grep", "path"),
                    ("Grep", "glob")):
         decision, reason, code, _ = tool(ctx, t, **{key: name})
-        assert (decision, code) == ("deny", "secret"), (t, name, reason)
+        codes = {"secret", ROOT_CODE("secret")} if name.startswith("/proc") else {"secret"}     # a glob is text, a path is read first
+        assert decision == "deny" and code in codes, (t, name, reason)
 
 
 @pytest.mark.parametrize("name", ["{home}/.claude.json", "{home}/.claude/settings.json", "{home}/.claude/.credentials.json",
@@ -466,7 +472,7 @@ def test_only_this_session_s_saved_tool_outputs_are_read_never_a_way_out_of_them
                                      "cat {home}/.kube/config", "git commit -F .env", "rm .env"])
 def test_secrets_are_refused_inside_shell_commands(ctx, command):
     decision, reason, code, _ = sh(ctx, command)
-    assert (decision, code) == ("deny", "secret"), (command, reason)
+    assert (decision, code) == ("deny", ROOT_CODE("secret") if "/proc" in command else "secret"), (command, reason)
 
 
 def test_a_glob_that_would_reach_a_secret_is_refused(ctx):
@@ -510,17 +516,46 @@ def test_a_device_is_refused_but_dev_null(ctx):
     for command in ("cat /dev/clipboard", "head -c 9 /dev/clipboard", "cat /dev/../dev/clipboard", "cat /tmp/../dev/clipboard",
                     f"cat {depth}dev/clipboard", "cat ~/../../../../../../../../../../dev/clipboard", "ls /dev",
                     "gh issue comment 1 --body-file /dev/clipboard", "git commit -F /dev/clipboard", "cat /DEV/Clipboard"):
-        assert sh(ctx, command)[2] == "device", command
-    assert tool(ctx, "Read", file_path="/dev/clipboard")[2] == "device"
+        assert sh(ctx, command)[2] == "posix path", command
+    assert tool(ctx, "Read", file_path="/dev/clipboard")[2] == "posix path"
     assert sh(ctx, "ls > /dev/clipboard")[2] == "unsure"                                 # a redirect: only to /dev/null
     assert sh(ctx, "cat < /dev/clipboard")[2] == "unsure"
     assert sh(ctx, "diff a.txt /dev/null")[0] == "allow"
     assert sh(ctx, "ls > /dev/null 2>&1")[0] == "allow"
 
 
+def test_git_bash_paths_go_through_one_allowlist(ctx):
+    """After `..` is folded as Git Bash folds it, only /<drive>/..., /tmp/... and /dev/null are read; the rest Git Bash maps outside the
+    drives (its own install, /proc, mounts) and is refused before any lookup."""
+    if os.name != "nt":
+        pytest.skip("Git Bash's paths are read on Windows")
+    depth = "../" * (len(pathlib.Path(ctx.places["work"]).parts) + 2)
+    for path in (f"{depth}proc/self/environ", "/c/../proc/self/environ", "/tmp/../proc/x", "~/" + depth + "proc/self/environ",
+                 f"{depth}cygdrive/c/x.txt", "/cygdrive/c/x.txt", "/etc/passwd", "/", "/usr/bin/env", "/mnt/c/x", "/home/x",
+                 "C:/../proc/self/environ", "C:\\..\\etc\\passwd", "\\etc\\passwd"):
+        word = f"'{path}'" if "\\" in path else path                                     # unquoted: bash expands ~
+        assert sh(ctx, f"cat {word}")[2] == "posix path", path
+        assert tool(ctx, "Read", file_path=path)[2] == "posix path", path
+    drive = ctx.places["work"][0].lower()
+    work_gitbash = "/" + drive + ctx.places["work"][2:]
+    (pathlib.Path(ctx.places["work"]) / "notes.txt").write_text("x")
+    for ok in ("notes.txt", "src/../notes.txt", ctx.places["work"] + "/notes.txt", work_gitbash + "/notes.txt", "/tmp/x.txt", "/dev/null"):
+        assert sh(ctx, f"cat '{ok}'")[0] == "allow", ok
+        assert tool(ctx, "Read", file_path=ok)[0] == "allow", ok
+
+
+def test_a_mapped_network_drive_is_refused_before_any_lookup(ctx, monkeypatch):
+    if os.name != "nt":
+        pytest.skip("drive letters are Windows'")
+    letter = ctx.places["work"][0].upper()
+    monkeypatch.setattr(guard, "drive_type", lambda x: guard.DRIVE_REMOTE if x == letter else 3)
+    assert tool(ctx, "Read", file_path=ctx.places["work"] + "/notes.txt")[2] == "network path"
+    assert sh(ctx, "cat notes.txt")[2] == "network path"
+
+
 def test_a_git_bash_drive_path_with_backslashes_is_read_as_its_windows_path(ctx):
-    assert sh(ctx, "cat /cygdrive/c/x.txt")[2] == "unsure"
-    assert tool(ctx, "Read", file_path="/cygdrive/c/x.txt")[2] == "unsure"
+    assert sh(ctx, "cat /cygdrive/c/x.txt")[2] == "posix path"
+    assert tool(ctx, "Read", file_path="/cygdrive/c/x.txt")[2] == "posix path"
     if os.name != "nt":
         return
     home = ctx.places["home"].replace("/", "\\")

@@ -260,14 +260,20 @@ files. So is a glob with `**` (any depth when bash's `globstar` is on).
 `.yarnrc.yml`, `pip.ini`, `pip.conf`, `.bash_history`, `.python_history`, `~/.claude.json*` and `~/.claude/` (but its `projects/*/memory/` and the session's own saved tool outputs `projects/*/<session>/tool-results/`, never another session's, judged after `..`
 and links are resolved, so neither is a way to the rest of `~/.claude/`), PowerShell's history
 (`PSReadLine/`, `ConsoleHost_history.txt`), anything under `.ssh/`, `.gnupg/`, `.kube/` or `/proc/`, and a file with
-"secret" or "token" in its name (in a shell command, a word with "token" that is not a file, like a branch name, is not one). Paths are compared after `..` is resolved, with `/` and `\`, case-insensitively on Windows, and Git Bash's `/c/...` (or `/c\...`) read
-as `C:/...`; a `/cygdrive/...` path is refused.
+"secret" or "token" in its name (in a shell command, a word with "token" that is not a file, like a branch name, is not one). Paths are compared after `..` is resolved, with `/` and `\`, case-insensitively on Windows.
+
+**Paths, one allowlist (Windows).** Every path, in a tool or a command, is first read the way Git Bash reads it: `\` is `/`, `C:/` is
+`/c/`, `..` is folded from the current folder (or `~`) without looking anything up, and it may climb above a drive's root (`/c/..` is
+`/`). Then only three absolute forms are read: `/<drive>/...` (that drive, `C:/...`), `/tmp/...` (the temp folder) and exactly
+`/dev/null`. Everything else is a place Git Bash maps outside the drives and is refused before any filesystem call: `/`, `/proc`,
+`/dev/...`, `/etc`, `/usr`, `/bin`, `/cygdrive`, `/mnt`, `/home`... (`posix path`). A path on a mapped network drive is refused too
+(Windows tells it from the local mapping). The other rules then judge the mapped path.
 
 **Network paths** (`\\host\share`, `//host/share`, `\\?\UNC\...`, `\\.\...`) are refused to every tool and in every command before the
 guard looks them up: looking one up would connect to that host (and on Windows send the owner's credentials). The `//host/...` of a URL
 (`https://...`) is only read as text. **Devices**, `/dev/...` but `/dev/null` (Git Bash's `/dev/clipboard` reads the clipboard), are
-refused as a path in every tool and command, also when `..` from the current folder or from `~` reaches them, and as a redirection
-(only `>/dev/null`). **The guard's own work is bounded**: a folder walk (Grep, `rm`) or a glob past 20000 entries is
+refused by the path allowlist above (and elsewhere than Windows by their own rule), and as a redirection (only `>/dev/null`). **The
+guard's own work is bounded**: a folder walk (Grep, `rm`) or a glob past 20000 entries is
 refused, and one deadline of 8 seconds covers the whole decision, every walk and glob of the command together (`too big`; the hook has 15
 seconds).
 

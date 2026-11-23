@@ -271,43 +271,80 @@ def norm(p):
     return os.path.normcase(os.path.realpath(str(p)))
 
 
-def device(p, cwd):
-    """True for a device as Git Bash or a POSIX shell reads the path (/dev/clipboard, /dev/sda, /dev/tcp/..., also reached by `..` from
-    the current folder: /c/x/../../dev), /dev/null aside."""
+NETWORK_HOW = "use a local path inside the worktree"
+DRIVE_REMOTE = 4                    # GetDriveTypeW: a mapped network drive
+
+
+def drive_type(letter):
+    """Windows' kind of the drive `letter` (GetDriveTypeW, from the local mapping, no network lookup); 0 elsewhere or when unknown."""
+    if not WINDOWS:
+        return 0
+    try:
+        import ctypes
+        return int(ctypes.windll.kernel32.GetDriveTypeW(f"{letter}:\\"))
+    except Exception:
+        return 0
+
+
+def posix_view(p, cwd):
+    """`p` the way Git Bash reads it, `..` folded lexically from the current folder (Git Bash's /c/... form of `cwd`): `\\` is `/`, C:/ is
+    /c/, /c/.. is /, and `..` may climb above a drive's root."""
     import posixpath
 
     def gitbash(x):
-        x = x.replace("\\", "/")
+        x = str(x).replace("\\", "/")
+        if re.match(r"^[A-Za-z]:(?!/|$)", x):
+            raise Refuse("unsure", "a drive-relative path (C:x)", how="use the full path, C:/...")
         m = re.match(r"^([A-Za-z]):(.*)", x)
         return "/" + m.group(1).lower() + m.group(2) if m else x
     q = gitbash(p)
     if not q.startswith("/"):
-        q = gitbash(str(cwd)).rstrip("/") + "/" + q
-    q = posixpath.normpath(q).lower()
-    return (q == "/dev" or q.startswith("/dev/")) and q != "/dev/null"
+        q = gitbash(cwd).rstrip("/") + "/" + q
+    return posixpath.normpath(q)
+
+
+def gitbash_path(p, cwd, temp=None):
+    """The Windows path Git Bash opens for `p`, read through one allowlist: after folding (posix_view), an absolute path is only
+    /<drive>/... (that drive), /tmp/... (the temp folder) or exactly /dev/null. Everything else Git Bash maps outside the drives (/proc,
+    /dev, /etc, /usr, /bin, /cygdrive, /mnt, /home, / itself...) and is refused, before any filesystem call; so is a mapped network drive.
+    Elsewhere than Windows: the path itself, devices (/dev/... but /dev/null) and /cygdrive refused."""
+    q = posix_view(p, cwd)
+    low = q.lower()
+    if low == "/dev/null":
+        return os.path.join(cwd, "/dev/null")
+    if not WINDOWS:
+        if re.match(r"^/(dev|cygdrive)(/|$)", low):
+            raise Refuse("posix path", "a device or /cygdrive path (/dev/clipboard reads the clipboard; only /dev/null is allowed)",
+                         how="use a file inside the worktree")
+        return os.path.join(cwd, str(p))
+    m = re.match(r"^/([a-z])(/.*)?$", low)
+    if m:
+        letter = q[1].upper()
+        if drive_type(letter) == DRIVE_REMOTE:
+            raise Refuse("network path", f"a path on the network drive {letter}: (the guard does not look it up, that would connect to "
+                         "the host)", how=NETWORK_HOW)
+        return letter + ":" + (q[2:] or "/")
+    if low == "/tmp" or low.startswith("/tmp/"):
+        import tempfile
+        return (temp or tempfile.gettempdir()) + q[4:]
+    raise Refuse("posix path", "a path Git Bash maps outside the drives (/proc, /dev, /etc, /usr, /cygdrive, /...; only /<drive>/..., "
+                 "/tmp/... and /dev/null are read)", how="use a path inside the worktree, C:/... or /c/...")
 
 
 def resolve(p, cwd, temp=None, tilde=False):
-    """`p` as a normalized absolute path: relative to `cwd`, `..` resolved, Git Bash's /c/... and /tmp read on Windows, case folded on
-    Windows. A network path is refused before any filesystem call (looking it up would connect to that host), a device (/dev/clipboard)
-    and a /cygdrive path too."""
+    """`p` as a normalized absolute path: read the way Git Bash reads it (gitbash_path: `..` folded, /c/... and /tmp mapped, anything
+    else outside the drives refused), case folded on Windows. A network path is refused before any filesystem call (looking it up would
+    connect to that host)."""
     p = str(p)
-    if re.match(r"^[\\/]cygdrive([\\/]|$)", p, re.I):
-        raise Refuse("unsure", "a /cygdrive path (the guard reads Git Bash's /c/..., not Cygwin's mounts)", how="use the C:/... path")
+    if network(p):
+        raise Refuse("network path", "a network path (\\\\host\\share, //host/share): the guard does not look it up, that would connect "
+                     "to the host", how=NETWORK_HOW)
     if tilde and (p == "~" or p.startswith(("~/", "~\\"))):
         p = os.path.expanduser("~") + p[1:]
-    if device(p, cwd):
-        raise Refuse("device", "a device path (/dev/clipboard reads the clipboard; only /dev/null is allowed)", how="use a file")
-    if WINDOWS:
-        m = re.match(r"^/([a-zA-Z])(?=[\\/]|$)", p)                 # Git Bash: /c/Users and /c\Users are both C:\Users
-        if m:
-            p = m.group(1) + ":" + (p[2:].replace("\\", "/") or "/")
-        elif temp and (p == "/tmp" or p.startswith("/tmp/")):
-            p = temp + p[4:]
-    full = os.path.join(cwd, p)
+    full = gitbash_path(p, cwd, temp)
     if network(full):
         raise Refuse("network path", "a network path (\\\\host\\share, //host/share): the guard does not look it up, that would connect "
-                     "to the host", how="use a local path inside the worktree")
+                     "to the host", how=NETWORK_HOW)
     return norm(full)
 
 
@@ -820,11 +857,24 @@ def test_command(words, ctx, cwd, who):
     return None
 
 
+def pieces(word):
+    """The pieces of a word around :, = and @ (HEAD:path, --opt=path, user@host:path), a drive's colon kept with its path (C:/x)."""
+    out, cur = [], ""
+    for i, ch in enumerate(word):
+        drive = ch == ":" and len(cur) == 1 and cur.isalpha() and word[i + 1:i + 2] in ("/", "\\")
+        if ch in "=@" or (ch == ":" and not drive):
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    return out + [cur]
+
+
 def secret_word(ctx, word, cwd):
     """True when a word of a command names a secret: the word, its pieces around : and =, and what its glob matches. A network path is
     refused (by ctx.path) before any lookup; the //host/... piece of a URL (https://...) is judged by its name only, never looked up."""
     url = re.match(r"[A-Za-z][A-Za-z0-9+.-]+://", word)
-    for piece in {word, *re.split(r"[:=@]", word)}:
+    for piece in {word, *pieces(word)}:
         if url and network(piece) and not network(word):
             if secret_name(piece, strict=False):
                 return True
