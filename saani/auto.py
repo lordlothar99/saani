@@ -794,6 +794,8 @@ def by_hand(argv, windows=None):
 
 
 def norm_key(path):
+    """A string-only, cross-OS key for a path in Claude Code's JSON config: slashes forward, no trailing slash, case folded for drive-letter
+    paths. It never resolves anything (the config may name folders of another OS or that no longer exist), so it is not core.same_path."""
     text = str(path).replace("\\", "/").rstrip("/")
     return text.casefold() if os.name == "nt" or re.match(r"^[A-Za-z]:/", text) else text
 
