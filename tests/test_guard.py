@@ -120,7 +120,11 @@ ALLOWED = [
     "wc -l src/*.py", "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
     "test -f README.md", "[ -d src ]", "[ a = b ]", "pwd", "diff a.txt b.txt",
     "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git show HEAD:src/app.py", "git add src/app.py", "git add -- src/app.py README.md",
-    "git stash list", "saani auto status --check", "git log --stat -3", "git log --oneline --branches", "git show HEAD:docs/stash.md",
+    "git stash list", "saani auto status --check",
+    "git -C {work} diff origin/dev...HEAD", "git log --oneline origin/dev..HEAD", "git diff origin/main...origin/dev",   # the agents'
+    "git log feat/12-cart-total", "git log origin/feat/12-cart-total..HEAD", "git show HEAD~2", "git log -n 5", "git log --author Bob",
+    "git branch --merged origin/dev", "git commit --fixup=HEAD", "git log --ancestry-path=origin/dev HEAD~3..HEAD", "git diff HEAD^ HEAD",
+    "git rev-parse --abbrev-ref HEAD", "git show HEAD:README.md", "git -C {work} log --oneline -5 origin/dev..", "git log --stat -3", "git log --oneline --branches", "git show HEAD:docs/stash.md",
     "git diff HEAD~1 -- src/stash.py", "git restore --source=HEAD~2 src/app.py", "git restore -s origin/dev src/app.py",
     "git restore --source HEAD^ --staged src/app.py", "git checkout HEAD -- src/app.py", "git checkout HEAD~1 -- src/app.py", "git switch -c feat/12-stash-fix origin/dev", "saani auto report --pr 3 --post",
     "git commit -m 'Cart: total in cents (refs #12)' -m 'Why: rounding' -m 'Undo: revert'", "git commit --amend --no-edit",
@@ -196,6 +200,15 @@ DENIED = [
     ("git show ':/WIP on'", "git stash"), ("git log HEAD..:/fix", "git stash"), ("git diff 'stash^{{tree}}'", "git stash"),
     ("git restore --source=stash src/app.py", "git stash"), ("git checkout stash -- src/app.py", "git stash"),
     ("git commit -C stash", "git stash"),
+    ("git ls-files --with-tree=':/untracked files on' --format=x", "revision"), ("git ls-files --with-tree ':/x'", "revision"),
+    ("git ls-files --with-tree=HEAD", "revision"), ("git ls-files --with HEAD", "revision"),
+    ("git log --ancestry-path=:/x", "revision"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
+    ("git show 0123456789abcdef0123456789abcdef01234567", "revision"), ("git diff abc1234 HEAD", "revision"),
+    ("git rev-parse --disambiguate=abcd", "git stash"), ("git rev-parse abc1234", "revision"), ("git log FETCH_HEAD", "revision"),
+    ("git show v1.0", "revision"), ("git diff 'HEAD@{{1}}'", "revision"), ("git log origin/other..HEAD", "revision"),
+    ("git show ORIG_HEAD:src/app.py", "revision"), ("git branch --contains abc1234", "revision"),
+    ("git commit --fixup=abc1234", "revision"), ("git commit -C abc1234", "revision"), ("git commit -qCabc1234", "revision"),
+    ("git commit -C origin/main", "revision"), ("git log --oneline -n 5 abc1234", "revision"), ("git ls-files ':/y'", "revision"), ("git status ':/y'", "revision"),
     ("git -C {work} stash pop", "git stash"), ("git stash pop", "git stash"), ("git stash pop -q", "git stash"),      # the owner's stash
     ("git stash", "git stash"), ("git stash push -q -m 'wip'", "git stash"), ("git stash push", "git stash"),        # on top of the owner's
     ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
@@ -491,7 +504,7 @@ def test_a_glob_that_would_reach_a_secret_is_refused(ctx):
 @pytest.mark.parametrize("command", [
     "cat ~/.ss[^x]/id_rs[^x]", "cat ~/.ss?/id_rs?", "cat ~/.ss*/id_*", "cat {home}/.ss?/id_rs?", "head -1 ~/.ss?/id_rs?",
     "gh issue comment 1 --body-file ~/.ss[^x]/id_rs[^x]", "gh issue comment 1 -F ~/.ss?/id_rs?", "git commit -F ~/.ss?/id_rs?",
-    "git diff ~/.ss?/id_rs? a.txt", "git diff -- ~/.ss?/id_rs?", "cat {main}/*.py", "cat ../../webshop/*", "wc -l {temp}/*",
+    "git diff ~/.ss?/id_rs? src", "git diff -- ~/.ss?/id_rs?", "cat {main}/*.py", "cat ../../webshop/*", "wc -l {temp}/*",
     "cat src/[a]pp.py", "cat ~/.ss?/id_rs? && ls", "cat **/app.py", "cat src/**", "wc -l **/*.py", "cat a**b"])
 def test_a_glob_is_matched_as_bash_reads_it_and_only_inside_the_run_s_places(ctx, command):
     decision, reason, code, _ = sh(ctx, command)

@@ -14,7 +14,7 @@ paths; `git -C <worktree> <command>`; `saani test --worktree <worktree> --kind <
 nothing chained. No `python -` or `python -c`, heredoc scripts, shell loops, `base64` or `awk`: a project's allow rules cannot cover
 arbitrary code, so each one asks the owner (and an auto run's guard refuses it).
 
-You are given an issue and a worktree. Read the issue, then `git -C <worktree> diff <integration branch>...HEAD`, then the code around each change.
+You are given an issue and a worktree. Read the issue, then `git -C <worktree> diff origin/<integration branch>...HEAD`, then the code around each change.
 You do not get, and do not ask for, the coder's reasoning: judge what the code does.
 
 Look for: bugs and missing edge cases; a change that breaks a rule of the project's CLAUDE.md; a test that does not test the change or was

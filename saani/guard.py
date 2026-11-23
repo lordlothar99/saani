@@ -1240,9 +1240,13 @@ def git_command(part, ctx, cwd):
         return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
                     "git", how="cd <worktree> && git ...")
     verdict = commit_takes_paths(rest) if sub == "commit" else None
-    verdict = verdict or git_sub(sub, words, ctx, gcwd, part)
+    verdict = verdict or git_sub(sub, words, ctx, gcwd, part) or revisions(sub, words, ctx, gcwd)
     if verdict:
         return verdict
+    # A :/<text> search runs over every ref (the owner's stash included): refused anywhere in a word, but a drive's C:/ (from ~ too).
+    if any(re.search(r"(?<![A-Za-z]):/|(?<=[A-Za-z]{2}):/", w) for w in words):
+        return deny("revision", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
+                    how="name HEAD, origin/<branch> or a worker branch")
     if scan(ctx, rest, gcwd, text):
         return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
     return None
@@ -1252,7 +1256,7 @@ def git_command(part, ctx, cwd):
 # stash@{n}, stash^3, a..stash, ^stash, any case: refs are files on Windows), found by a :/message search over every ref, or listed by
 # an option that walks every ref or the reflogs.
 STASH_REV = re.compile(r"(?:^|\.\.|\^|=)(?:refs[\\/]+)?stash(?:$|[@^~:{]|\.\.)", re.I)
-EVERY_REF = ("all", "glob", "reflog", "walk-reflogs", "stdin", "bisect", "alternate-refs", "indexed-objects")
+EVERY_REF = ("all", "glob", "reflog", "walk-reflogs", "stdin", "bisect", "alternate-refs", "indexed-objects", "disambiguate")
 REF_PATTERNS = ("branches", "remotes", "tags")
 
 
@@ -1276,6 +1280,84 @@ def owner_stash(sub, words):
             return no
         if re.fullmatch(r"-[a-zA-Z]*g[a-zA-Z]*", w):
             return no
+    return None
+
+
+# Revisions, an allowlist: every git command the guard allows that takes a revision (as a word or as an option's value) takes only these.
+REV_SUBS = ("diff", "log", "show", "rev-parse", "ls-files", "branch", "commit")
+REV_TEXT_VALUED = {"-n", "--max-count", "--skip", "--since", "--after", "--until", "--before", "--author", "--committer", "--grep", "-S",
+                   "-G", "-O", "-L"}                    # options git reads with their value as the next word, a value that is no revision
+BRANCH_REV = {"--merged", "--no-merged", "--contains", "--no-contains", "--points-at"}
+COMMIT_REV = ("reuse-message", "reedit-message", "fixup", "squash")
+
+
+def allowed_rev(w, ctx, write=False):
+    """True for a revision a run may name: HEAD (HEAD~, HEAD~n, HEAD^n), origin/<integration>, origin/<production> (reading only), a
+    worker branch and origin/<worker branch>, and a range (a..b, a...b, a side empty) of those. Never a commit id, a tag, FETCH_HEAD, a
+    reflog (@{n}) or anything else."""
+    for sep in ("...", ".."):
+        if sep in w:
+            a, _, b = w.partition(sep)
+            return bool(a or b) and all(not x or allowed_rev(x, ctx, write) for x in (a, b))
+    base = re.sub(r"(?:[~^]\d*)+$", "", w)
+    if base == "HEAD" or base == f"origin/{ctx.integration}" or (not write and base == f"origin/{ctx.production}"):
+        return True
+    return bool(ctx.worker_branch.match(base.removeprefix("origin/")))
+
+
+def revisions(sub, words, ctx, gcwd):
+    """A refusal when a git command names a revision off the allowlist (allowed_rev), as a word or as the value of a revision option
+    (--ancestry-path=, branch --merged/--contains/--points-at, commit -C/-c/--fixup/--squash...); ls-files --with-tree outright. A word
+    of diff or log that is not an allowed revision must be an existing path (git refuses a word that is both)."""
+    if sub not in REV_SUBS:
+        return None
+
+    def no(what):
+        return deny("revision", f"git {sub} with {what[:40]} (only HEAD, HEAD~n, origin/{ctx.integration}, origin/{ctx.production}, worker "
+                    "branches and ranges of these; no commit id)", "git", how="name HEAD, origin/<branch> or a worker branch")
+    k, ended = 0, False
+    while k < len(words):
+        w = words[k]
+        nxt = words[k + 1] if k + 1 < len(words) else ""
+        if ended or w == "--":
+            ended = True
+        elif w.startswith("--"):
+            name, eq, value = w[2:].partition("=")
+            if sub == "ls-files" and name and "with-tree".startswith(name):
+                return no("--with-tree")
+            if eq and name and "ancestry-path".startswith(name) and not allowed_rev(value, ctx):
+                return no(w)
+            if sub == "commit" and name and any(x.startswith(name) for x in COMMIT_REV):
+                if not allowed_rev(value if eq else nxt, ctx, write=True):
+                    return no(w)
+                k += 0 if eq else 1
+            elif sub == "branch" and w in BRANCH_REV:
+                if not allowed_rev(nxt, ctx):
+                    return no(w)
+                k += 1
+            elif not eq and w in REV_TEXT_VALUED:
+                k += 1
+        elif w.startswith("-") and len(w) > 1:
+            if sub == "commit":
+                for j, ch in enumerate(w[1:], 1):        # a cluster: flags until one that takes a value (the rest, or the next word)
+                    if ch in "Cc":
+                        value = w[j + 1:] or nxt
+                        if not allowed_rev(value, ctx, write=True):
+                            return no(w)
+                        k += 0 if w[j + 1:] else 1
+                        break
+                    if ch in "mFtSu":
+                        break
+            elif w in REV_TEXT_VALUED:
+                k += 1
+        elif sub in ("ls-files", "commit", "branch") or getattr(w, "glob", False):
+            pass                                         # paths (ls-files, a glob bash expands), refused paths (commit), patterns (branch)
+        elif sub == "show" and ":" in w:
+            if not allowed_rev(w.split(":", 1)[0], ctx):
+                return no(w)
+        elif not allowed_rev(w, ctx) and not (sub in ("diff", "log") and os.path.lexists(ctx.path(w, gcwd))):
+            return no(w)
+        k += 1
     return None
 
 
