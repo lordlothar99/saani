@@ -226,7 +226,7 @@ Windows `:stream` suffix, ignored).
 | Read, Glob, LS | anywhere | secrets |
 | Grep | inside the worktrees folder or the run's folder; a `glob` of plain names (`*.py`) narrows what is looked at | elsewhere (home, the main checkout, temp); a `type`; a glob starting with `!`; a folder tree in which the search could read a secret file, judged by each file's path below the root (`.docker/config.json`, `.kube/config`, `.ssh/...`), or a tree too big to look through (past 20000 entries) |
 | Edit, Write, MultiEdit, NotebookEdit | inside the run's places | the main checkout, home, anywhere else; secrets; protected files |
-| Agent, Task, TodoWrite, ToolSearch, Skill, SendMessage, WebSearch, WebFetch, BashOutput, KillShell | always | |
+| Agent, Task, TodoWrite, ToolSearch, Skill, SendMessage, WebSearch, WebFetch, BashOutput, KillShell, TaskOutput, TaskStop, SubagentHandback (a subagent hands its report back) | always | |
 | AskUserQuestion | | always: nobody answers; the question goes in the report |
 | Any other tool (an MCP tool...) | | always |
 | Bash | when every part of the command is allowed (below) | the rest |

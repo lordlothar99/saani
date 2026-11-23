@@ -817,7 +817,7 @@ def test_paths_with_backslashes_dots_and_case(ctx):
 
 
 def test_other_tools_are_allowed_unknown_ones_refused_and_questions_never_asked(ctx):
-    for name in ("Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage", "WebSearch", "WebFetch", "BashOutput", "KillShell"):
+    for name in ("Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage", "WebSearch", "WebFetch", "BashOutput", "KillShell", "SubagentHandback"):
         assert guard.decide({"tool_name": name, "tool_input": {}}, ctx)[0] == "allow", name
     assert guard.decide({"tool_name": "mcp__x__delete", "tool_input": {}}, ctx)[2] == "unknown tool"
     assert guard.decide({"tool_name": None}, ctx)[2] == "unknown tool"

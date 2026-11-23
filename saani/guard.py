@@ -541,7 +541,8 @@ def deny(code, why, word="", how=HOW):
 READ_TOOLS = {"Read": "file_path", "LS": "path", "Glob": "path"}
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 OTHER_TOOLS = {"Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage", "WebSearch", "WebFetch",
-               "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop"}
+               "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
+               "SubagentHandback"}                           # a subagent hands its report back to the session that started it
 
 
 def decide(event, ctx):
