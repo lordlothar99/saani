@@ -41,6 +41,23 @@ class RegistryError(Exception):
     """The registry could not be read: the guard cannot tell present from auto, so it refuses."""
 
 
+class Refuse(Exception):
+    """A refusal found deep inside a check, before the guard touches the filesystem or past its budget (a network path, a glob outside
+    the run's places, a walk too long): `decide` turns it into a deny."""
+
+    def __init__(self, code, why, how=HOW):
+        super().__init__(why)
+        self.code, self.why, self.how = code, why, how
+
+
+BUDGET_SECONDS = 5.0                # the guard's own time for a folder walk or a glob (the hook has 15 s): past it, refused
+
+
+def network(p):
+    """True for a path the system would open over the network: `\\\\host\\share`, `//host/share`, `\\\\?\\UNC\\...`, `\\\\.\\...`."""
+    return len(p) >= 2 and p[0] in "\\/" and p[1] in "\\/"
+
+
 # ---------------------------------------------------------------- the registry of auto sessions (~/.saani/auto)
 
 def registry():
@@ -230,7 +247,7 @@ def norm(p):
 
 def resolve(p, cwd, temp=None, tilde=False):
     """`p` as a normalized absolute path: relative to `cwd`, `..` resolved, Git Bash's /c/... and /tmp read on Windows, case folded on
-    Windows."""
+    Windows. A network path is refused before any filesystem call (looking it up would connect to that host)."""
     p = str(p)
     if WINDOWS:
         m = re.match(r"^/([a-zA-Z])(?=/|$)", p)
@@ -240,7 +257,11 @@ def resolve(p, cwd, temp=None, tilde=False):
             p = temp + p[4:]
     if tilde and (p == "~" or p.startswith(("~/", "~\\"))):
         p = os.path.expanduser("~") + p[1:]
-    return norm(os.path.join(cwd, p))
+    full = os.path.join(cwd, p)
+    if network(full):
+        raise Refuse("network path", "a network path (\\\\host\\share, //host/share): the guard does not look it up, that would connect "
+                     "to the host", how="use a local path inside the worktree")
+    return norm(full)
 
 
 def inside(p, base):
@@ -407,6 +428,13 @@ OTHER_TOOLS = {"Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage
 
 def decide(event, ctx):
     """("allow" | "deny", reason, short reason for the log, the refused command's first word) for one PreToolUse event in an auto run."""
+    try:
+        return decide_tool(event, ctx)
+    except Refuse as e:
+        return deny(e.code, e.why, how=e.how)
+
+
+def decide_tool(event, ctx):
     tool = event.get("tool_name")
     inp = event.get("tool_input")
     if not isinstance(inp, dict):
@@ -481,13 +509,15 @@ def grep_tool(inp, ctx):
 
 
 def tree_has(root, test, skip=()):
-    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries."""
-    seen = 0
+    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries, or the walk
+    takes longer than BUDGET_SECONDS."""
+    import time
+    seen, end = 0, time.monotonic() + BUDGET_SECONDS
     for top, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d.lower() not in skip]
         for name in dirs + files:
             seen += 1
-            if seen > WALK_CAP or test(os.path.join(top, name), name.lower()):
+            if seen > WALK_CAP or time.monotonic() >= end or test(os.path.join(top, name), name.lower()):
                 return True
     return False
 
@@ -659,7 +689,7 @@ def is_python(word):
     interpreter running saani."""
     if re.fullmatch(r"python(3(\.\d+)?)?|py", word):
         return True
-    return bool(sys.executable) and ("/" in word or "\\" in word) and norm(word) == norm(sys.executable)
+    return bool(sys.executable) and ("/" in word or "\\" in word) and not network(word) and norm(word) == norm(sys.executable)
 
 
 def saani_start(words, cwd, temp=None):
@@ -715,9 +745,14 @@ def test_command(words, ctx, cwd, who):
 
 
 def secret_word(ctx, word, cwd):
-    """True when a word of a command names a secret: the word, its pieces around : and =, and what its glob matches."""
+    """True when a word of a command names a secret: the word, its pieces around : and =, and what its glob matches. A network path is
+    refused (by ctx.path) before any lookup; the //host/... piece of a URL (https://...) is judged by its name only, never looked up."""
+    url = re.match(r"[A-Za-z][A-Za-z0-9+.-]+://", word)
     for piece in {word, *re.split(r"[:=@]", word)}:
-        if piece and secret_name(piece, ctx.path(piece, cwd), strict=False):
+        if url and network(piece) and not network(word):
+            if secret_name(piece, strict=False):
+                return True
+        elif piece and secret_name(piece, ctx.path(piece, cwd), strict=False):
             return True
     if getattr(word, "glob", False):
         import glob

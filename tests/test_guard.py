@@ -516,6 +516,57 @@ def test_grep_and_rm_refuse_a_tree_too_big_to_look_through(ctx, monkeypatch):
     assert sh(ctx, "rm -rf {work}/big")[2] == "guard file"
 
 
+@pytest.mark.parametrize("name,inp", [
+    ("Read", {"file_path": "\\\\host\\s\\x.md"}), ("Read", {"file_path": "//host/s/x.md"}), ("Read", {"file_path": "\\\\?\\UNC\\host\\s\\x"}),
+    ("Read", {"file_path": "\\\\.\\pipe\\x"}), ("Read", {"file_path": "/\\host\\s\\x.md"}), ("Glob", {"pattern": "*.md", "path": "//host/s"}),
+    ("LS", {"path": "\\\\host\\s"}), ("Grep", {"pattern": "x", "path": "\\\\host\\s"}), ("Write", {"file_path": "//host/s/x.md"}),
+    ("Edit", {"file_path": "\\\\host\\s\\x.md"}), ("Bash", {"command": "cat //host/s/x.md"}), ("Bash", {"command": "cat '\\\\host\\s\\x.md'"}),
+    ("Bash", {"command": "gh issue comment 1 --body-file //host/s/x.md"}), ("Bash", {"command": "cd //host/s"}),
+    ("Bash", {"command": "git diff //host/s/x a.txt"}), ("Bash", {"command": "//host/s/python.exe -m pytest -q"}),
+    ("Bash", {"command": "python -m pytest -q //host/s/tests"}), ("Bash", {"command": "grep x a=//host/s/x"})])
+def test_a_network_path_is_refused_before_any_filesystem_call(ctx, monkeypatch, name, inp):
+    def local_only(real):
+        def call(p, *a, **k):
+            if isinstance(p, (str, os.PathLike)) and guard.network(os.fspath(p)):
+                raise AssertionError(f"the guard looked a network path up: {p}")
+            return real(p, *a, **k)
+        return call
+    for fn in ("realpath", "exists", "isdir", "isfile", "lexists"):
+        monkeypatch.setattr(os.path, fn, local_only(getattr(os.path, fn)))
+    for fn in ("stat", "scandir", "listdir"):
+        monkeypatch.setattr(os, fn, local_only(getattr(os, fn)))
+    decision, reason, code, _ = guard.decide({"tool_name": name, "tool_input": inp}, ctx)
+    assert (decision, code) == ("deny", "network path"), (name, inp, reason)
+
+
+def test_a_read_of_a_network_path_never_reaches_realpath(ctx, monkeypatch):
+    def no_lookup(*a, **k):
+        raise AssertionError("the guard looked a path up")
+    monkeypatch.setattr(os.path, "realpath", no_lookup)
+    assert tool(ctx, "Read", file_path="\\\\host\\s\\x.md")[2] == "network path"
+    assert tool(ctx, "Read", file_path="//host/s/x.md")[2] == "network path"
+
+
+def test_a_url_is_not_looked_up_as_a_network_path(ctx, monkeypatch):
+    real = os.path.realpath
+
+    def local_only(p, *a, **k):
+        assert not guard.network(str(p)), p
+        return real(p, *a, **k)
+    monkeypatch.setattr(os.path, "realpath", local_only)
+    assert sh(ctx, "gh issue view https://github.com/acme/webshop/issues/12")[0] == "allow"
+    assert sh(ctx, "gh pr view https://evil.example/acme/webshop/pull/1")[2] == "another repository"
+
+
+def test_a_walk_past_the_guard_s_time_budget_is_refused(ctx, monkeypatch):
+    (pathlib.Path(ctx.places["work"]) / "src" / "app.py").write_text("x")
+    assert tool(ctx, "Grep", pattern="x", path="{work}")[0] == "allow"
+    assert sh(ctx, "rm -rf {work}/src")[0] == "allow"
+    monkeypatch.setattr(guard, "BUDGET_SECONDS", 0)
+    assert tool(ctx, "Grep", pattern="x", path="{work}")[2] == "secret"                  # the walk ran out of time: refused
+    assert sh(ctx, "rm -rf {work}/src")[2] == "guard file"
+
+
 def test_rm_of_a_folder_looks_at_its_whole_tree(ctx):
     docs = pathlib.Path(ctx.places["work"]) / "docs" / "sub"
     docs.mkdir(parents=True)
