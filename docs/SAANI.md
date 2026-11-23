@@ -103,7 +103,8 @@ flowchart TB
 - **Generated files** (`[land] generated`, rebuilt by `[land] rebuild`) are rebuilt at landing and committed there, so workers never commit
   them.
 - **Landing tests red, or a push refused** (the integration branch moved): the landing merges again and retries, the landing tests
-  again only when the new commits touch the branch's files, at most `push_attempts` times; otherwise it stops and nothing reaches the integration branch.
+  again only when the new commits touch the branch's files, at most `push_attempts` times; otherwise it stops and nothing reaches the
+  integration branch.
 - **Landing while a pull request is open**: a finished task lands at once. Each landing makes that pull request's CI stale; the CI runs once
   more right before the merge, and that run is the one that counts.
 - **The measure**: each landing appends a line to `build/saani-landings.jsonl` of the main checkout; `saani status` sums it, `saani kpis`
@@ -255,13 +256,16 @@ A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Start
 asked, what blocks the issue); the map and the auto run read it through that one parser.
 
 ### An auto run
-An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM; at most 2 per project, another project's run has its own 2). Each
-issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`, the coder (in the background, so several issues
-progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a time (the lock). Claude Code asks `saani auto pick
---json` whenever a slot is free and takes the first eligible issue, so an issue that lands is replaced at once and the list is never a
-stale one. Two issues whose likely files overlap (the paths the issue body names between backticks, against the files the running
-worktrees changed and the other picked issues) are not run side by side: the later one waits, and `pick` says "overlaps #m (path)". The
-check is best effort and narrow: only paths named between backticks count (a folder such as `docs/` does not; a bare `saani.toml` is the root file only), and there is no fallback on title words, so an issue that names no paths never waits on overlap. The slots are sized from the machine, not from the memory the running issues already use; a conflict at landing goes back to the coder of that issue. `saani kpis` gives the cost per issue, role and model.
+An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM; at most 2 per
+project, another project's run has its own 2). Each issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`,
+the coder (in the background, so several issues progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a
+time (the lock). Claude Code asks `saani auto pick --json` whenever a slot is free and takes the first eligible issue, so an issue that
+lands is replaced at once and the list is never a stale one. Two issues whose likely files overlap (the paths the issue body names between
+backticks, against the files the running worktrees changed and the other picked issues) are not run side by side: the later one waits, and
+`pick` says "overlaps #m (path)". The check is best effort and narrow: only paths named between backticks count (a folder such as `docs/`
+does not; a bare `saani.toml` is the root file only), and there is no fallback on title words, so an issue that names no paths never waits
+on overlap. The slots are sized from the machine, not from the memory the running issues already use; a conflict at landing goes back to
+the coder of that issue. `saani kpis` gives the cost per issue, role and model.
 
 **Two sub-modes: interactive and away** (#50). `/saani:auto here` runs in the owner's session: the questions any time,
 `saani auto on --here` writes the run's record (stop rules, journal, report) without the guard's switch, so the session stays in present
@@ -277,8 +281,9 @@ prints the command to start by hand. The session is started with `CLAUDE_CODE_PR
 (`hasTrustDialogAccepted`; it reads that flag only, never writes the file): open Claude Code in the folder once and accept the trust
 dialog. It records the process id in `build/saani-auto-<id>.pid`, and `saani auto status` says when that process is gone while the run is
 still on (then read the log and `saani auto off --run <id>`). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the
-guard decides every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after
-repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none` every
+guard decides every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code
+falls back to asking after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With
+`--permission-prompts none` every
 such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
 classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
