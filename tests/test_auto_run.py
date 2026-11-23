@@ -123,6 +123,16 @@ def test_off_run_ends_a_run_without_a_record(world, capsys):
         auto.cmd_off(args(run_id="a b"))
 
 
+def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):
+    os.makedirs(guard.registry(), exist_ok=True)
+    pathlib.Path(guard.registry(), "sess-9.over").write_text("{broken", encoding="utf-8")
+    assert guard.state("sess-9") == {"over": True}                                       # still refused until the owner clears it
+    assert guard.turn_off_run("gone") == 0                                               # no run id to match it by
+    assert auto.cmd_off(args(run_id="gone")) == 0
+    assert "removed 1 unreadable over mark of the guard (no run id to match): sess-9" in capsys.readouterr().out
+    assert guard.state("sess-9") is None and not os.listdir(guard.registry())
+
+
 def test_off_run_removes_an_over_mark_too(world, capsys):
     old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
     guard.turn_on("sess-1", "gone", world.root, world.wt, folder=world.run, started=old)

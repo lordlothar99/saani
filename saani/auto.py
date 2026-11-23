@@ -622,6 +622,11 @@ def cmd_off(args):
     if mine:
         print(status_text(rec))
     gone = end_guard_entries(run_id)
+    from . import guard
+    unreadable = guard.remove_unreadable_over()
+    if unreadable:
+        print(f"removed {len(unreadable)} unreadable over mark{'' if len(unreadable) == 1 else 's'} of the guard (no run id to match): "
+              + ", ".join(unreadable))
     if mine:
         path = record_path()
         try:

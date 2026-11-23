@@ -202,7 +202,8 @@ the workers are covered too); nothing the model can write or the folder it is in
 - **The switch off: the owner's.** Inside an auto run `saani auto on` and `saani auto off` are refused: a run never re-arms, resets or
   ends itself. The owner ends it from a terminal (`saani auto off --run <id>`, which removes that run's entries: `turn_off_run`). An entry
   older than 12 hours is over: renamed `<session>.over`, and every call of that session is refused (`run over`), never back to present
-  mode, until the owner's `saani auto off --run <id>` removes the mark too. `turn_on`, `turn_off`, `turn_off_run`, `state` and
+  mode, until the owner's `saani auto off --run <id>` removes the mark too. A mark that cannot be read (no run id to match it by) keeps
+  its session refused; `saani auto off` removes such marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and
   `refusals` in `saani/guard.py` are the same switch for code.
 - **Fail closed.** An entry that cannot be read, a registry that cannot be listed, or hook input that cannot be read while an entry
   exists: refused (`guard error: <what>`). An internal error is a refusal, never a crash. If the hook cannot run at all (timeout, no

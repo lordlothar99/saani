@@ -168,6 +168,32 @@ def turn_off_run(run_id):
     return done
 
 
+def remove_unreadable_over():
+    """Removes the over marks that cannot be read or name no run (no id to match them by): the owner's `saani auto off`, from a terminal.
+    Until then their session stays refused. Returns their session ids."""
+    removed = []
+    try:
+        names = os.listdir(registry())
+    except FileNotFoundError:
+        return removed
+    for name in names:
+        if not name.endswith(OVER):
+            continue
+        path = os.path.join(registry(), name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("id"), str) and RUN_ID.fullmatch(data["id"]):
+                continue
+        except ValueError:
+            pass
+        except OSError:
+            continue                                         # cannot even be opened: left as it is (still refused)
+        os.remove(path)
+        removed.append(name[:-len(OVER)])
+    return removed
+
+
 def refusals(run=None, project=None):
     """{"total": n, "by_reason": {reason: n}} of the refusal log, for the run `run` (None: every line) and, when given, the project
     whose main checkout is `project` (two projects' runs never mix)."""
