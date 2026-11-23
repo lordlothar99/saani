@@ -238,7 +238,7 @@ here-documents: `git commit -F - <<'EOF' ... EOF`, and `"$(cat <<'EOF' ... EOF\n
 An unquoted glob (`*`, `?`) in a command's arguments is read where bash reads it (Git Bash's `/c/...`, `/tmp`, `~`) and matched by the
 guard itself: only inside the worktrees folder or the run's folder, never reaching a secret, within the guard's budget (below). A glob
 with `[...]` is refused: bash reads `[^x]` as "not x" and has `[[:alpha:]]`, which the guard's matcher does not; quote it, or name the
-files.
+files. So is a glob with `**` (any depth when bash's `globstar` is on).
 
 | Command | Allowed | Refused |
 |---|---|---|

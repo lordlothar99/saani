@@ -470,7 +470,7 @@ def test_a_glob_that_would_reach_a_secret_is_refused(ctx):
     "cat ~/.ss[^x]/id_rs[^x]", "cat ~/.ss?/id_rs?", "cat ~/.ss*/id_*", "cat {home}/.ss?/id_rs?", "head -1 ~/.ss?/id_rs?",
     "gh issue comment 1 --body-file ~/.ss[^x]/id_rs[^x]", "gh issue comment 1 -F ~/.ss?/id_rs?", "git commit -F ~/.ss?/id_rs?",
     "git diff ~/.ss?/id_rs? a.txt", "git diff -- ~/.ss?/id_rs?", "cat {main}/*.py", "cat ../../webshop/*", "wc -l {temp}/*",
-    "cat src/[a]pp.py", "cat ~/.ss?/id_rs? && ls"])
+    "cat src/[a]pp.py", "cat ~/.ss?/id_rs? && ls", "cat **/app.py", "cat src/**", "wc -l **/*.py", "cat a**b"])
 def test_a_glob_is_matched_as_bash_reads_it_and_only_inside_the_run_s_places(ctx, command):
     decision, reason, code, _ = sh(ctx, command)
     assert decision == "deny", (command, reason)

@@ -808,6 +808,8 @@ def secret_word(ctx, word, cwd):
         # [...] (bash reads [^x] as "not x", Python's fnmatch as "^ or x", and bash has [[:alpha:]]).
         if "[" in word:
             raise Refuse("unsure", "a glob with [...] (the guard does not read it as bash does)", how="name the files, or use * and ?")
+        if "**" in word:                                         # with globstar on, bash reads ** as any depth: the matcher does not
+            raise Refuse("unsure", "a glob with ** (any depth when bash's globstar is on)", how="name the files, or use * and ?")
         pattern = ctx.path(word, cwd)
         if not ctx.in_run(pattern):
             raise Refuse("glob outside the worktrees", "a glob outside the worktrees folder and the run's folder",
