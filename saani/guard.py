@@ -1367,7 +1367,8 @@ def revisions(sub, words, ctx, gcwd):
                     "branches and ranges of these; no commit id)", "git", how="name HEAD, origin/<branch> or a worker branch")
     # git takes the FIRST literal -- (even one that looks like an option's value) as the end of the revisions: with one, every word
     # before it is read as a revision, never as a path, so no path or glob exemption applies there.
-    dashdash = words.index("--") if "--" in words else None
+    # (rev-parse reads its arguments in order: -n, --default, --prefix take a following -- as their value, so it gets no -- rule.)
+    dashdash = words.index("--") if "--" in words and sub != "rev-parse" else None
     k = 0
     while k < len(words):
         w = words[k]
@@ -1388,6 +1389,10 @@ def revisions(sub, words, ctx, gcwd):
                 if not allowed_rev(nxt, ctx):
                     return no(w)
                 k += 1
+            elif sub == "rev-parse" and name in ("default", "prefix"):     # their value is read as a revision: judged as one
+                if not allowed_rev(value if eq else nxt, ctx):
+                    return no(w)
+                k += 0 if eq else 1
             elif not eq and takes_text(sub, w):
                 k += 1
         elif w.startswith("-") and len(w) > 1:
