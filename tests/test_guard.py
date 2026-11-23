@@ -624,7 +624,8 @@ def test_a_broken_entry_fails_closed_and_an_old_one_is_over(tmp_path, home):
         guard.state("s-1")
     old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
     guard.turn_on("s-2", "r", "m", "w", started=old)
-    assert guard.state("s-2") is None
+    assert guard.state("s-2")["over"] is True                                            # over, never present mode again
+    assert guard.state("s-2")["over"] is True
 
 
 def test_present_mode_prints_nothing(tmp_path, home):
@@ -718,11 +719,24 @@ def test_registration_needs_a_run_folder_inside_the_worktrees_of_a_saani_project
     assert guard.state("s-1")["deploy"] is True
 
 
-def test_an_expired_entry_is_deleted(tmp_path, home):
-    old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
-    guard.turn_on("s-1", "r", "m", "w", started=old)
-    assert guard.state("s-1") is None
-    assert not (home / ".saani" / "auto" / "s-1.json").exists()
+def test_an_expired_entry_is_over_every_call_refused_until_the_owner_ends_the_run(tmp_path, home):
+    main, work = fake_repo(tmp_path)
+    old = (datetime.datetime.now() - datetime.timedelta(hours=13)).isoformat()
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt", started=old)
+    for call in ({"command": "git status"}, {"command": "ls"}):                          # denied, and denied again: never present mode
+        out = hook(home, work, "Bash", **call)
+        assert out["permissionDecision"] == "deny" and "over" in out["permissionDecisionReason"], call
+    assert hook(home, work, "Read", file_path=str(work / "README.md"))["permissionDecision"] == "deny"
+    assert not (home / ".saani" / "auto" / "s-1.json").exists() and (home / ".saani" / "auto" / "s-1.over").exists()
+    post(home, work, AUTO_ON, ran(marker("r", work)))                                    # never re-armed
+    assert guard.state("s-1")["over"] is True
+    assert guard.refusals("r")["by_reason"] == {"run over": 3}
+    assert guard.turn_off_run("r") == 1                                                  # the owner, from a terminal: the mark goes too
+    assert not (home / ".saani" / "auto" / "s-1.over").exists() and guard.state("s-1") is None
+    assert hook(home, work, "Bash", command="git status") is None
+    guard.turn_on("s-2", "r2", main, tmp_path / "webshop-wt", started=old)
+    assert guard.state("s-2")["over"] is True and guard.turn_off("s-2")["over"] is True
+    assert guard.state("s-2") is None
 
 
 def test_the_guard_fails_closed(tmp_path, home):

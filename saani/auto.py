@@ -375,11 +375,11 @@ def project_of(entry):
 
 
 def entries():
-    """[(session id, entry)] of the guard's registry, read only."""
+    """[(session id, entry)] of the guard's registry (over marks included: the guard still refuses their calls), read only."""
     from . import guard
     out = []
     try:
-        names = [x for x in os.listdir(guard.registry()) if x.endswith(".json")]
+        names = [x for x in os.listdir(guard.registry()) if x.endswith((".json", guard.OVER))]
     except OSError:
         return out
     for name in names:

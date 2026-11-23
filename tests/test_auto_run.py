@@ -123,6 +123,15 @@ def test_off_run_ends_a_run_without_a_record(world, capsys):
         auto.cmd_off(args(run_id="a b"))
 
 
+def test_off_run_removes_an_over_mark_too(world, capsys):
+    old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
+    guard.turn_on("sess-1", "gone", world.root, world.wt, folder=world.run, started=old)
+    assert guard.state("sess-1")["over"] is True                                         # the session is over: every call refused
+    assert auto.cmd_off(args(run_id="gone")) == 0
+    assert "(1 guard entry removed" in capsys.readouterr().out
+    assert guard.state("sess-1") is None and not os.listdir(guard.registry())
+
+
 def test_off_run_of_another_run_keeps_the_record(world):
     record(world)
     assert auto.cmd_off(args(run_id="elsewhere")) == 0

@@ -8,7 +8,8 @@ Two modes (docs/SAANI.md, The guard), told apart by the hook's `session_id` only
   `saani auto on` too: the owner is asked unless their own rules allow it. A present session never switches itself into auto mode.
 - **auto** (`~/.saani/auto/<session_id>.json`): written by the PostToolUse hook once the whole Bash command `saani auto on ...` ran,
   ended normally and printed its marker line (`saani auto: on <id> folder=<path>`); removed by the owner from a terminal (`saani auto off
-  --run <id>`, `turn_off_run`) or after 12 hours. Every tool call gets "allow" or "deny", never "ask", because an away run must not wait;
+  --run <id>`, `turn_off_run`). After 12 hours it is over (renamed `<session_id>.over`): every call of that session is refused, it never
+  falls back to present mode. Every tool call gets "allow" or "deny", never "ask", because an away run must not wait;
   `saani auto on` and `off` are refused (a run never re-arms or ends itself). The rules are an allowlist: what the guard cannot read for
   sure is refused, with the reason and how to go on. Each refusal adds a line to `~/.saani/auto/refusals.jsonl` (time, run, tool, short
   reason, the command's first word only).
@@ -27,7 +28,8 @@ import sys
 REFUSALS = "refusals.jsonl"
 SESSION = re.compile(r"[A-Za-z0-9_-]{1,128}")
 RUN_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
-MAX_HOURS = 12                      # an entry older than this is over (the run's own limit is 10 hours): present mode again
+MAX_HOURS = 12                      # an entry older than this is over (the run's own limit is 10 hours): every call refused
+OVER = ".over"                      # the mark of a session whose entry is over: it stays until the owner's `saani auto off --run <id>`
 WINDOWS = os.name == "nt"
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 HOW = ("skip it and note it for the report; the owner can do it when present, or a reviewed change can add a rule to the guard "
@@ -49,12 +51,27 @@ def _entry(session_id):
     return os.path.join(registry(), session_id + ".json") if isinstance(session_id, str) and SESSION.fullmatch(session_id) else None
 
 
+def _over(path):
+    return path[:-len(".json")] + OVER
+
+
 def state(session_id, now=None):
-    """The auto run of this Claude Code session ({"id", "started", "main", "wt_dir", "folder", "deploy", settings}), or None. Raises
-    RegistryError when the entry exists but cannot be read, or the registry cannot be looked at."""
+    """The auto run of this Claude Code session ({"id", "started", "main", "wt_dir", "folder", "deploy", settings}), or None. A session
+    whose entry is over gets {..., "over": True}: it was on, so it never falls back to present mode. Raises RegistryError when the entry
+    exists but cannot be read, or the registry cannot be looked at."""
     path = _entry(session_id)
     if path is None:
         return None
+    try:
+        with open(_over(path), encoding="utf-8") as f:
+            data = json.load(f)
+        return {**data, "over": True} if isinstance(data, dict) else {"over": True}
+    except FileNotFoundError:
+        pass
+    except ValueError:
+        return {"over": True}
+    except OSError as e:
+        raise RegistryError(type(e).__name__) from e
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -71,10 +88,10 @@ def state(session_id, now=None):
         raise RegistryError("no start time") from e
     if (now or datetime.datetime.now()) - started > datetime.timedelta(hours=MAX_HOURS):
         try:
-            os.remove(path)                                  # over: the entry goes, present mode again
+            os.replace(path, _over(path))                    # over: marked, every call refused until the owner's `saani auto off`
         except OSError:
             pass
-        return None
+        return {**data, "over": True}
     return data
 
 
@@ -99,26 +116,28 @@ def turn_on(session_id, run_id, main, wt_dir, folder=None, deploy=False, started
 
 
 def turn_off(session_id):
-    """Removes this session's entry: present mode again. Returns the entry that was there, or None."""
+    """Removes this session's entry and its over mark: present mode again. Returns the entry that was there, or None."""
     path = _entry(session_id)
     try:
         was = state(session_id)
     except RegistryError:
         was = {}
-    if path and os.path.exists(path):
-        os.remove(path)
+    for p in (path, path and _over(path)):
+        if p and os.path.exists(p):
+            os.remove(p)
     return was
 
 
 def turn_off_run(run_id):
-    """Removes every entry of the run `run_id` (the owner's `saani auto off --run <id>`, from a terminal). Returns how many."""
+    """Removes every entry of the run `run_id`, over marks included (the owner's `saani auto off --run <id>`, from a terminal). Returns
+    how many."""
     done = 0
     try:
         names = os.listdir(registry())
     except FileNotFoundError:
         return 0
     for name in names:
-        if not name.endswith(".json"):
+        if not name.endswith((".json", OVER)):
             continue
         path = os.path.join(registry(), name)
         try:
@@ -1458,7 +1477,7 @@ def main(raw=None):
     error = "Saani guard (auto run): guard error: {}. To go on: the owner looks at the guard."
     if event is None:
         try:
-            some = any(n.endswith(".json") for n in os.listdir(registry()))
+            some = any(n.endswith((".json", OVER)) for n in os.listdir(registry()))
         except FileNotFoundError:
             some = False
         except OSError:
@@ -1480,6 +1499,11 @@ def main(raw=None):
         emit("deny", error.format(f"registry {type(e).__name__}"))
         return 0
     if st is None:
+        return 0
+    if st.get("over"):
+        log_refusal(st, event.get("tool_name", "?"), "run over", "")
+        emit("deny", f"Saani guard (auto run): refused, this auto run is over (its {MAX_HOURS} hours are past). To go on: report and "
+                     "stop; the owner ends the run from a terminal: saani auto off --run <id>.")
         return 0
     cwd = event.get("cwd")
     try:
