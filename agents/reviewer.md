@@ -15,6 +15,8 @@ nothing chained. No `python -` or `python -c`, heredoc scripts, shell loops, `ba
 arbitrary code, so each one asks the owner (and an auto run's guard refuses it).
 
 You are given an issue and a worktree. Read the issue, then `git -C <worktree> diff origin/<integration branch>...HEAD`, then the code around each change.
+Name commits as `HEAD~n` or ranges like `origin/<integration branch>..HEAD` (`git -C <worktree> show HEAD~1`), never by their short
+ids: in an auto run the guard refuses raw object ids.
 You do not get, and do not ask for, the coder's reasoning: judge what the code does.
 
 Look for: bugs and missing edge cases; a change that breaks a rule of the project's CLAUDE.md; a test that does not test the change or was
