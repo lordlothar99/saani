@@ -47,6 +47,9 @@ key = ""                         # the PATH of the deploy key, never its content
 timeout_minutes = 30
 paths = []                       # path prefixes the project deploys (the map: an issue touching none is "To close")
 
+[release]
+version_file = ""                # the file holding the version (`version = "1.2.0"`): when a merged dev -> main pull request changes it, `saani merge` creates the GitHub release v<version>; empty: no release
+
 [board]
 folders = { work = "C:/work/webshop", deploy = "C:/work/webshop-main", auto = "C:/work/webshop-auto" }
 session_match = "webshop"        # Claude Code sessions whose project folder name contains this are listed

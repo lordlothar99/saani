@@ -628,6 +628,30 @@ def cmd_land(args):
     return 0
 
 
+def force_remove_folder(path, tries=6, pause=1.0):
+    """Deletes a folder git left behind after unregistering its worktree: read-only files are made writable, and a lock that is only
+    transient (a process still closing a file, a scanner) gets a few seconds. True when the folder is gone."""
+    def writable(func, p, _exc):
+        try:
+            os.chmod(p, 0o700)
+            func(p)
+        except OSError:
+            pass
+    folder = pathlib.Path(path)
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(pause)
+        if not folder.exists():
+            return True
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(folder, onexc=writable)
+        else:
+            shutil.rmtree(folder, onerror=writable)
+        if not folder.exists():
+            return True
+    return not folder.exists()
+
+
 def remove_landed_worktree(cwd, branch):
     """Removes a landed worktree and its local branch, and says what is actually left when git fails: still registered (it stays, the
     branch too) or unregistered with a folder left behind (the branch goes, the owner removes the folder)."""
@@ -642,6 +666,9 @@ def remove_landed_worktree(cwd, branch):
         print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
         return
     git("branch", "-D", branch, cwd=home, check=False)
+    if not same_path(cwd, home) and force_remove_folder(cwd):          # git unregistered it but kept the folder: finish the job
+        print(f"removed: {cwd} and the local branch {branch} (the folder git left behind)")
+        return
     quoted = str(cwd).replace("'", "''")
     exists = pathlib.Path(cwd).exists()
     left = f"the folder {cwd} is left" if exists else "nothing is left"

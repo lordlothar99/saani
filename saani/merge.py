@@ -8,7 +8,7 @@ Standard library only; the checks are pure functions (tests/test_merge.py).
 import importlib
 import json
 
-from . import ci, config
+from . import ci, config, notes
 
 PASSED_CHECKS = ("success", "neutral", "skipped")      # any other conclusion (failure, cancelled, timed_out, action_required, stale...) refuses
 
@@ -92,6 +92,30 @@ def run_command(args):
         return 1
 
 
+def release_step(number, merge_sha):
+    """The GitHub release when the merged pull request changed the version (saani/notes.py): (0, None) when it was made or none was due.
+    A failure of any kind never undoes the merge: it prints `next:` with the command for the owner, and gives (1, that line)."""
+    if not cfg().version_file:
+        return 0, None
+    if not merge_sha:
+        print(f"no release made: GitHub names no merge commit for #{number} yet")
+        line = f"next: saani release create <version> --target <merge commit> --from-pr {number}"
+        print(line)
+        return 1, line
+    version = None
+    try:
+        notes.release_after_merge(number, merge_sha)
+    except BaseException as e:                                   # ReleaseFailed (a SystemExit), OSError, odd gh data...
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        version = getattr(e, "version", None)
+        print(f"the merge is done; the release step failed: {e}")
+        line = f"next: saani release create {version or '<version>'} --target {merge_sha} --from-pr {number}"
+        print(line)
+        return 1, line
+    return 0, None
+
+
 def merge_it(args):
     c = cfg()
     gh = ci.Run(args.dry_run)
@@ -110,24 +134,33 @@ def merge_it(args):
     if args.dry_run:
         print(f"dry-run: gh pr merge {n} --merge")
         print(f"dry-run: then saani ci merged {n} (relabel, remove the finished auto runs)")
+        if c.version_file:
+            print(f"dry-run: then, when the pull request changes the version in {c.version_file}, the GitHub release v<version> with the notes of its issues")
         if args.deploy:
             print("dry-run: then the deploy" + ("" if deployer() else " (not available yet: saani/deploy.py is missing)"))
         return 0
     gh.write("gh", "pr", "merge", str(n), "--repo", c.repo, "--merge", "--match-head-commit", sha)
-    after = gh.json("gh", "pr", "view", str(n), "--repo", c.repo, "--json", "state") or {}
+    after = gh.json("gh", "pr", "view", str(n), "--repo", c.repo, "--json", "state,mergeCommit") or {}
     if after.get("state") != "MERGED":
         print(f"#{n} is {after.get('state')}, not MERGED (a merge queue may only have enqueued it): stopping before the relabel; "
               f"when it is merged, run saani ci merged {n}")
         return 1
     print(f"merged #{n} into {c.production}")
     code = ci.cmd_merged(gh, n)
+    release_code, next_line = release_step(n, (after.get("mergeCommit") or {}).get("oid"))
+    code = release_code or code
     if not args.deploy:
         return code
     deploy = deployer()
     if deploy is None:
         print("deploy is not available yet (saani/deploy.py is missing): the merge is done, nothing was deployed")
+        if next_line:
+            print(next_line)
         return 2
-    return deploy(args) or code
+    result = deploy(args) or code
+    if next_line:
+        print(next_line)                                         # the last line, after the deploy's own output
+    return result
 
 
 def add_parsers(sub):

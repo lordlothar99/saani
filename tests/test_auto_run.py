@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 
 import pytest
@@ -623,9 +624,52 @@ def failing_removal(world, monkeypatch, listed=None, name="task-12-cart", error=
 
 def test_a_removal_that_half_fails_deletes_the_branch_and_names_the_folder_left(world, monkeypatch, capsys):
     folder, calls = failing_removal(world, monkeypatch, error="Directory not empty")
+    monkeypatch.setattr(core, "force_remove_folder", lambda p: False)          # something really keeps it locked
     core.remove_landed_worktree(folder, "task/12-cart")
     out = capsys.readouterr().out
     assert ("branch", "-D", "task/12-cart") in calls and str(folder) in out and "unregistered" in out
+
+
+def test_a_folder_git_left_behind_is_deleted_by_saani_read_only_files_included(world, monkeypatch, capsys):
+    folder, calls = failing_removal(world, monkeypatch, error="Permission denied")
+    locked = folder / "sub" / "ro.txt"
+    locked.parent.mkdir()
+    locked.write_text("x")
+    os.chmod(locked, 0o400)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    out = capsys.readouterr().out
+    assert not folder.exists() and ("branch", "-D", "task/12-cart") in calls and "removed:" in out and "unregistered" not in out
+
+
+def test_a_transient_lock_is_retried_until_the_folder_goes(tmp_path, monkeypatch):
+    folder = tmp_path / "wt"
+    folder.mkdir()
+    real, calls = shutil.rmtree, []
+
+    def flaky(p, **kw):
+        calls.append(p)
+        if len(calls) < 3:
+            return None                                                        # still locked: nothing deleted
+        return real(p, **kw)
+    monkeypatch.setattr(shutil, "rmtree", flaky)
+    assert core.force_remove_folder(folder, tries=5, pause=0) is True and len(calls) == 3 and not folder.exists()
+
+
+def test_a_persistent_lock_gives_up_after_the_tries(tmp_path, monkeypatch):
+    folder = tmp_path / "wt"
+    folder.mkdir()
+    calls = []
+    monkeypatch.setattr(shutil, "rmtree", lambda p, **kw: calls.append(p))
+    assert core.force_remove_folder(folder, tries=4, pause=0) is False and len(calls) == 4 and folder.exists()
+
+
+def test_the_main_checkout_is_never_deleted_by_the_leftover_cleanup(world, monkeypatch, capsys):
+    folder, calls = failing_removal(world, monkeypatch, error="busy")
+    seen = []
+    monkeypatch.setattr(core, "force_remove_folder", lambda p: seen.append(p) or True)
+    monkeypatch.setattr(core, "main_checkout", lambda cwd=None: folder)       # the landed folder IS the main checkout: refuse
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert seen == [] and folder.exists()
 
 
 def test_a_removal_that_fails_with_the_worktree_still_registered_keeps_it_and_the_branch(world, monkeypatch, capsys):
@@ -643,6 +687,7 @@ def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_regi
 
 def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
     folder, _ = failing_removal(world, monkeypatch, name="it's a folder", error="busy")
+    monkeypatch.setattr(core, "force_remove_folder", lambda p: False)
     core.remove_landed_worktree(folder, "task/12-cart")
     assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
 

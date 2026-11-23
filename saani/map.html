@@ -35,8 +35,8 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 @media (prefers-reduced-motion:reduce){::view-transition-old(root),::view-transition-new(root),.pg-enter body,body.pg-leave{animation:none}}
 /* The owner, 2026-11-22: switching project is a trip across Arrakis: the map shakes, blurs and burns into a sand storm, then the new
    base comes out of the dust */
-#storm{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;transition:opacity .45s ease;overflow:hidden;
-  background:radial-gradient(ellipse at 50% 50%,rgba(214,168,104,.35),rgba(96,56,26,.85))}
+#storm{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;transition:opacity .38s ease-in-out;overflow:hidden;
+  background:radial-gradient(ellipse at 50% 50%,rgba(222,182,120,.92),rgba(150,100,56,.95) 60%,rgba(96,56,26,.97))}
 #storm::before,#storm::after{content:"";position:absolute;inset:-60%}
 #storm::before{background:repeating-linear-gradient(-18deg,rgba(240,212,160,0) 0 14px,rgba(240,212,160,.55) 14px 17px,rgba(240,212,160,0) 17px 46px)}
 #storm::after{background:repeating-linear-gradient(-14deg,rgba(170,118,62,0) 0 30px,rgba(170,118,62,.45) 30px 34px,rgba(170,118,62,0) 34px 90px)}
@@ -45,31 +45,18 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 #storm.on::after{animation:gust2 .5s linear infinite}
 @keyframes gust1{to{transform:translateX(-48.37px)}}     /* one stripe period across: the loop has no seam */
 @keyframes gust2{to{transform:translateX(-92.76px)}}
-#stage.warp-out #map{animation:warpOut .7s ease-in both}
-#stage.warp-in #map{animation:warpIn .95s cubic-bezier(.2,.8,.25,1) both}
-@keyframes warpOut{0%{filter:none;transform:none}15%{transform:translate(-6px,3px) rotate(-.3deg)}30%{transform:translate(7px,-4px) rotate(.4deg)}
-  45%{transform:translate(-8px,2px) scale(1.02)}60%{filter:blur(4px) sepia(.35) saturate(1.15);transform:translate(6px,-3px) scale(1.04)}
-  80%{transform:translate(-4px,2px) scale(1.06)}100%{filter:blur(14px) sepia(.7) saturate(1.3) brightness(1.08) contrast(.9);transform:scale(1.1)}}
-@keyframes warpIn{0%{filter:blur(14px) sepia(.7) saturate(1.3) brightness(1.08) contrast(.9);transform:scale(.93)}20%{transform:scale(.95) translate(4px,-2px)}
-  40%{transform:scale(.97) translate(-3px,2px)}65%{filter:blur(2px) sepia(.25)}100%{filter:none;transform:none}}
-@media (prefers-reduced-motion:reduce){#storm.on::before,#storm.on::after,#stage.warp-out #map,#stage.warp-in #map{animation:none}}
+#stage.warp-out > svg{animation:warpOut .7s ease-in both}
+#stage.warp-in > svg{animation:warpIn .95s cubic-bezier(.2,.8,.25,1) both}
+@keyframes warpOut{0%{transform:none}15%{transform:translate(-6px,3px) rotate(-.3deg)}30%{transform:translate(7px,-4px) rotate(.4deg)}
+  45%{transform:translate(-8px,2px) scale(1.02)}60%{transform:translate(6px,-3px) scale(1.04)}80%{transform:translate(-4px,2px) scale(1.07)}100%{transform:scale(1.1)}}
+@keyframes warpIn{0%{transform:scale(.93)}20%{transform:scale(.95) translate(4px,-2px)}40%{transform:scale(.97) translate(-3px,2px)}100%{transform:none}}
+@media (prefers-reduced-motion:reduce){#storm.on::before,#storm.on::after,#stage.warp-out > svg,#stage.warp-in > svg{animation:none}}
 .harvtxt{font:600 8px var(--mono);letter-spacing:.06em;fill:#f0dcb4}
 .hblink{animation:hblink 1s steps(1) infinite}
 .flame{transform-box:fill-box;transform-origin:50% 100%;animation:flame .7s ease-in-out infinite alternate}
 @keyframes flame{from{transform:scaleY(.85) skewX(-4deg)}to{transform:scaleY(1.12) skewX(4deg)}}
 @keyframes hblink{50%{opacity:.15}}
 @media (prefers-reduced-motion:reduce){.hblink{animation:none}}
-/* The owner, 2026-11-22: the tweak menu, bottom left beside Signs: try the release PR, its CI lights, the trip and a sandworm */
-.tweaks{position:fixed;z-index:6;bottom:calc(14px + env(safe-area-inset-bottom,0px));left:calc(104px + env(safe-area-inset-left,0px))}
-.tweaks > .btn{position:static;background:var(--slab)}
-.tweakpanel{position:absolute!important;bottom:calc(100% + 8px);left:0;padding:12px 14px;display:grid;gap:10px;min-width:280px;transform-origin:bottom left;animation:twIn .18s ease-out both}
-@keyframes twIn{from{opacity:0;transform:translateY(6px) scale(.97)}}
-.tw-sec{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.tw-h{flex:1 0 100%;font:500 10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--dust)}
-.tweakpanel .btn{position:static;font-size:10px;padding:6px 8px}
-.tweakpanel .btn[disabled]{opacity:.4;cursor:default}
-.tweakpanel .btn.on{background:var(--sand);color:var(--night)}
-.tw-note{margin:0;font:400 11px/1.4 var(--body);color:var(--dust);max-width:280px}
 .zlist{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 .zlist li{cursor:pointer;padding:4px 6px;border:1px solid transparent;font-size:14px}
 .zlist li:hover{border-color:var(--edge-hi);background:rgba(255,255,255,.03)}
@@ -85,6 +72,26 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 #decohi{display:none}
 .moving #ground.cached #decohi[href]{display:inline}
 .asleep *{animation-play-state:paused!important}
+/* the refresh wind: fine streaks of sand blowing across the screen */
+#wind{position:fixed;inset:0;z-index:3;pointer-events:none;opacity:0;overflow:hidden}
+#wind::before,#wind::after{content:"";position:absolute;inset:-40%}
+#wind::before{background:repeating-linear-gradient(-8deg,rgba(245,222,176,0) 0 60px,rgba(245,222,176,.45) 60px 61.5px,rgba(245,222,176,0) 61.5px 150px)}
+#wind::after{background:repeating-linear-gradient(-5deg,rgba(200,150,90,0) 0 95px,rgba(200,150,90,.35) 95px 97px,rgba(200,150,90,0) 97px 240px)}
+#wind.on{animation:windIn 3.6s ease-in-out both}
+#wind.on::before{animation:blow1 .45s linear infinite}
+#wind.on::after{animation:blow2 .7s linear infinite}
+@keyframes windIn{0%{opacity:0}15%,75%{opacity:1}100%{opacity:0}}
+@keyframes blow1{to{transform:translateX(151.47px)}}   /* one stripe period: a seamless loop */
+@keyframes blow2{to{transform:translateX(240.92px)}}
+@media (prefers-reduced-motion:reduce){#wind.on,#wind.on::before,#wind.on::after{animation:none}}
+/* The owner, 2026-11-22: a smooth trip. While it plays the map is one GPU layer showing the cached picture of the ground (no vector
+   repaint), the panels drop their backdrop blur, the map's own animations wait, and the map shakes without a blur (the storm covers it) */
+.warping #ground.cached #deco{display:none}
+.warping #ground.cached #decoimg{display:inline}
+.warping .hud{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--slab-hi)}
+.warping #map *{animation-play-state:paused!important}
+
+#storm::before,#storm::after,#wind::before,#wind::after{will-change:transform}
 </style>
 <style>
 /* Layout: a full-screen isometric board (SVG, pan and zoom), the HUD floating at the corners, panels over it. One dusk look, dark. */
@@ -103,7 +110,11 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 html,body{height:100%;margin:0}
 body{background:var(--night);color:var(--bone);font:15px/1.5 var(--body);overflow:hidden;touch-action:none}
 #stage{position:fixed;inset:0;background:#6e4628}
-#map{width:100%;height:100%;display:block;cursor:grab}
+/* The owner, 2026-11-22: the static ground and the living map are two stacked SVGs, each on its own GPU layer: the containers' rings,
+   the smoke, the vehicles and the sandworm repaint only the upper layer, never the whole ground underneath */
+#stage > svg{position:absolute;inset:0;width:100%;height:100%;display:block;will-change:transform}
+#mapGround{pointer-events:none}
+#map{cursor:grab}
 #map.drag{cursor:grabbing}
 .hud{position:fixed;z-index:5;background:var(--slab);border:1px solid var(--edge);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .brand{top:calc(14px + env(safe-area-inset-top,0px));left:calc(14px + env(safe-area-inset-left,0px));padding:12px 16px 12px}
@@ -228,6 +239,14 @@ a{color:var(--amber)}
 .smoke{transform-box:fill-box;transform-origin:center;animation:smoke 3.3s ease-out infinite;opacity:0}
 @keyframes smoke{0%{transform:translate(0,0) scale(.6);opacity:.55}100%{transform:translate(14px,-46px) scale(2.4);opacity:0}}
 @media (prefers-reduced-motion:reduce){.ring,.spark,.swirl,.wing,.bob,.halo,.beacon,.smoke{animation:none}}
+/* The owner, 2026-11-22: the slow ambient loops change a dozen times a second instead of sixty: each change repaints the map's upper
+   layer, and at this pace the eye does not tell the difference (after the loops above: their `animation` shorthand resets the timing) */
+.ring{animation-timing-function:steps(18)}
+.smoke{animation-timing-function:steps(30)}
+.bob,.halo,.beacon{animation-timing-function:steps(8)}
+.flame{animation-timing-function:steps(5)}
+.swirl{animation-timing-function:steps(24)}
+.wing{animation-timing-function:steps(2)}
 .moving .hud{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--slab-hi)}
 .dust{animation:dust .5s ease-out infinite}
 .cargo .lbl{font:500 10px var(--mono);fill:var(--bone)}
@@ -249,7 +268,7 @@ a{color:var(--amber)}
 }
 </style>
 
-<div id="notice" class="hud notice" role="status" hidden></div><div id="storm" aria-hidden="true"></div><div id="stage"><svg id="map" role="img" aria-label="Saani map: each block is an issue, each figure a worker"><defs>
+<div id="notice" class="hud notice" role="status" hidden></div><div id="storm" aria-hidden="true"></div><div id="wind" aria-hidden="true"></div><div id="stage"><svg id="mapGround" aria-hidden="true"><g id="world0"><g id="ground"></g></g></svg><svg id="map" role="img" aria-label="Saani map: each block is an issue, each figure a worker"><defs>
  <linearGradient id="g-sand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--sand-hi)"/><stop offset=".55" stop-color="var(--sand)"/><stop offset="1" stop-color="var(--sand-lo)"/></linearGradient>
  <filter id="f-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
  <marker id="arr-you" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--ember)"/></marker>
@@ -257,7 +276,7 @@ a{color:var(--amber)}
  <marker id="arr-hot" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber)"/></marker>
  <marker id="arr-side" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--faint)"/></marker>
  <radialGradient id="g-glow"><stop offset="0" stop-color="var(--amber)" stop-opacity=".55"/><stop offset="1" stop-color="var(--amber)" stop-opacity="0"/></radialGradient>
-</defs><g id="world"><g id="ground"></g><g id="worms"></g><g id="things"></g><g id="air"></g></g></svg></div>
+</defs><g id="world"><g id="worms"></g><g id="things"></g><g id="air"></g></g></svg></div>
 
 <div class="hud brand"><small>Software factory</small><div class="title-row"><h1>Saani</h1><nav id="pages" class="pages" aria-label="Pages" hidden><a href="/" aria-current="page">Map</a><a href="/kanban">Kanban</a></nav><button id="demo" class="btn" type="button" hidden>Demo traffic: on</button><select id="proj" class="btn" aria-label="Project" hidden></select><button id="refresh" class="btn" type="button" title="Ask GitHub and the rest again now (the board refreshes by itself every 5 seconds)" hidden>↻ Refresh</button></div><div class="meta"><span id="src" class="badge">…</span><span id="clock"></span></div></div>
 
@@ -269,13 +288,6 @@ a{color:var(--amber)}
 
 <div class="hud summary" id="summary" aria-label="At a glance" hidden></div>
 
-<div class="tweaks" id="tweaks"><button id="tweakbtn" class="btn hud" type="button" aria-expanded="false" aria-controls="tweakpanel">⚙ Tweaks</button>
-<div id="tweakpanel" class="hud tweakpanel" hidden>
-<div class="tw-sec"><span class="tw-h">Release PR</span><button class="btn" type="button" data-tw="merge">Merge it</button></div>
-<div class="tw-sec"><span class="tw-h">CI lights</span><button class="btn" type="button" data-tw="ci" data-state="running">Running</button><button class="btn" type="button" data-tw="ci" data-state="green">Passed</button><button class="btn" type="button" data-tw="ci" data-state="red">Failed</button></div>
-<div class="tw-sec"><span class="tw-h">Travel</span><button class="btn" type="button" data-tw="trip">Sandstorm trip</button><button class="btn" type="button" data-tw="worm">Call a sandworm</button></div>
-<p class="tw-note" id="tw-note"></p>
-</div></div>
 <details class="hud legend" id="legend"><summary>Signs</summary><button class="x" type="button" aria-label="Close the signs">×</button><ul id="legend-list"></ul></details>
 
 <div class="hud zoom"><button class="btn" id="zout" type="button" aria-label="Zoom out">−</button><span class="pct" id="pct">100%</span><button class="btn" id="zin" type="button" aria-label="Zoom in">+</button><button class="btn" id="zfit" type="button">Fit</button></div>
@@ -478,7 +490,7 @@ const STEP_LABEL = {inbox: "Inbox · to triage", backlog: "Backlog", you: "Waiti
                     checks: "Live checks", done: "Done"};
 const NEXT = {backlog: "started", started: "building", building: "testing", testing: "dev", dev: "pr", pr: "close", close: "done"};
 // a block's top is its issue Type (GitHub issue types: Bug, Task, Feature); its sides are the same brown for every block
-const TYPE = {bug: {word: "Bug", color: "#d8614a"}, task: {word: "Task", color: "#e3be4f"}, feature: {word: "Feature", color: "#6b9bd6"}};
+const TYPE = {bug: {word: "Bug", color: "#d8614a"}, task: {word: "Task", color: "#e29f42"}, feature: {word: "Feature", color: "#6b9bd6"}};
 const TYPE_NONE = {word: "No type", color: "#d8c6a4"}, SIDE_L = "#6e4a2c", SIDE_R = "#53361f";
 function typeOf(c) {
   // the Type from the state when it carries one, else the worktree branch prefix (bug/, task/, feat/), else the labels
@@ -954,7 +966,7 @@ function blockSVG(c) {
          `<polygon points="${P([A, B, Cc, D])}" fill="${rimC}"/><polygon points="${P(inner)}" fill="${t}"/>` +
          `<polygon points="${P([inner[0], inner[1], L(inner[1], inner[2], .18), L(inner[0], inner[3], .18)])}" fill="#000" opacity=".14"/>` +
          ln(D0, D, 1.4, .6) + ln(C0, Cc, 1.6, .7) + ln(B0, B, 1.4, .6) + ln(D0, C0, 1, .5) + ln(C0, B0, 1, .5) + `</g>`;
-  if (c.need) out += `<polygon points="${P(inner)}" fill="${C.ember}" opacity=".35"/>`;
+  // The owner, 2026-11-22: no tint over the content any more (a container that needs you has its orange ring): a Type has the same colour everywhere
   if (c.step === "building") { const [sx, sy] = iso(0, 0, h + .2); out += `<circle class="spark" cx="${sx}" cy="${sy}" r="3" fill="${C.amber}"/><circle class="spark" cx="${sx + 6}" cy="${sy - 4}" r="2" fill="${C.ember}" style="animation-delay:.4s"/>`; }
   if (c.step === "testing" || (c.runs || []).some(r => r.live)) out += `<ellipse class="swirl" cx="0" cy="${-h * TH / 2}" rx="26" ry="14" fill="none" stroke="${C.ridge}" stroke-width="1.5" stroke-dasharray="4 7"/>`;
   const [lx, ly] = iso(0, 0, h); const label = String(c.number), w = label.length * 6.4 + 8;
@@ -1099,7 +1111,7 @@ function applyView() {
   clampView();
   document.body.classList.add("moving"); clearTimeout(movingTimer); movingTimer = setTimeout(() => { document.body.classList.remove("moving"); clearTimeout(DETAIL_T_TIMER); DETAIL_T_TIMER = setTimeout(cacheDetail, 350); }, 180);
   if (viewRaf) return;
-  viewRaf = requestAnimationFrame(() => { viewRaf = 0; $("#world").setAttribute("transform", `translate(${VIEW.tx.toFixed(1)},${VIEW.ty.toFixed(1)}) scale(${VIEW.s.toFixed(4)})`); $("#pct").textContent = Math.round(VIEW.s * 100) + "%"; });
+  viewRaf = requestAnimationFrame(() => { viewRaf = 0; const tf = `translate(${VIEW.tx.toFixed(1)},${VIEW.ty.toFixed(1)}) scale(${VIEW.s.toFixed(4)})`; $("#world").setAttribute("transform", tf); $("#world0").setAttribute("transform", tf); $("#pct").textContent = Math.round(VIEW.s * 100) + "%"; });
 }
 function bounds() { const a = iso(0, 0), b = iso(BOARD_W, 0), c = iso(BOARD_W, BOARD_D), d = iso(0, BOARD_D); return {x0: d[0] - 40, x1: b[0] + 40, y0: a[1] - 160, y1: c[1] + 1.6 * TH + 60}; }
 function fit() {
@@ -1353,6 +1365,42 @@ function clickAt(e) {
 
 // ------------------------------------------------------------------ the air: transport flights and ambient traffic
 const air = $("#air"); const flights = [];
+// The owner, 2026-11-22: a refresh raises the wind: streaks of blown sand cross the screen and a few dust devils spin across the base
+let GUST = null;
+function gust() {
+  if (RM) return;
+  const w = $("#wind"); w.classList.remove("on"); void w.offsetWidth; w.classList.add("on"); clearTimeout(w._t); w._t = setTimeout(() => w.classList.remove("on"), 3600);
+  if (GUST) GUST.g.remove();
+  const g = document.createElementNS(NS, "g"); g.setAttribute("class", "devils"); air.append(g);
+  const W = BOARD_W, D = BOARD_D, n = 3 + Math.floor(Math.random() * 2), devils = [];
+  for (let i = 0; i < n; i++) {                               // each one crosses the board from its left side to its right on screen, at its own height
+    const y0 = D * (.15 + .7 * Math.random()), x0 = -6 - Math.random() * 8;
+    devils.push({a: [x0, y0], b: [W + 6 + Math.random() * 8, y0 - 20 - Math.random() * 30], delay: i * 350 + Math.random() * 300, size: 1.6 + Math.random() * .9, seed: Math.random() * 9});
+  }
+  GUST = {g, devils, t0: performance.now(), dur: 3600};
+}
+function devilSVG(x, y, size, t, seed, fade) {
+  // a dust devil: stacked rings of sand widening upward and swaying, a dusty foot, grains flung around
+  let s = `<ellipse cx="${x.toFixed(1)}" cy="${(y + 2).toFixed(1)}" rx="${(26 * size).toFixed(1)}" ry="${(9 * size).toFixed(1)}" fill="#6e4a2c" opacity="${(.3 * fade).toFixed(2)}"/>`;
+  for (let k = 0; k < 9; k++) {
+    const h = k * 11 * size, r = (5 + k * 3.4) * size, sway = Math.sin(t * 3 + k * .55 + seed) * k * 1.8 * size, spin = t * 9 + k;
+    s += `<ellipse cx="${(x + sway).toFixed(1)}" cy="${(y - h).toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * .32).toFixed(1)}" fill="${k % 2 ? "#c8955e" : "#b07c4c"}" opacity="${((.78 - k * .05) * fade).toFixed(2)}" stroke="#f3dcae" stroke-opacity="${(.35 * fade).toFixed(2)}" stroke-width="1" stroke-dasharray="${(r * .9).toFixed(1)} ${(r * .6).toFixed(1)}" stroke-dashoffset="${(-spin * r * .25).toFixed(1)}"/>`;
+  }
+  for (let k = 0; k < 7; k++) { const a = t * 6 + k * .9 + seed, rr = (18 + (k * 7 + t * 40) % 34) * size;
+    s += `<circle cx="${(x + Math.cos(a) * rr).toFixed(1)}" cy="${(y - 30 * size - Math.sin(a) * rr * .35 - k * 6 * size).toFixed(1)}" r="${(2.6 - k * .25).toFixed(1)}" fill="#e8c890" opacity="${(.6 * fade).toFixed(2)}"/>`; }
+  return s;
+}
+function gustStep(now) {
+  if (!GUST) return;
+  const T = now - GUST.t0; if (T > GUST.dur + 1400) { GUST.g.remove(); GUST = null; return; }
+  let s = "";
+  for (const d of GUST.devils) {
+    const t = Math.max(0, Math.min(1, (T - d.delay) / GUST.dur)); if (T < d.delay) continue;
+    const fade = Math.min(1, t * 8, (1 - t) * 8), [x, y] = iso(d.a[0] + (d.b[0] - d.a[0]) * t, d.a[1] + (d.b[1] - d.a[1]) * t);
+    s += devilSVG(x, y, d.size, T / 1000, d.seed, Math.max(0, fade));
+  }
+  GUST.g.innerHTML = s;
+}
 const TRANSIT = new Set();                                 // issues riding a vehicle: hidden at their new place until it lands
 // The owner, 2026-11-22: when the release PR is merged, its harvester drives its load down the track to the Launch Pad (deploy) or the
 // Archive (nothing to deploy), stops, and the issues appear there as it leaves
@@ -1450,9 +1498,10 @@ function tick(now) {
     f.g.setAttribute("transform", `translate(${x.toFixed(1)},${y.toFixed(1)})`);
     if (t >= 1) { f.g.remove(); flights.splice(i, 1); TRANSIT.delete(f.n); const blk = document.querySelector(`.blk[data-n="${f.n}"]`); if (blk) blk.style.visibility = ""; }
   }
-  if (crawlerG && SEG.length) { const p = along(now * .018); crawlerG.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)}) scale(${p.dir * .9},.9)`); }
-  if (patrolG) { const [cx, cy] = iso(BOARD_W / 2, BOARD_D / 2), a = now / 14000; patrolG.setAttribute("transform", `translate(${(cx + Math.cos(a) * 1900).toFixed(1)},${(cy + Math.sin(a) * 520 - 260).toFixed(1)}) scale(${Math.sin(a) > 0 ? -1 : 1},1)`); }
-  tripStep(now);
+  const amb = now - (tick.amb || 0) > 32; if (amb) tick.amb = now;              // the ambient vehicles: 30 updates a second
+  if (amb && crawlerG && SEG.length) { const p = along(now * .018); crawlerG.setAttribute("transform", `translate(${p.x.toFixed(1)},${p.y.toFixed(1)}) scale(${p.dir * .9},.9)`); }
+  if (amb && patrolG) { const [cx, cy] = iso(BOARD_W / 2, BOARD_D / 2), a = now / 14000; patrolG.setAttribute("transform", `translate(${(cx + Math.cos(a) * 1900).toFixed(1)},${(cy + Math.sin(a) * 520 - 260).toFixed(1)}) scale(${Math.sin(a) > 0 ? -1 : 1},1)`); }
+  tripStep(now); gustStep(now);
   if (!RM) wormStep(now);
   requestAnimationFrame(tick);
 }
@@ -1568,11 +1617,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function warp(load) {
   const st = $("#stage"), sm = $("#storm");
   if (RM) { const apply = await load().catch(() => null); if (apply) apply(); return; }
+  document.body.classList.add("warping"); clearTimeout(warp._t);
   st.classList.remove("warp-in"); void st.offsetWidth; st.classList.add("warp-out"); sm.classList.add("on");
   const [apply] = await Promise.all([load().catch(() => null), sleep(700)]);
   if (apply) apply();
   st.classList.remove("warp-out"); st.classList.add("warp-in"); setTimeout(() => sm.classList.remove("on"), 250);
-  setTimeout(() => st.classList.remove("warp-in"), 1000);
+  warp._t = setTimeout(() => { st.classList.remove("warp-in"); document.body.classList.remove("warping"); }, 1000);
 }
 async function switchProject(key) {
   PROJECT = key; pinProject(); for (const k in DETAILS) delete DETAILS[k];
@@ -1597,7 +1647,7 @@ $("#demo").addEventListener("click", () => demo(!demoTimer));
 $("#proj").addEventListener("change", e => switchProject(e.target.value));
 addEventListener("hashchange", () => { const k = location.hash.slice(1); if (k && k !== PROJECT) switchProject(k); });
 $("#refresh").addEventListener("click", async e => {
-  const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…";
+  const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…"; gust();
   try { const d = await fetchState(true); if (d) { FAILS = 0; LASTOK = Date.now(); drawState(d, true); } }
   catch (err) { if (projectGone(err)) schedule(0); else { FAILS++; stale(); } }
   b.disabled = false; b.textContent = "↻ Refresh";
@@ -1608,23 +1658,5 @@ if (!("PageRevealEvent" in window)) {
   document.addEventListener("click", e => { const a = e.target.closest && e.target.closest(".pages a"); if (!a || a.getAttribute("aria-current") || a.hasAttribute("aria-disabled") || e.metaKey || e.ctrlKey || e.shiftKey) return;
     e.preventDefault(); document.body.classList.add("pg-leave"); setTimeout(() => { location.href = a.href; }, RM ? 0 : 240); });
 }
-// the tweak menu
-function tweakSync() {
-  const live = LIVE, hasPR = !!(DATA && DATA.pr), inPR = DATA ? DATA.cards.filter(c => c.step === "pr").length : 0, st = ciLook(DATA && DATA.pr).word;
-  for (const b of document.querySelectorAll('#tweakpanel [data-tw="merge"]')) b.disabled = live || !inPR;
-  for (const b of document.querySelectorAll('#tweakpanel [data-tw="ci"]')) { b.disabled = live || !hasPR; b.classList.toggle("on", hasPR && {running: "running", green: "passed", red: "failed"}[b.dataset.state] === st); }
-  $("#tw-note").textContent = live ? "Live data: the release PR follows GitHub; only the trip and the sandworm can be tried here."
-    : inPR ? `Sample PR #${DATA.pr.number} carries ${inPR} issue${inPR > 1 ? "s" : ""}.` : "The sample PR is empty: its issues left on the last merge. The Caravan Depot refills it as the demo runs.";
-}
-$("#tweakbtn").addEventListener("click", () => { const p = $("#tweakpanel"), open = p.hidden; p.hidden = !open; $("#tweakbtn").setAttribute("aria-expanded", String(open)); if (open) tweakSync(); });
-$("#tweakpanel").addEventListener("click", e => {
-  const b = e.target.closest("[data-tw]"); if (!b || b.disabled) return;
-  if (b.dataset.tw === "merge") mergeSamplePR();
-  if (b.dataset.tw === "ci" && DATA.pr) { DATA.pr.ci = {...(DATA.pr.ci || {}), state: b.dataset.state}; render(); }
-  if (b.dataset.tw === "trip") warp(async () => () => fit());
-  if (b.dataset.tw === "worm") { WORM = null; nextWorm = 0; }
-  setTimeout(tweakSync, 50);
-});
-addEventListener("pointerdown", e => { if (!e.target.closest("#tweaks") && !$("#tweakpanel").hidden) { $("#tweakpanel").hidden = true; $("#tweakbtn").setAttribute("aria-expanded", "false"); } });
 drawGround(); routeIndex(); legend(); fit(); ambient(); requestAnimationFrame(tick); load();
 </script>
