@@ -113,7 +113,7 @@ ALLOWED = [
     "wc -l src/*.py", "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
     "test -f README.md", "[ -d src ]", "[ a = b ]", "pwd", "diff a.txt b.txt",
     "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git show HEAD:src/app.py", "git add src/app.py", "git add -- src/app.py README.md",
-    "git stash push -q -m 'wip'", "git stash pop -q", "git stash list", "saani auto status --check", "saani auto report --pr 3 --post",
+    "git stash list", "saani auto status --check", "saani auto report --pr 3 --post",
     "git commit -m 'Cart: total in cents (refs #12)' -m 'Why: rounding' -m 'Undo: revert'", "git commit --amend --no-edit",
     "git commit -am 'Cart: -f is only text here, as is .env'",
     "git commit -m \"$(cat <<'EOF'\nCart: total (refs #12)\n\nWhy: x\nUndo: y\nEOF\n)\"",
@@ -123,7 +123,7 @@ ALLOWED = [
     "git checkout -- src/app.py", "git checkout origin/dev -- src/app.py", "git merge origin/dev", "git merge --no-edit origin/dev",
     "git merge --abort", "git rebase origin/dev", "git rebase --continue", "git fetch origin dev", "git fetch -q origin",
     "git worktree list --porcelain", "git rev-parse HEAD", "git branch --list 'feat/*'", "git branch --show-current", "git branch -a",
-    "git branch", "git ls-files", "git stash", "git stash push -m 'wip on .env text'", "git stash pop", "git restore src/app.py",
+    "git branch", "git ls-files", "git restore src/app.py",
     "git -C {work} status", "git --no-pager log", "git diff --exit-code",
     "python -m pytest -q", "python -m pytest -q tests/test_cart.py", "python -m pytest -q -x -k cart", "python -m pytest -q --tb=short",
     "npm test", "'{python_exe}' -m pytest -q",
@@ -176,6 +176,8 @@ DENIED = [
     ("git stash push -a", "git stash"), ("git stash push --all", "git stash"), ("git stash push -p", "git stash"),
     ("git stash push --only-untracked", "git stash"), ("git stash show", "git stash"), ("git stash show -p 'stash@{{0}}'", "git stash"),
     ("git stash apply", "git stash"), ("git stash push src/app.py", "git stash"),
+    ("git -C {work} stash pop", "git stash"), ("git stash pop", "git stash"), ("git stash pop -q", "git stash"),      # the owner's stash
+    ("git stash", "git stash"), ("git stash push -q -m 'wip'", "git stash"), ("git stash push", "git stash"),        # on top of the owner's
     ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
     ("git show refs/stash", "git stash"), ("git log -p stash", "git stash"), ("git show 'stash@{{0}}^3:notes.txt'", "git stash"),
     ("git show HEAD:../x", "secret"), ("git show HEAD:/etc/passwd", "secret"), ("git show HEAD:config/credentials.yml", "secret"),

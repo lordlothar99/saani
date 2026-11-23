@@ -995,7 +995,7 @@ def git_command(part, ctx, cwd):
     if sub == "push":
         return deny("git push", "git push (only saani land pushes, as its own process)", "git", how="land with saani land")
     if sub == "reset" and "--hard" in words:
-        return deny("git reset --hard", "git reset --hard", "git", how="git restore <path>, or git stash")
+        return deny("git reset --hard", "git reset --hard", "git", how="git restore <path>")
     if sub == "clean":
         return deny("git clean", "git clean", "git", how="remove the files one by one with rm inside the worktree")
     if sub == "branch" and ("-D" in words or (("--delete" in words or "-d" in words) and ("--force" in words or "-f" in words))):
@@ -1158,11 +1158,12 @@ def git_sub(sub, words, ctx, gcwd, part):
             return deny("not on the list", "git branch other than listing", "git", how="saani start makes branches, saani prune deletes them")
         return None
     if sub == "stash":
-        if words in ([], ["list"], ["pop"], ["pop"] + ["-q"], ["pop", "--quiet"]):
+        # refs/stash is shared by every worktree of the repository: pop, apply and drop would take the owner's stash, and a push puts the
+        # run's on top of it (the owner's next pop applies it). Only the list is read.
+        if words == ["list"]:
             return None
-        if words[:1] == ["push"] and all(w in ("-q", "--quiet", "-m", "--message") for w in words[1:]):
-            return None
-        return deny("git stash", "git stash other than push [-q] [-m MSG], pop [-q] and list (no -u, -a, -p, show)", "git")
+        return deny("git stash", "git stash other than list (refs/stash is shared with the owner's checkout)", "git",
+                    how="commit the work on the worker's branch, or git restore <file>")
     return no
 
 
