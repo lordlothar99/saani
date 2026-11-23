@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 
 import pytest
 
@@ -594,6 +595,62 @@ def test_a_session_that_cannot_start_falls_back_to_the_command_by_hand(world, ca
         raise OSError("policy")
     assert auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen) == 2
     assert "could not start (policy)" in capsys.readouterr().out
+
+
+def test_the_headless_session_waits_for_its_background_coders(world, capsys):
+    seen = []
+    def popen(argv, **kw):
+        seen.append(kw)
+        return type("P", (), {"pid": 4242})()
+    auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen)
+    assert seen[0]["env"][auto.WAIT_VAR] == "0" and seen[0]["env"]["PATH"] == os.environ["PATH"]
+    assert auto.away_env({"A": "1"}) == {"A": "1", auto.WAIT_VAR: "0"}
+
+
+def test_the_command_to_start_by_hand_carries_the_variable():
+    argv = ["claude", "-p", "x"]
+    assert auto.by_hand(argv, windows=True) == "$env:CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS='0'; claude -p x"
+    assert auto.by_hand(argv, windows=False) == "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p x"
+
+
+def test_away_warns_when_claude_code_does_not_trust_the_folder_but_still_starts(world, capsys):
+    popen = lambda argv, **kw: type("P", (), {"pid": 1})()
+    home = pathlib.Path(os.environ["USERPROFILE"])
+    assert auto.folder_trusted(world.root, home) is False                      # no file
+    assert auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen) == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "trust dialog" in out and "started (process 1)" in out
+    key = str(world.root).replace("\\", "/").upper() if os.name == "nt" else str(world.root)
+    (home / ".claude.json").write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": False}}, "secret": "x"}), encoding="utf-8")
+    assert auto.folder_trusted(world.root, home) is False
+    (home / ".claude.json").write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
+    assert auto.folder_trusted(world.root, home) is True
+    assert auto.cmd_away(args(only=None, id="r2"), which=lambda name: "claude", popen=popen) == 0
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_status_says_when_an_away_run_s_process_is_gone(world, capsys, monkeypatch):
+    record(world, mode="away")
+    assert auto.away_gone(auto.read_record()) is None                          # no pid recorded
+    auto.pid_path("r1").write_text("4242", encoding="utf-8")
+    monkeypatch.setattr(auto, "process_alive", lambda pid: False)
+    assert auto.cmd_status(args()) == 0
+    out = capsys.readouterr().out
+    assert "process (4242) is gone" in out and "saani auto off --run r1" in out and "saani-auto-r1.log" in out
+    monkeypatch.setattr(auto, "process_alive", lambda pid: True)
+    auto.cmd_status(args())
+    assert "is gone" not in capsys.readouterr().out
+    record(world, mode="here")                                                 # a here run has no process
+    monkeypatch.setattr(auto, "process_alive", lambda pid: False)
+    auto.cmd_status(args())
+    assert "is gone" not in capsys.readouterr().out
+
+
+def test_process_alive_knows_this_process_and_a_dead_one():
+    assert auto.process_alive(os.getpid()) is True
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    assert auto.process_alive(dead.pid) is False
 
 
 def test_away_refuses_a_folder_outside_the_worktrees(world, tmp_path):

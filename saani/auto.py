@@ -557,6 +557,20 @@ def status_text(rec, now=None):
     return "\n".join(lines)
 
 
+def away_gone(rec, alive=None):
+    """A line when an away run's process (its id written by `saani auto away`) is gone while the run is still on; else None."""
+    if rec.get("mode") != "away":
+        return None
+    try:
+        pid = int(pid_path(rec["id"]).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if (alive or process_alive)(pid):
+        return None
+    return (f"  WARNING: the away run's process ({pid}) is gone but the run is still on: it stopped without ending. Read the log "
+            f"build/saani-auto-{rec['id']}.log, then end the run from a terminal: saani auto off --run {rec['id']}")
+
+
 def cmd_status(args):
     rec = read_record()
     if not rec:
@@ -569,6 +583,9 @@ def cmd_status(args):
         print("no auto run is on")
         return 0
     print(status_text(rec))
+    gone = away_gone(rec)
+    if gone:
+        print(gone)
     if not args.check:
         return 0
     hit = reached(rec)
@@ -761,13 +778,66 @@ def away_command(run_id, folder, only=(), deploy=False, claude="claude"):
     return [claude, "-p", prompt, "--permission-mode", "auto", "--permission-prompts", "none"]
 
 
+WAIT_VAR = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"   # `claude -p` stops its background tasks this long after the last turn; 0 = wait for them
+
+
+def away_env(environ=None):
+    """The headless session's environment: ours, and `claude -p` waits for its background coders (#52)."""
+    return {**(os.environ if environ is None else environ), WAIT_VAR: "0"}
+
+
+def by_hand(argv, windows=None):
+    """The command to type for an away run, with the variable the started session gets (PowerShell 5.1 on Windows, else sh)."""
+    if os.name == "nt" if windows is None else windows:
+        return f"$env:{WAIT_VAR}='0'; {shown(argv)}"
+    return f"{WAIT_VAR}=0 {shown(argv)}"
+
+
+def norm_key(path):
+    text = str(path).replace("\\", "/").rstrip("/")
+    return text.casefold() if os.name == "nt" or re.match(r"^[A-Za-z]:/", text) else text
+
+
+def folder_trusted(folder, home=None):
+    """True when Claude Code's user file (`~/.claude.json`) says the folder's trust dialog was accepted; a missing or unreadable file, or
+    key, is False. Reads only that one flag of that file; never writes it."""
+    try:
+        data = json.loads((pathlib.Path(home) if home else pathlib.Path.home()).joinpath(".claude.json").read_text(encoding="utf-8"))
+        projects = data.get("projects")
+        want = norm_key(folder)
+        return any(norm_key(k) == want and isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True for k, v in projects.items())
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
+def pid_path(run_id):
+    return build_dir() / f"saani-auto-{run_id}.pid"
+
+
+def process_alive(pid, run=subprocess.run):
+    """Whether a process with this id exists (standard library only)."""
+    if os.name == "nt":
+        try:
+            out = run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            return True                                                         # cannot tell: say nothing
+        return re.search(rf"\b{pid}\b", out) is not None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True                                                             # exists, not ours
+    return True
+
+
 def start_detached(argv, cwd, log, popen=subprocess.Popen):
     """Start `argv` so it outlives the session that starts it, its output appended to `log`. Windows: its own console, shown minimized
     (the owner can see the run is there) and out of the starting session's job when the job allows it; elsewhere: a new session. The
     process id."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
-        common = {"cwd": str(cwd), "stdout": out, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
+        common = {"cwd": str(cwd), "stdout": out, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL, "env": away_env()}
         if os.name != "nt":
             return popen(argv, start_new_session=True, **common).pid
         info = subprocess.STARTUPINFO()
@@ -795,13 +865,21 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     exe = (which or shutil.which)("claude")
     if exe is None:
         print("saani auto away: `claude` is not on the PATH, so the run cannot start by itself. Start it by hand, in a terminal, from "
-              f"{main}:\n  {shown(argv)}")
+              f"{main}:\n  {by_hand(argv)}")
         return 2
+    if not folder_trusted(main):
+        print(f"saani auto away: WARNING: Claude Code does not trust {main} yet, so a headless session there ignores the project's allow "
+              "rules and every tool call is refused. Open Claude Code interactively in that folder once and accept the trust dialog, "
+              "then start the run again (the run starts anyway).")
     try:
         pid = start_detached([exe] + argv[1:], main, log, popen)
     except OSError as e:
-        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {shown(argv)}")
+        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}")
         return 2
+    try:
+        pid_path(run_id).write_text(str(pid), encoding="utf-8")
+    except OSError:
+        pass
     print(f"saani auto: away {run_id} started (process {pid}), in a minimized window" if os.name == "nt" else
           f"saani auto: away {run_id} started (process {pid})")
     print(f"  log:    {log}")

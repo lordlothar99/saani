@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Away run (issue #52): the headless session no longer stops its background coders 10 minutes after its last turn and exits. `saani auto
+  away` starts it with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (the command to start by hand carries it too) and the skill tells it to keep
+  its turn open until the coders are done. `saani auto away` warns when Claude Code does not trust the project's folder (its allow rules
+  would be ignored), and `saani auto status` says when an away run's process is gone while the run is still on.
 - An auto run keeps at most 2 issues in flight per project (was 3), and another project's worktrees no longer take its slots: the free-RAM
   guard no longer divides memory per issue, it only drops a run to 1 when memory cannot hold one issue (issue #51).
 

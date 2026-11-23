@@ -270,7 +270,12 @@ folder> [--only N ...] [--deploy]` starts a headless session itself, detached fr
 new session elsewhere), in the project's main folder so its committed settings apply: `claude -p "/saani:auto run <id> --folder <path>"
 --permission-mode auto --permission-prompts none`, its output in `build/saani-auto-<id>.log`. That session runs `saani auto on`, so the
 guard registers it and never the owner's. Without `claude` on the PATH, or when the session cannot start, `saani auto away` exits 2 and
-prints the command to start by hand. With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides every call of
+prints the command to start by hand. The session is started with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (the hand command carries it:
+`$env:CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS='0'; claude -p ...` in PowerShell), because `claude -p` otherwise stops its background coders
+10 minutes after its last turn and exits (#52). Before it starts, `saani auto away` warns (it does not refuse) when `~/.claude.json` does
+not show the main folder as trusted (`hasTrustDialogAccepted`; it reads that flag only, never writes the file): open Claude Code in the
+folder once and accept the trust dialog. It records the process id in `build/saani-auto-<id>.pid`, and `saani auto status` says when that
+process is gone while the run is still on (then read the log and `saani auto off --run <id>`). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides every call of
 a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after
 repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none` every
 such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's

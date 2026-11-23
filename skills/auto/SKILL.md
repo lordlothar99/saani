@@ -13,7 +13,9 @@ issues; none: a full run):
   guess.
 - `off`: the section "off" below.
 - `run <id> --folder <path> [--deploy]` (then issue numbers, if any): the inside of an away run, typed by `saani auto away` into the
-  headless session, never by the owner: skip "Before the run" but its step 4, then do the run.
+  headless session, never by the owner: skip "Before the run" but its step 4, then do the run. In this headless session, keep your
+  turn open until every background coder is done and the report is written: a turn that ends with coders running lets `claude -p` stop
+  them and exit, and nothing lands.
 
 ## The two sub-modes
 
