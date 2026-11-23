@@ -328,15 +328,18 @@ KEY_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
 
 
 def home_claude(c):
-    """True for a path inside ~/.claude/ (Claude Code's own settings, sessions, tool results), but its projects' memory folders."""
+    """True for a path inside ~/.claude/ (Claude Code's own settings, sessions, credentials), but its projects' memory and saved tool
+    outputs (projects/<p>/memory/, projects/<p>/tool-results/). Judged on the path as given (`..` folded) and, by the caller, on the
+    resolved path too (a link out of tool-results/ is judged where it leads). A part's `:stream` and trailing dots and spaces are dropped as
+    Windows drops them; a part that is then empty (`...`) or `..` (`.. `) is not read for sure: a secret."""
     if not os.path.isabs(c):
         return False
     home = os.path.join(os.path.expanduser("~"), ".claude")
     for base in {os.path.normcase(os.path.normpath(home)), norm(home)}:
         p = os.path.normcase(os.path.normpath(c))
         if inside(p, base):
-            rel = [x for x in re.split(r"[\\/]+", p[len(base):]) if x]
-            return not (len(rel) >= 3 and rel[0] == "projects" and rel[2] == "memory")
+            rel = [x.split(":")[0].rstrip(". ") for x in re.split(r"[\\/]+", p[len(base):]) if x]
+            return "" in rel or ".." in rel or not (len(rel) >= 3 and rel[0] == "projects" and rel[2] in ("memory", "tool-results"))
     return False
 
 

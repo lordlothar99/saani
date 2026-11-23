@@ -255,7 +255,8 @@ files.
 **Secrets**, refused to every tool and inside commands: `.env`, `.env.*`, `.envrc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.ppk`, `*.jks`,
 `*.keystore`, `*.kdbx`, `id_rsa*`, `id_ed25519*` (and the other ssh key names), anything with "credentials" in its name (any case),
 `.netrc`, `.npmrc` and `npmrc`, `.pypirc`, `.pgpass`, `.git-credentials`, any `hosts.yml`, `.docker/config.json`, `.git/config` (tokens
-in remote URLs; git itself still reads it), `~/.claude.json` and `~/.claude/` (but its `projects/*/memory/`), PowerShell's history
+in remote URLs; git itself still reads it), `~/.claude.json` and `~/.claude/` (but its `projects/*/memory/` and the saved tool outputs `projects/*/tool-results/`, judged after `..`
+and links are resolved, so neither is a way to the rest of `~/.claude/`), PowerShell's history
 (`PSReadLine/`, `ConsoleHost_history.txt`), anything under `.ssh/`, `.gnupg/`, `.kube/` or `/proc/`, and a file with
 "secret" or "token" in its name (in a shell command, a word with "token" that is not a file, like a branch name, is not one). Paths are compared after `..` is resolved, with `/` and `\`, case-insensitively on Windows, and Git Bash's `/c/...` read
 as `C:/...`.

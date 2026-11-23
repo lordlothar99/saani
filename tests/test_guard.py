@@ -388,7 +388,7 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
 
 
 @pytest.mark.parametrize("name", ["{home}/.claude.json", "{home}/.claude/settings.json", "{home}/.claude/.credentials.json",
-                                  "{home}/.claude/projects/acme-webshop/tool-results/x.txt", "{home}/.claude", "~/.claude/settings.json",
+                                  "{home}/.claude/projects/acme-webshop/session.jsonl", "{home}/.claude", "~/.claude/settings.json",
                                   "{home}/AppData/Roaming/npm/etc/npmrc", "putty.ppk", "release.jks", "app.keystore", "vault.kdbx",
                                   "{home}/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt",
                                   "{home}/.local/share/powershell/PSReadLine/ConsoleHost_history.txt", "{main}/.git/config",
@@ -405,6 +405,29 @@ def test_claude_s_memory_and_a_project_s_own_claude_folder_are_no_secret(ctx):
     assert sh(ctx, "cat ~/.claude/settings.json")[2] == "secret"
     assert sh(ctx, "cat {main}/.git/config")[2] == "secret"
     assert sh(ctx, "git status")[0] == "allow"
+
+
+def test_claude_s_saved_tool_outputs_are_read_but_never_a_way_out_of_them(ctx):
+    results = pathlib.Path(ctx.places["home"]) / ".claude" / "projects" / "acme-webshop" / "tool-results"
+    results.mkdir(parents=True)
+    (results / "out.txt").write_text("x")
+    (results.parents[2] / "settings.json").write_text("{}")
+    tr = "{home}/.claude/projects/acme-webshop/tool-results"
+    assert tool(ctx, "Read", file_path=tr + "/out.txt")[0] == "allow"
+    assert tool(ctx, "Read", file_path="~/.claude/projects/acme-webshop/tool-results/out.txt")[0] == "allow"
+    assert sh(ctx, "head -50 ~/.claude/projects/acme-webshop/tool-results/out.txt")[0] == "allow"
+    assert sh(ctx, f"cat {tr}/out.txt")[0] == "allow"
+    for escape in (tr + "/../../../settings.json", tr + "/../../../projects/../settings.json", tr + "/.../settings.json",
+                   tr + "/.. /.. /.. /settings.json", "{home}/.claude/settings.json", "{home}/.claude/projects/acme-webshop/x.jsonl",
+                   "{home}/.claude/projects/acme-webshop/tool-results.jsonl", "{home}/.claude/tool-results/out.txt"):
+        assert tool(ctx, "Read", file_path=escape)[2] == "secret", escape
+        assert sh(ctx, f"cat '{escape}'")[2] == "secret", escape
+    try:
+        os.symlink(results.parents[2] / "settings.json", results / "link.json")
+    except (OSError, NotImplementedError):
+        return                                                                           # no symlinks here (Windows without the right)
+    assert tool(ctx, "Read", file_path=tr + "/link.json")[2] == "secret"                 # judged where it leads
+    assert sh(ctx, f"cat {tr}/link.json")[2] == "secret"
 
 
 @pytest.mark.parametrize("command", ["cat .env", "head {home}/.ssh/id_ed25519", "grep x .env.local", "cat server.pem",
