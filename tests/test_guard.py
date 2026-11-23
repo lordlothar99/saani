@@ -903,6 +903,22 @@ def test_a_broken_entry_fails_closed_and_an_old_one_is_over(tmp_path, home):
     assert guard.state("s-2")["over"] is True
 
 
+def test_an_entry_renamed_over_between_the_two_looks_is_still_over(tmp_path, home, monkeypatch):
+    old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
+    guard.turn_on("s-1", "r", "m", "w", started=old)
+    entry = home / ".saani" / "auto" / "s-1.json"
+    real, looks = open, []
+
+    def racing(path, *a, **k):                       # another call expires the entry right after this one looked for the mark
+        looks.append(os.path.basename(path))
+        if looks == ["s-1.over"]:
+            os.replace(entry, entry.with_suffix(".over"))
+            raise FileNotFoundError(path)
+        return real(path, *a, **k)
+    monkeypatch.setattr(guard, "open", racing, raising=False)
+    assert guard.state("s-1")["over"] is True and looks == ["s-1.over", "s-1.json", "s-1.over"]
+
+
 def test_present_mode_prints_nothing(tmp_path, home):
     main, work = fake_repo(tmp_path)
     assert hook(home, work, "Bash", command="git push --force") is None

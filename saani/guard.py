@@ -72,6 +72,20 @@ def _over(path):
     return path[:-len(".json")] + OVER
 
 
+def _read_over(path):
+    """The over mark of the entry `path` as {..., "over": True} ({"over": True} when unreadable), or None when there is none."""
+    try:
+        with open(_over(path), encoding="utf-8") as f:
+            data = json.load(f)
+        return {**data, "over": True} if isinstance(data, dict) else {"over": True}
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        return {"over": True}
+    except OSError as e:
+        raise RegistryError(type(e).__name__) from e
+
+
 def state(session_id, now=None):
     """The auto run of this Claude Code session ({"id", "started", "main", "wt_dir", "folder", "deploy", settings}), or None. A session
     whose entry is over gets {..., "over": True}: it was on, so it never falls back to present mode. Raises RegistryError when the entry
@@ -79,21 +93,14 @@ def state(session_id, now=None):
     path = _entry(session_id)
     if path is None:
         return None
-    try:
-        with open(_over(path), encoding="utf-8") as f:
-            data = json.load(f)
-        return {**data, "over": True} if isinstance(data, dict) else {"over": True}
-    except FileNotFoundError:
-        pass
-    except ValueError:
-        return {"over": True}
-    except OSError as e:
-        raise RegistryError(type(e).__name__) from e
+    over = _read_over(path)
+    if over:
+        return over
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return None
+        return _read_over(path)                              # renamed to .over between the two looks (another call expired it)
     except (OSError, ValueError) as e:
         raise RegistryError(type(e).__name__) from e
     if not isinstance(data, dict):
