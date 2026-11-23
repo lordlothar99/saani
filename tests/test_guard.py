@@ -205,6 +205,8 @@ DENIED = [
     ("git ls-files --with-tree=HEAD", "revision"), ("git ls-files --with HEAD", "revision"),
     ("git log --ancestry-path=:/x", "revision"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
     ("git show 0123456789abcdef0123456789abcdef01234567", "revision"), ("git diff abc1234 HEAD", "revision"),
+    ("git rev-parse --author abc1234", "revision"), ("git rev-parse --author 'HEAD@{{1}}'", "revision"),
+    ("git rev-parse -S abc1234", "revision"), ("git rev-parse --since main", "revision"),
     ("git rev-parse --disambiguate=abcd", "git stash"), ("git log -pg", "git stash"), ("git log -gp", "git stash"),
     ("git log --ancestry-path=stash HEAD", "git stash"), ("git rev-parse abc1234", "revision"), ("git log FETCH_HEAD", "revision"),
     ("git show v1.0", "revision"), ("git diff 'HEAD@{{1}}'", "revision"), ("git log origin/other..HEAD", "revision"),

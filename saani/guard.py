@@ -1321,6 +1321,12 @@ def allowed_rev(w, ctx, write=False):
     return bool(ctx.worker_branch.match(base.removeprefix("origin/")))
 
 
+def takes_text(sub, w):
+    """True when git `sub` reads the next word as the value of option `w`, a value that is no revision: the log/diff options of
+    REV_TEXT_VALUED in diff, log and show; only -n in rev-parse (which takes no --author and resolves the next word itself)."""
+    return w in REV_TEXT_VALUED if sub in ("diff", "log", "show") else (sub == "rev-parse" and w == "-n")
+
+
 def flag_cluster(w, letter):
     """True for a cluster of short flags (-xyz, ASCII letters only) that holds `letter` (linear, unlike -[a-zA-Z]*x[a-zA-Z]*)."""
     return len(w) > 1 and w[0] == "-" and w[1:].isascii() and w[1:].isalpha() and letter in w[1:]
@@ -1359,7 +1365,7 @@ def revisions(sub, words, ctx, gcwd):
                 if not allowed_rev(nxt, ctx):
                     return no(w)
                 k += 1
-            elif not eq and w in REV_TEXT_VALUED:
+            elif not eq and takes_text(sub, w):
                 k += 1
         elif w.startswith("-") and len(w) > 1:
             if sub == "commit":
@@ -1372,7 +1378,7 @@ def revisions(sub, words, ctx, gcwd):
                         break
                     if ch in "mFtSu":
                         break
-            elif w in REV_TEXT_VALUED:
+            elif takes_text(sub, w):
                 k += 1
         elif sub in ("ls-files", "commit", "branch") or (getattr(w, "glob", False) and dashdash is None):
             pass                                         # paths (ls-files, a glob bash expands), refused paths (commit), patterns (branch)
