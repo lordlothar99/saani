@@ -1014,6 +1014,31 @@ def test_an_expired_entry_is_over_every_call_refused_until_the_owner_ends_the_ru
     assert guard.state("s-2") is None
 
 
+def test_a_decision_that_blocks_is_cut_off_with_a_deny_within_the_budget(tmp_path, home, monkeypatch, capsys):
+    import time
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
+    monkeypatch.setattr(guard, "BUDGET_SECONDS", 0.3)
+    monkeypatch.setattr(guard.os.path, "realpath", lambda p, *a, **k: time.sleep(5) or p)   # a disconnected drive: every lookup blocks
+    monkeypatch.setattr(guard, "log_refusal", lambda *a: None)                            # (its own lookup would block too)
+    exits = []
+    monkeypatch.setattr(guard, "hard_exit", exits.append)
+    raw = json.dumps({"session_id": "s-1", "cwd": str(work), "hook_event_name": "PreToolUse", "tool_name": "Read",
+                      "tool_input": {"file_path": str(work / "x.txt")}}).encode()
+    began = time.monotonic()
+    assert guard.main(raw) == 0
+    assert time.monotonic() - began < 2 and exits == [0]
+    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "could not decide" in out["permissionDecisionReason"]
+
+
+def test_post_tool_use_does_not_go_through_the_decision_thread(tmp_path, home, monkeypatch):
+    monkeypatch.setattr(guard, "hard_exit", lambda code: pytest.fail("PostToolUse was cut off"))
+    raw = json.dumps({"session_id": "s-1", "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"},
+                      "cwd": str(tmp_path)}).encode()
+    assert guard.main(raw) == 0 and guard.state("s-1") is None
+
+
 def test_the_guard_fails_closed(tmp_path, home):
     main, work = fake_repo(tmp_path)
     guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")

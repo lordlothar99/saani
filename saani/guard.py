@@ -1853,6 +1853,11 @@ def post_tool_use(event):
 
 # ---------------------------------------------------------------- the hook
 
+def hard_exit(code):
+    """Ends the hook now, the blocked decision thread with it (os._exit: no cleanup waits on that thread)."""
+    os._exit(code)
+
+
 def emit(decision, reason):
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
                                              "permissionDecisionReason": reason}}))
@@ -1901,12 +1906,29 @@ def main(raw=None):
         emit("deny", f"Saani guard (auto run): refused, this auto run is over (its {MAX_HOURS} hours are past). To go on: report and "
                      "stop; the owner ends the run from a terminal: saani auto off --run <id>.")
         return 0
-    cwd = event.get("cwd")
-    try:
-        cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else os.getcwd()
-        decision, reason, code, word = decide(event, context(cwd, st, session_id))
-    except (Exception, SystemExit) as e:
-        decision, reason, code, word = "deny", error.format(type(e).__name__), "guard error", ""
+    # The decision runs in a thread with a hard stop: a lookup that blocks (a slow or disconnected drive) must not reach the hook's 15 s
+    # timeout, after which Claude Code's normal permissions would decide.
+    result = []
+
+    def run():
+        try:
+            cwd = event.get("cwd")
+            cwd = cwd if isinstance(cwd, str) and not network(cwd) and os.path.isdir(cwd) else os.getcwd()
+            result.append(decide(event, context(cwd, st, session_id)))
+        except BaseException as e:
+            result.append(("deny", error.format(type(e).__name__), "guard error", ""))
+    import threading
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(BUDGET_SECONDS)
+    if not result:
+        log_refusal(st, event.get("tool_name", "?"), "too slow", "")
+        emit("deny", f"Saani guard (auto run): refused, the guard could not decide within {BUDGET_SECONDS:g} seconds (a path on a slow or "
+                     "disconnected drive?). To go on: use a local path inside the worktree.")
+        sys.stdout.flush()
+        hard_exit(0)
+        return 0
+    decision, reason, code, word = result[0]
     if decision == "deny":
         log_refusal(st, event.get("tool_name", "?"), code, word)
     emit(decision, reason)

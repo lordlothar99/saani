@@ -276,7 +276,8 @@ guard looks them up: looking one up would connect to that host (and on Windows s
 refused by the path allowlist above (and elsewhere than Windows by their own rule), and as a redirection (only `>/dev/null`). **The
 guard's own work is bounded**: a folder walk (Grep, `rm`) or a glob past 20000 entries is
 refused, and one deadline of 8 seconds covers the whole decision, every walk and glob of the command together (`too big`; the hook has 15
-seconds).
+seconds). The decision also runs under a hard stop: if it has not answered after 8 seconds (a lookup blocked on a slow or disconnected
+drive), the hook answers deny (`too slow`) and ends at once, so Claude Code's own permissions never take over by timeout.
 
 Issues and comments have one shape. A new issue starts from the template of its Type (`.github/ISSUE_TEMPLATE/`): an **At a glance** table
 (Auto, Deploy, Needs the owner, Blocked by, Parent), then Context, Result, Acceptance criteria, Scope, Decisions for the owner and Links.
