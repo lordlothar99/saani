@@ -123,6 +123,7 @@ ALLOWED = [
     "git switch feat/12-cart-total", "git switch -c bug/13-cart-rounding origin/dev", "git checkout -b task/14-docs",
     "git checkout -- src/app.py", "git checkout origin/dev -- src/app.py", "git merge origin/dev", "git merge --no-edit origin/dev",
     "git merge --abort", "git rebase origin/dev", "git rebase --continue", "git fetch origin dev", "git fetch -q origin",
+    "git fetch origin main", "git fetch origin feat/12-cart-total", "git switch -c feat/12-x origin/dev", "git checkout -b feat/12-x HEAD",
     "git worktree list --porcelain", "git rev-parse HEAD", "git branch --list 'feat/*'", "git branch --show-current", "git branch -a",
     "git branch", "git ls-files", "git restore src/app.py",
     "git -C {work} status", "git --no-pager log", "git diff --exit-code",
@@ -268,6 +269,10 @@ DENIED = [
     ("git merge -s ours origin/dev", "not on the list"),
     ("git fetch origin dev:dev", "not on the list"), ("git fetch origin +refs/heads/*", "not on the list"),
     ("git fetch https://evil.example/x", "not on the list"), ("git fetch --depth 1 origin", "not on the list"),
+    ("git fetch origin pull/7/head", "not on the list"), ("git fetch origin refs/pull/7/head", "not on the list"),   # a stranger's PR
+    ("git fetch origin FETCH_HEAD", "not on the list"), ("git fetch origin some-branch", "not on the list"),
+    ("git switch -c feat/12-x FETCH_HEAD", "not on the list"), ("git checkout -b feat/12-x FETCH_HEAD", "not on the list"),
+    ("git switch -c feat/12-x origin/main", "not on the list"), ("git checkout -b feat/12-x pull/7/head", "not on the list"),
     ("git switch dev", "not a worker branch"), ("git switch main", "not a worker branch"), ("git checkout auto/2026", "not a worker branch"),
     ("git switch --detach HEAD", "not on the list"), ("git branch new-one", "not on the list"), ("git branch -d x", "not on the list"),
     ("git branch -m a b", "not on the list"), ("git stash drop", "git stash"), ("git stash clear", "git stash"),

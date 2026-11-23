@@ -1149,8 +1149,12 @@ def git_sub(sub, words, ctx, gcwd, part):
             positional.append(w)
         if positional and positional[0] != "origin":
             return deny("not on the list", "git fetch from a remote other than origin", "git")
-        if any(":" in w or w.startswith("+") for w in positional[1:]):
-            return deny("not on the list", "git fetch with a refspec that writes a branch (: or +)", "git")
+        # Only the project's branches by name: never a pull request's ref (pull/7/head, refs/...), FETCH_HEAD, or a : or + refspec, so
+        # nothing a stranger pushed can be fetched and then checked out.
+        for w in positional[1:]:
+            if w not in (ctx.integration, ctx.production) and not ctx.worker_branch.match(w):
+                return deny("not on the list", f"git fetch of something other than origin's {ctx.integration}, {ctx.production} or a "
+                            "worker branch (no pull/, refs/, FETCH_HEAD, : or + refspec)", "git")
         return None
     if sub in ("switch", "checkout"):
         if "--" in words:
@@ -1167,6 +1171,9 @@ def git_sub(sub, words, ctx, gcwd, part):
         if not positional or not ctx.worker_branch.match(positional[0]) or len(positional) > most:
             return deny("not a worker branch", f"git {sub} to a branch that is not a worker's (<type>/<n>-<words>)", "git",
                         how="saani start <n> makes the issue's worktree and branch")
+        if positional[1:] and positional[1] not in (f"origin/{ctx.integration}", "HEAD"):
+            return deny("not on the list", f"git {sub} with a start point other than origin/{ctx.integration} or HEAD (never FETCH_HEAD "
+                        "or a fetched pull request)", "git", how=f"git {sub} -c <branch> origin/{ctx.integration}")
         return None
     if sub == "rebase":
         positional = [w for w in words if w not in ("-q", "--quiet")]
