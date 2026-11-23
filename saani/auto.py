@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 
-from . import config, core, glance
+from . import config, core, glance, queue
 
 MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
 GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
@@ -565,7 +565,7 @@ def away_gone(rec, alive=None):
         pid = int(pid_path(rec["id"]).read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
-    if (alive or process_alive)(pid):
+    if (alive or queue.alive)(pid):
         return None
     return (f"  WARNING: the away run's process ({pid}) is gone but the run is still on: it stopped without ending. Read the log "
             f"build/saani-auto-{rec['id']}.log, then end the run from a terminal: saani auto off --run {rec['id']}")
@@ -794,6 +794,8 @@ def by_hand(argv, windows=None):
 
 
 def norm_key(path):
+    """A string-only, cross-OS key for a path in Claude Code's JSON config: slashes forward, no trailing slash, case folded for drive-letter
+    paths. It never resolves anything (the config may name folders of another OS or that no longer exist), so it is not core.same_path."""
     text = str(path).replace("\\", "/").rstrip("/")
     return text.casefold() if os.name == "nt" or re.match(r"^[A-Za-z]:/", text) else text
 
@@ -828,23 +830,6 @@ def folder_trusted(folder, home=None, environ=None):
 
 def pid_path(run_id):
     return build_dir() / f"saani-auto-{run_id}.pid"
-
-
-def process_alive(pid, run=subprocess.run, windows=None):
-    """Whether a process with this id exists (standard library only)."""
-    if os.name == "nt" if windows is None else windows:
-        try:
-            out = run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, timeout=30).stdout   # bytes: the OEM code page
-            return re.search(rf"\b{pid}\b".encode(), out) is not None
-        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-            return True                                                         # cannot tell: say nothing
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True                                                             # exists, not ours
-    return True
 
 
 def start_detached(argv, cwd, log, popen=subprocess.Popen):

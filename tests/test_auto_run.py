@@ -5,7 +5,6 @@ import json
 import os
 import pathlib
 import subprocess
-import sys
 
 import pytest
 
@@ -552,10 +551,10 @@ def stub_landing(world, monkeypatch, on_git=None):
     return calls
 
 
-def test_landing_does_its_post_push_steps_before_the_worktree_is_removed(world, monkeypatch, capsys):
+def test_landing_does_its_post_push_steps_before_the_worktree_is_removed(world, monkeypatch):
     record(world)
     order = []
-    calls = stub_landing(world, monkeypatch)
+    stub_landing(world, monkeypatch)
     monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: order.append("comment") or True)
     monkeypatch.setattr(auto, "journal", lambda *a, **k: order.append("journal"))
     monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: order.append("remove"))
@@ -578,66 +577,46 @@ def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(w
     assert "next: journal the landing of #12" in out and "next: comment the commit on #12" in out and order == ["remove"]
 
 
-def test_a_removal_that_half_fails_deletes_the_branch_and_names_the_folder_left(world, monkeypatch, capsys):
-    folder = world.wt / "task-12-cart"
+def failing_removal(world, monkeypatch, listed=None, name="task-12-cart", error="in use"):
+    """A landed worktree's folder whose `git worktree remove` fails; `listed` is how `git worktree list` spells that folder (None: it is
+    not registered any more). Returns (folder, the git calls)."""
+    folder = world.wt / name
     folder.mkdir()
+    listing = f"worktree {world.root}\nbranch refs/heads/dev\n"
+    if listed:
+        listing += f"\nworktree {listed(folder)}\nbranch refs/heads/task/12-cart\n"
 
     def on_git(a):
         if a[:2] == ("worktree", "remove"):
-            return subprocess.CompletedProcess(a, 1, stdout="", stderr="Directory not empty")
+            return subprocess.CompletedProcess(a, 1, stdout="", stderr=error)
         if a[:2] == ("worktree", "list"):
-            return f"worktree {world.root}\nbranch refs/heads/dev\n"
+            return listing
         return None
-    calls = stub_landing(world, monkeypatch, on_git)
+    return folder, stub_landing(world, monkeypatch, on_git)
+
+
+def test_a_removal_that_half_fails_deletes_the_branch_and_names_the_folder_left(world, monkeypatch, capsys):
+    folder, calls = failing_removal(world, monkeypatch, error="Directory not empty")
     core.remove_landed_worktree(folder, "task/12-cart")
     out = capsys.readouterr().out
     assert ("branch", "-D", "task/12-cart") in calls and str(folder) in out and "unregistered" in out
 
 
 def test_a_removal_that_fails_with_the_worktree_still_registered_keeps_it_and_the_branch(world, monkeypatch, capsys):
-    folder = world.wt / "task-12-cart"
-    folder.mkdir()
-
-    def on_git(a):
-        if a[:2] == ("worktree", "remove"):
-            return subprocess.CompletedProcess(a, 1, stdout="", stderr="in use")
-        if a[:2] == ("worktree", "list"):
-            return f"worktree {world.root}\nbranch refs/heads/dev\n\nworktree {folder}\nbranch refs/heads/task/12-cart\n"
-        return None
-    calls = stub_landing(world, monkeypatch, on_git)
+    folder, calls = failing_removal(world, monkeypatch, listed=str)
     core.remove_landed_worktree(folder, "task/12-cart")
     assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
 
 
 def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_registered(world, monkeypatch, capsys):
-    folder = world.wt / "task-12-cart"
-    folder.mkdir()
-    other = str(folder).replace("\\", "/")
-    if os.name == "nt":
-        other = other.upper()
-
-    def on_git(a):
-        if a[:2] == ("worktree", "remove"):
-            return subprocess.CompletedProcess(a, 1, stdout="", stderr="in use")
-        if a[:2] == ("worktree", "list"):
-            return f"worktree {world.root}\nbranch refs/heads/dev\n\nworktree {other}\nbranch refs/heads/task/12-cart\n"
-        return None
-    calls = stub_landing(world, monkeypatch, on_git)
+    other = lambda folder: str(folder).replace("\\", "/").upper() if os.name == "nt" else str(folder).replace("\\", "/")
+    folder, calls = failing_removal(world, monkeypatch, listed=other)
     core.remove_landed_worktree(folder, "task/12-cart")
     assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
 
 
 def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
-    folder = world.wt / "it's a folder"
-    folder.mkdir()
-
-    def on_git(a):
-        if a[:2] == ("worktree", "remove"):
-            return subprocess.CompletedProcess(a, 1, stdout="", stderr="busy")
-        if a[:2] == ("worktree", "list"):
-            return f"worktree {world.root}\nbranch refs/heads/dev\n"
-        return None
-    stub_landing(world, monkeypatch, on_git)
+    folder, _ = failing_removal(world, monkeypatch, name="it's a folder", error="busy")
     core.remove_landed_worktree(folder, "task/12-cart")
     assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
 
@@ -732,7 +711,7 @@ def test_a_session_that_cannot_start_falls_back_to_the_command_by_hand(world, ca
     assert "could not start (policy)" in capsys.readouterr().out
 
 
-def test_the_headless_session_waits_for_its_background_coders(world, capsys):
+def test_the_headless_session_waits_for_its_background_coders(world):
     seen = []
     def popen(argv, **kw):
         seen.append(kw)
@@ -768,37 +747,19 @@ def test_status_says_when_an_away_run_s_process_is_gone(world, capsys, monkeypat
     record(world, mode="away")
     assert auto.away_gone(auto.read_record()) is None                          # no pid recorded
     auto.pid_path("r1").write_text("4242", encoding="utf-8")
-    monkeypatch.setattr(auto, "process_alive", lambda pid: False)
+    assert auto.away_gone(auto.read_record(), alive=lambda pid: False).startswith("  WARNING")      # the injected check
+    assert auto.away_gone(auto.read_record(), alive=lambda pid: True) is None
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: False)                # the default check is queue.alive
     assert auto.cmd_status(args()) == 0
     out = capsys.readouterr().out
     assert "process (4242) is gone" in out and "saani auto off --run r1" in out and "saani-auto-r1.log" in out
-    monkeypatch.setattr(auto, "process_alive", lambda pid: True)
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: True)
     auto.cmd_status(args())
     assert "is gone" not in capsys.readouterr().out
     record(world, mode="here")                                                 # a here run has no process
-    monkeypatch.setattr(auto, "process_alive", lambda pid: False)
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: False)
     auto.cmd_status(args())
     assert "is gone" not in capsys.readouterr().out
-
-
-def test_process_alive_knows_this_process_and_a_dead_one():
-    assert auto.process_alive(os.getpid()) is True
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
-    dead.wait()
-    assert auto.process_alive(dead.pid) is False
-
-
-def test_tasklist_output_in_another_code_page_does_not_crash_the_liveness_check():
-    def tasklist(out):
-        return lambda *a, **k: type("R", (), {"stdout": out})()
-    found = "claude.exe                   4242 Console   1   120 K ausgeführt".encode("cp850")
-    none = "INFO: Keine Task läuft mit den angegebenen Kriterien. äö".encode("cp850")
-    assert auto.process_alive(4242, tasklist(found), windows=True) is True
-    assert auto.process_alive(4242, tasklist(none), windows=True) is False
-    assert auto.process_alive(42, tasklist(found), windows=True) is False        # a whole word only
-    def broken(*a, **k):
-        raise ValueError("odd")
-    assert auto.process_alive(4242, broken, windows=True) is True                # cannot tell: quiet
 
 
 def test_trust_counts_for_a_parent_folder_and_any_spelling(tmp_path):

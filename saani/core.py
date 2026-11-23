@@ -173,10 +173,12 @@ def milestone_warning(info, number):
 
 def known_worktree(folder, known):
     """`folder` when it is one of this repository's worktrees other than the main checkout (`known`: their paths, main first), else None."""
-    def norm(p):
-        return os.path.normcase(str(pathlib.Path(p).resolve()))
-    target = norm(folder)
-    return pathlib.Path(folder) if target in [norm(p) for p in known[1:]] else None
+    return pathlib.Path(folder) if any(same_path(folder, p) for p in known[1:]) else None
+
+
+def same_path(a, b):
+    """True when two paths are the same place: resolved, so the spelling (slashes, letter case on Windows) does not matter."""
+    return os.path.normcase(str(pathlib.Path(a).resolve())) == os.path.normcase(str(pathlib.Path(b).resolve()))
 
 
 def prunable(merged, in_worktrees):
@@ -636,17 +638,15 @@ def remove_landed_worktree(cwd, branch):
         git("branch", "-D", branch, cwd=home, check=False)
         print(f"removed: {cwd} and the local branch {branch}")
         return
-    def same(p):                           # spelling (slashes, letter case on Windows) must not matter
-        return os.path.normcase(pathlib.Path(p).resolve())
-    registered = any(same(p) == same(cwd) for p, _ in worktrees(home))
-    if registered:
+    if any(same_path(p, cwd) for p, _ in worktrees(home)):             # still registered
         print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
         return
     git("branch", "-D", branch, cwd=home, check=False)
     quoted = str(cwd).replace("'", "''")
-    left = f"the folder {cwd} is left" if pathlib.Path(cwd).exists() else "nothing is left"
+    exists = pathlib.Path(cwd).exists()
+    left = f"the folder {cwd} is left" if exists else "nothing is left"
     print(f"the worktree is unregistered but git could not delete its folder: the local branch {branch} is deleted; {left}"
-          + (f", remove it yourself (e.g. Remove-Item -LiteralPath '{quoted}' -Recurse -Force)" if pathlib.Path(cwd).exists() else ""))
+          + (f", remove it yourself (e.g. Remove-Item -LiteralPath '{quoted}' -Recurse -Force)" if exists else ""))
 
 
 def landing_fields(row):
