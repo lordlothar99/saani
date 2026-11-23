@@ -755,12 +755,51 @@ def secret_word(ctx, word, cwd):
         elif piece and secret_name(piece, ctx.path(piece, cwd), strict=False):
             return True
     if getattr(word, "glob", False):
-        import glob
-        base = word if os.path.isabs(word) else os.path.join(cwd, word)
-        for k, match in enumerate(glob.iglob(base)):
-            if k > 2000 or secret_name(match):
+        # The word as bash reads it (ctx.path: /c/..., /tmp, ~), matched here with a budget; never outside the run's places, never a
+        # [...] (bash reads [^x] as "not x", Python's fnmatch as "^ or x", and bash has [[:alpha:]]).
+        if "[" in word:
+            raise Refuse("unsure", "a glob with [...] (the guard does not read it as bash does)", how="name the files, or use * and ?")
+        pattern = ctx.path(word, cwd)
+        if not ctx.in_run(pattern):
+            raise Refuse("glob outside the worktrees", "a glob outside the worktrees folder and the run's folder",
+                         how="name the file, or Read it; globs only inside a worktree")
+        for match in glob_matches(pattern):
+            if secret_name(match) or not ctx.in_run(norm(match)):
                 return True
     return False
+
+
+def glob_matches(pattern):
+    """The paths matching the absolute, normalized `pattern`, one path part at a time with * and ? (in any case, hidden names too: never
+    fewer than bash lists). Refused past WALK_CAP entries or BUDGET_SECONDS."""
+    import fnmatch
+    import time
+    end, seen = time.monotonic() + BUDGET_SECONDS, [0]
+
+    def tick():
+        seen[0] += 1
+        if seen[0] > WALK_CAP or time.monotonic() >= end:
+            raise Refuse("too big", "a glob that reaches more entries than the guard looks through in its time",
+                         how="name the files, or a narrower glob")
+    drive, rest = os.path.splitdrive(pattern)
+    level = [drive + os.sep]
+    for part in [x for x in re.split(r"[\\/]+", rest) if x]:
+        found = []
+        for d in level:                                # (a plain part: one lookup per path already counted)
+            if not re.search(r"[*?]", part):
+                if os.path.lexists(os.path.join(d, part)):
+                    found.append(os.path.join(d, part))
+                continue
+            try:
+                with os.scandir(d) as entries:
+                    for e in entries:
+                        tick()
+                        if fnmatch.fnmatchcase(e.name.lower(), part.lower()):
+                            found.append(e.path)
+            except OSError:
+                continue
+        level = found
+    return level
 
 
 def scan(ctx, words, cwd, skip=()):

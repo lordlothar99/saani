@@ -235,6 +235,10 @@ allowed only as the last part. Refused before any rule: `$` outside single quote
 redirection but `2>&1`, `>/dev/null` and `2>/dev/null` (so no process substitution and no writing through the shell). The only
 here-documents: `git commit -F - <<'EOF' ... EOF`, and `"$(cat <<'EOF' ... EOF\n)"` as the exact value of `git commit -m`, or of
 `--body`/`--title` of `gh issue comment`, `gh pr create` and `gh pr comment`; the delimiter is quoted, so the body is plain text.
+An unquoted glob (`*`, `?`) in a command's arguments is read where bash reads it (Git Bash's `/c/...`, `/tmp`, `~`) and matched by the
+guard itself: only inside the worktrees folder or the run's folder, never reaching a secret, within the guard's budget (below). A glob
+with `[...]` is refused: bash reads `[^x]` as "not x" and has `[[:alpha:]]`, which the guard's matcher does not; quote it, or name the
+files.
 
 | Command | Allowed | Refused |
 |---|---|---|
