@@ -904,6 +904,19 @@ def secret_word(ctx, word, cwd):
     return False
 
 
+def glob_option(ctx, word, cwd):
+    """True when bash would expand the glob `word` into an option: its first path part holds * or ? and matches a name starting with -.
+    An absolute word (/x, C:/x, ~ already expanded) expands to absolute paths, never an option."""
+    if re.match(r"^([\\/]|[A-Za-z]:)", word):
+        return False
+    first = re.split(r"[\\/]", word, maxsplit=1)[0]
+    if not re.search(r"[*?]", first):
+        return False
+    if "[" in first:
+        raise Refuse("unsure", "a glob with [...] (the guard does not read it as bash does)", how="name the files, or use * and ?")
+    return any(os.path.basename(m).startswith("-") for m in glob_matches(ctx.path(first, cwd), ctx))
+
+
 def glob_matches(pattern, ctx):
     """The paths matching the absolute, normalized `pattern`, one path part at a time with * and ? (in any case, hidden names too: never
     fewer than bash lists). Refused past WALK_CAP entries or once the decision's time is spent."""
@@ -966,6 +979,15 @@ def command(part, ctx, cwd):
             return deny("cd outside the worktrees", "cd outside a worktree and the run's folder", cmd,
                         how="work in the run's folder or an issue's worktree"), cwd
         return None, target
+    # Bash expands an unquoted * or ? after the guard has looked, and both match a leading `-`: a file named --all, -- or -exec would
+    # become an option. git and find take no glob at all (git expands a quoted pathspec itself); elsewhere a glob may not match one.
+    globs = [w for w in args if getattr(w, "glob", False)]
+    if globs and cmd in ("git", "find"):
+        return deny("unsure", "a glob in git or find (bash would expand it, an option included): quote it", cmd,
+                    how="quote the pattern ('src/*.py'): git and find match it themselves"), cwd
+    if any(glob_option(ctx, w, cwd) for w in globs):
+        return deny("unsure", "a glob that expands to an option (a file whose name starts with -)", cmd,
+                    how="name the files"), cwd
     start = saani_start(words, cwd, ctx.temp)
     if start:
         return saani_command(words[start:], ctx, cwd), cwd

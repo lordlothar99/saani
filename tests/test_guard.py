@@ -196,8 +196,8 @@ DENIED = [
     ("git diff 'stash@{{0}}'", "git stash"), ("git diff HEAD..stash", "git stash"), ("git log HEAD...STASH", "git stash"),
     ("git log ^stash HEAD", "git stash"), ("git show 'refs\\stash'", "git stash"), ("git rev-parse stash", "git stash"),
     ("git rev-parse --all", "git stash"), ("git log -g", "git stash"), ("git log --walk-reflogs", "git stash"),
-    ("git log --reflog", "git stash"), ("git log --glob=refs/st*", "git stash"), ("git log --branches=x*", "git stash"),
-    ("git log --tags=v*", "git stash"), ("git log --remotes=*", "git stash"), ("git log --stdin", "git stash"),
+    ("git log --reflog", "git stash"), ("git log --glob='refs/st*'", "git stash"), ("git log --branches='x*'", "git stash"),
+    ("git log --tags='v*'", "git stash"), ("git log --remotes='*'", "git stash"), ("git log --stdin", "git stash"),
     ("git show ':/WIP on'", "git stash"), ("git log HEAD..:/fix", "git stash"), ("git diff 'stash^{{tree}}'", "git stash"),
     ("git restore --source=stash src/app.py", "git stash"), ("git checkout stash -- src/app.py", "git stash"),
     ("git commit -C stash", "git stash"),
@@ -308,7 +308,7 @@ DENIED = [
     ("git rebase -x ls origin/dev", "not on the list"), ("git rebase origin/main", "not on the list"),
     ("git rebase -i origin/dev", "not on the list"), ("git merge origin/main", "not on the list"), ("git merge feat/12-x", "not on the list"),
     ("git merge -s ours origin/dev", "not on the list"),
-    ("git fetch origin dev:dev", "not on the list"), ("git fetch origin +refs/heads/*", "not on the list"),
+    ("git fetch origin dev:dev", "not on the list"), ("git fetch origin '+refs/heads/*'", "not on the list"),
     ("git fetch https://evil.example/x", "not on the list"), ("git fetch --depth 1 origin", "not on the list"),
     ("git fetch origin pull/7/head", "not on the list"), ("git fetch origin refs/pull/7/head", "not on the list"),   # a stranger's PR
     ("git fetch origin FETCH_HEAD", "not on the list"), ("git fetch origin some-branch", "not on the list"),
@@ -367,13 +367,32 @@ def test_what_an_auto_run_must_never_do_is_refused_with_a_reason(ctx, command, c
 
 def test_with_a_literal_dashdash_every_word_before_it_is_a_revision_never_a_path(ctx):
     (pathlib.Path(ctx.places["work"]) / "main").write_text("x")                         # a planted file named like the owner's branch
-    for command in ("git log main -- src", "git log -p main -- .", "git diff HEAD main -- src", "git log ma?n -- src",
+    for command in ("git log main -- src", "git log -p main -- .", "git diff HEAD main -- src", "git log 'ma?n' -- src",
                     "git diff main -- ."):
         decision, reason, code, _ = sh(ctx, command)
         assert (decision, code) == ("deny", "revision"), (command, reason)
     assert sh(ctx, "git log src")[0] == "allow"                                          # an existing path, no --: a path
     assert sh(ctx, "git log main")[0] == "allow"                                         # (git reads it as the file: ambiguous refused)
     assert sh(ctx, "git log HEAD -- main")[0] == "allow"
+
+
+def test_a_glob_never_expands_into_an_option(ctx):
+    work = pathlib.Path(ctx.places["work"])
+    for name in ("--all", "main", "--", "-exec", "-delete", "notes.md"):
+        (work / name).write_text("x")
+    for command in ("git log -p -?all", "git log -p *all", "git log -p main -?", "find . -maxdepth 0 -?xec sh x \\;",
+                    "find . -name zz -o -?elete", "git add src/*.py", "find src/*"):
+        decision, reason, code, _ = sh(ctx, command)
+        assert (decision, code) == ("deny", "unsure"), (command, reason)
+        assert "glob in git or find" in reason, command
+    assert sh(ctx, "git log -- 'src/*.py'")[0] == "allow"                               # quoted: git matches it itself
+    assert sh(ctx, "find . -name '*.md'")[0] == "allow"
+    assert sh(ctx, "cat {work}/*.md")[0] == "allow"
+    assert sh(ctx, "cat *.md")[0] == "allow"
+    (work / "-n.md").write_text("x")
+    assert sh(ctx, "cat *.md")[1].count("expands to an option") == 1                    # cat -n.md: an option
+    assert sh(ctx, "wc -l ?n.md")[2] == "unsure"
+    assert sh(ctx, "cat {work}/*.md")[0] == "allow"                                     # absolute: expands to absolute paths
 
 
 def test_a_compound_command_is_refused_when_any_part_is(ctx):

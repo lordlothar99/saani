@@ -239,7 +239,10 @@ here-documents: `git commit -F - <<'EOF' ... EOF`, and `"$(cat <<'EOF' ... EOF\n
 An unquoted glob (`*`, `?`) in a command's arguments is read where bash reads it (Git Bash's `/c/...`, `/tmp`, `~`) and matched by the
 guard itself: only inside the worktrees folder or the run's folder, never reaching a secret, within the guard's budget (below). A glob
 with `[...]` is refused: bash reads `[^x]` as "not x" and has `[[:alpha:]]`, which the guard's matcher does not; quote it, or name the
-files. So is a glob with `**` (any depth when bash's `globstar` is on).
+files. So is a glob with `**` (any depth when bash's `globstar` is on). Bash's `*` and `?` match a leading `-`, so a file the run
+wrote (`--all`, `--`, `-exec`) could turn a glob into an option after the guard looked: `git` and `find` take no unquoted glob at all
+(quote the pattern, they match it themselves), and elsewhere a glob whose matches include a name starting with `-` is refused. Options
+and `--` thus only come from words the guard sees.
 
 | Command | Allowed | Refused |
 |---|---|---|
