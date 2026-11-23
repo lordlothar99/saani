@@ -603,7 +603,7 @@ def cmd_status(args):
 
 
 def guard_live(session):
-    """True when the guard still holds this session (its entry is not over)."""
+    """True when the guard still holds this session: an entry, over or not (an over session is still refused until the owner's off)."""
     from . import guard
     try:
         return guard.state(session) is not None
