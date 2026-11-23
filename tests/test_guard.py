@@ -533,7 +533,7 @@ def test_secrets_are_refused_inside_shell_commands(ctx, command):
     "gh issue comment 1 --body-file ~/.ss[^x]/id_rs[^x]", "gh issue comment 1 -F ~/.ss?/id_rs?", "git commit -F ~/.ss?/id_rs?",
     "git diff ~/.ss?/id_rs? src", "git diff -- ~/.ss?/id_rs?", "cat {main}/*.py", "cat ../../webshop/*", "wc -l {temp}/*",
     "cat src/[a]pp.py", "cat ~/.ss?/id_rs? && ls", "cat **/app.py", "cat src/**", "wc -l **/*.py", "cat a**b", "cat *.key",
-    "cat server*", "cat .en?", "cat src/../.e*", "cat ?otes.txt", "cat /c/Users/x/.ss?/id_rs?"])
+    "cat server*", "cat .en?", "cat src/../.e*", "cat ?otes.txt", "cat /c/x/.ss?/id_rs?"])
 def test_an_unquoted_glob_is_refused_before_any_other_rule(ctx, command):
     work = pathlib.Path(ctx.places["work"])
     for name in ("server.key", "notes.txt", ".env"):
