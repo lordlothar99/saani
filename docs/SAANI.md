@@ -268,7 +268,7 @@ and links are resolved, so neither is a way to the rest of `~/.claude/`), PowerS
 `/`). Then only three absolute forms are read: `/<drive>/...` (that drive, `C:/...`), `/tmp/...` (the temp folder) and exactly
 `/dev/null`. Everything else is a place Git Bash maps outside the drives and is refused before any filesystem call: `/`, `/proc`,
 `/dev/...`, `/etc`, `/usr`, `/bin`, `/cygdrive`, `/mnt`, `/home`... (`posix path`). A path on a mapped network drive is refused too
-(Windows tells it from the local mapping). The other rules then judge the mapped path.
+(Windows tells it from the local mapping), and so is a drive-relative path (`C:x`, or `C:` alone: that drive's current folder). The other rules then judge the mapped path.
 
 **Network paths** (`\\host\share`, `//host/share`, `\\?\UNC\...`, `\\.\...`) are refused to every tool and in every command before the
 guard looks them up: looking one up would connect to that host (and on Windows send the owner's credentials). The `//host/...` of a URL

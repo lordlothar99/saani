@@ -301,8 +301,8 @@ def posix_view(p, cwd):
 
     def gitbash(x):
         x = str(x).replace("\\", "/")
-        if re.match(r"^[A-Za-z]:(?!/|$)", x):
-            raise Refuse("unsure", "a drive-relative path (C:x)", how="use the full path, C:/...")
+        if re.match(r"^[A-Za-z]:(?!/)", x):
+            raise Refuse("unsure", "a drive-relative path (C:x, or C: alone: that drive's current folder)", how="use the full path, C:/...")
         m = re.match(r"^([A-Za-z]):(.*)", x)
         return "/" + m.group(1).lower() + m.group(2) if m else x
     q = gitbash(p)

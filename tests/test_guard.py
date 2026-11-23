@@ -576,6 +576,13 @@ def test_git_bash_paths_go_through_one_allowlist(ctx):
         assert tool(ctx, "Read", file_path=ok)[0] == "allow", ok
 
 
+def test_a_bare_drive_letter_is_its_current_folder_so_refused(ctx):
+    for path in ("C:", "d:", "C:x.txt"):
+        assert tool(ctx, "Read", file_path=path)[2] == "unsure", path
+        assert sh(ctx, f"ls {path}")[2] == "unsure", path
+    assert tool(ctx, "Read", file_path="C:/")[0] == "allow"
+
+
 def test_a_mapped_network_drive_is_refused_before_any_lookup(ctx, monkeypatch):
     if os.name != "nt":
         pytest.skip("drive letters are Windows'")
