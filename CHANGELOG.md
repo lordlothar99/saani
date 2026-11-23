@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Map: one figure per running subagent, each on its own issue (several coders no longer show as one figure on the last one's issue), and
+  the panel lists all the runs of the role; clicking the harvester opens its release PR; the map says "Stale" and retries less often while
+  Saani does not answer, and a hidden tab stops polling; the ground is sharper at high zoom; Task and Feature colours and the deploy
+  route's bend changed. The roster's runs carry the `issue` they name (issue #53).
 - Away run (issue #52): the headless session no longer stops its background coders 10 minutes after its last turn and exits. `saani auto
   away` starts it with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (the command to start by hand carries it too) and the skill tells it to keep
   its turn open until the coders are done. `saani auto away` warns when Claude Code does not mark the project's folder as trusted (its allow

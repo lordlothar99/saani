@@ -154,8 +154,12 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
   (bottom left) to END (top right), with branches (to deploy or to close) and the ways back (tests failed, CI red, needs you, hotfix, not
   planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether an auto run can take
-  it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, auto fit, the
-  prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+  it); each worker is a figure: one per running subagent (two coders at once are two figures, each on its own issue; an idle role is one
+  figure in the camp, and a worker's panel lists all the runs of its role). The release pull request is the harvester: hover for its CI,
+  click to open its link, the issues it carries and a prompt for the whole PR. Hover for a summary, click for the full panel (context,
+  acceptance criteria, history, auto fit, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+- While Saani does not answer, the map keeps the last data on screen, shows "Stale" (since when) and asks less often (every 10, 20, 40,
+  then 60 s, back to 5 s once it answers). A hidden browser tab stops asking and pauses the animations.
 - Both pages have a top bar with the page switch (Map · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
 - The map is one HTML file (`saani/map.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
   `mock-state.json` beside it. Its data: [map-data-contract.md](map-data-contract.md).
