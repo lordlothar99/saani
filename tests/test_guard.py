@@ -432,7 +432,9 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                                   "{home}/.bash_history", "{work}/.python_history", "{home}/.gitconfig", "{home}/.config/git/config",
                                   "{home}/.m2/settings.xml", "{work}/.yarnrc.yml", "{home}/AppData/Roaming/pip/pip.ini",
                                   "{home}/.config/pip/pip.conf", "{home}/.claude.json.backup", "{home}/.npmrc.bak", "{home}/.netrc~",
-                                  "{main}/.git/refs/stash", "{main}/.git/logs/refs/stash", "{main}/.git/packed-refs"])
+                                  "{main}/.git/refs/stash", "{main}/.git/logs/refs/stash", "{main}/.git/packed-refs",
+                                  "{main}/.git/packed-refs::$DATA", "{main}/.git./refs/stash", "{home}/.m2./settings.xml. ",
+                                  "{home}/.config/git/config:x"])
 def test_more_secrets_are_refused_to_read(ctx, name):
     decision, reason, code, _ = tool(ctx, "Read", file_path=name)
     assert (decision, code) == ("deny", "secret"), (name, reason)

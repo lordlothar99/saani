@@ -474,11 +474,10 @@ def secret_name(raw, resolved=None, strict=True, session=None):
             continue
         if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"] or home_claude(str(c), session):
             return True
-        if [x.split(":")[0].rstrip(". ") for x in parts[-2:]] == [".git", "config"]:      # Windows: `.git./config` is .git/config
+        clean = [x.split(":")[0].rstrip(". ") for x in parts]          # Windows: `.git./config`, `packed-refs::$DATA` are the files
+        if clean[-2:] == [".git", "config"] or any(clean[-len(t):] == t for t in STRONG_TAILS):
             return True
         name = parts[-1].split(":")[0].rstrip(". ") or parts[-1]       # Windows: `.env::$DATA` and `.env.` are `.env`
-        if any(parts[-len(t):] == t for t in STRONG_TAILS):
-            return True
         if name == ".env" or name.startswith((".env.",) + STRONG_PREFIXES) or name in STRONG_NAMES or "credentials" in name:
             return True
         if name.endswith(KEY_SUFFIXES) or name.startswith(KEY_PREFIXES):
