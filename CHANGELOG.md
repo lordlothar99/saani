@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+
+## 0.5.0 (2026-11-23)
+- Plugin 0.5.0: auto run fixes (at most 2 issues in flight per project, `saani land` after the worktree removal, an away run's
+  headless session that waits for its coders), and the map's crew: one figure per running subagent.
 - Map: one figure per running subagent, each on its own issue (several coders no longer show as one figure on the last one's issue), and
   the panel lists all the runs of the role; clicking the harvester opens its release PR; the map says "Stale" and retries less often while
   Saani does not answer, and a hidden tab stops polling; the ground is sharper at high zoom; Task and Feature colours and the deploy
