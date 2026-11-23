@@ -173,10 +173,12 @@ def milestone_warning(info, number):
 
 def known_worktree(folder, known):
     """`folder` when it is one of this repository's worktrees other than the main checkout (`known`: their paths, main first), else None."""
-    def norm(p):
-        return os.path.normcase(str(pathlib.Path(p).resolve()))
-    target = norm(folder)
-    return pathlib.Path(folder) if target in [norm(p) for p in known[1:]] else None
+    return pathlib.Path(folder) if any(same_path(folder, p) for p in known[1:]) else None
+
+
+def same_path(a, b):
+    """True when two paths are the same place: resolved, so the spelling (slashes, letter case on Windows) does not matter."""
+    return os.path.normcase(str(pathlib.Path(a).resolve())) == os.path.normcase(str(pathlib.Path(b).resolve()))
 
 
 def prunable(merged, in_worktrees):
@@ -527,6 +529,7 @@ def named_worktree(path):
 
 
 def cmd_land(args):
+    from . import auto                     # up front: the worktree's own files may be gone by the end of the landing
     c = cfg()
     cwd = named_worktree(args.worktree)
     branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
@@ -602,21 +605,48 @@ def cmd_land(args):
         raise
     print(f"LANDED: {branch} -> {c.integration} at {row['head']} in {row['seconds']} s"
           + (f"; conflicts: {', '.join(row['conflicts'])}" if row["conflicts"] else ""))
+    # Every step after the push runs before the worktree goes (its own saani files are deleted with it), and each one on its own:
+    # a failure prints the step it left undone, never skips the others.
     restore_generated(cwd)                 # the landing tests may rewrite them with other line endings
+    n = m.group(2)
+    try:
+        auto.journal(n, "landed")
+    except (Exception, SystemExit) as e:   # noqa: BLE001 (git() exits on a failed command)
+        print(f"next: journal the landing of #{n} (saani auto journal failed: {e})")
+    why = ""
+    try:
+        commented = (not args.no_comment) and mark_on_dev(n, row)
+    except (Exception, SystemExit) as e:   # noqa: BLE001
+        commented, why = False, f" ({e})"
+    if not commented:
+        print(f"next: comment the commit on #{n} and label it {c.labels.get('in_dev', 'in-dev')}{why}")
     if not args.keep:
-        home = main_checkout(cwd)
-        os.chdir(home)
-        gone = git("worktree", "remove", str(cwd), cwd=home, check=False)
-        if gone.returncode == 0:
-            git("branch", "-D", branch, cwd=home, check=False)
-            print(f"removed: {cwd} and the local branch {branch}")
-        else:
-            print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
-    from . import auto
-    auto.journal(m.group(2), "landed")
-    if args.no_comment or not mark_on_dev(m.group(2), row):
-        print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
+        try:
+            remove_landed_worktree(cwd, branch)
+        except (Exception, SystemExit) as e:   # noqa: BLE001
+            print(f"next: remove the worktree: git worktree remove {cwd}; git branch -D {branch} ({e})")
     return 0
+
+
+def remove_landed_worktree(cwd, branch):
+    """Removes a landed worktree and its local branch, and says what is actually left when git fails: still registered (it stays, the
+    branch too) or unregistered with a folder left behind (the branch goes, the owner removes the folder)."""
+    home = main_checkout(cwd)
+    os.chdir(home)
+    gone = git("worktree", "remove", str(cwd), cwd=home, check=False)
+    if gone.returncode == 0:
+        git("branch", "-D", branch, cwd=home, check=False)
+        print(f"removed: {cwd} and the local branch {branch}")
+        return
+    if any(same_path(p, cwd) for p, _ in worktrees(home)):             # still registered
+        print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
+        return
+    git("branch", "-D", branch, cwd=home, check=False)
+    quoted = str(cwd).replace("'", "''")
+    exists = pathlib.Path(cwd).exists()
+    left = f"the folder {cwd} is left" if exists else "nothing is left"
+    print(f"the worktree is unregistered but git could not delete its folder: the local branch {branch} is deleted; {left}"
+          + (f", remove it yourself (e.g. Remove-Item -LiteralPath '{quoted}' -Recurse -Force)" if exists else ""))
 
 
 def landing_fields(row):

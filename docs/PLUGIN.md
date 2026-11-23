@@ -45,10 +45,16 @@ briefing and a report; below that size it costs more than it saves. **When it de
 read; a failure log to read (Tester); a fresh review (Reviewer, always for a change to the guard, the landing or the CI); a question that
 needs reading many pages (Researcher). Parallel coders each get their own worktree.
 
-**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`, at most 3): Claude Code asks `saani auto pick --json` for
+**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`, at most 2 per project): Claude Code asks `saani auto pick --json` for
 the free slots and the next eligible issues, starts each (`saani start`), runs its coder in the background, and reviews and lands as each
 coder finishes. Landings are one at a time (the lock); a slot that frees is filled at once by a new `saani auto pick`. Issues whose likely
 files overlap are not run side by side. See `skills/auto/SKILL.md`.
+
+## The headless session of an away run (#52)
+`claude -p` stops its background tasks 10 minutes after the last turn and exits, and the away run has its coders in the background. So
+`saani auto away` starts the session with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (wait indefinitely) and the skill's away part tells it
+to keep its turn open until the coders are done. It also warns when Claude Code does not trust the main folder yet: open Claude Code there
+once and accept the dialog. The mechanics (the command by hand, the trust check, the process id) are in docs/SAANI.md, "An auto run".
 
 ## Install (checked against the Claude Code docs and `claude plugin validate`, 2026-11-22)
 This repository is both the marketplace and the plugin: `.claude-plugin/marketplace.json` lists one plugin whose source is `./`, the repo

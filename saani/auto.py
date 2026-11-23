@@ -11,10 +11,10 @@ import re
 import subprocess
 import sys
 
-from . import config, core, glance
+from . import config, core, glance, queue
 
-MAX_PARALLEL = 3          # never more issues side by side than this, whatever the settings or the machine say
-GB_PER_ISSUE = 4          # free memory one running issue is given (its tests, its tools, its subagent)
+MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
+GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
 CPUS_PER_ISSUE = 4
 ISSUE_LIMIT = 500         # open issues read
 GIT_TIMEOUT = 60
@@ -30,14 +30,15 @@ def cfg():
 # ---------------------------------------------------------------- sizing
 
 def parallel_size(configured, cpus, free_gb, running=0):
-    """How many issues an auto run keeps in flight. `configured` 0: auto-sized, min(3, cpus // 4, free GB // 4), each at least 1 (free_gb None:
-    unknown, the cores alone decide); any n >= 1 is fixed, capped at 3. The memory the `running` issues already use is given back to
-    `free_gb`, so the size is the machine's, the same at every pick."""
+    """How many issues an auto run keeps in flight, per project (another project's run has its own slots). `configured` 0: auto-sized,
+    min(2, cpus // 4), at least 1, and 1 when the free memory (the `running` issues' own memory given back) cannot hold even one issue
+    (free_gb None: unknown, the cores alone decide); any n >= 1 is fixed, capped at 2. The memory is not divided per issue: other
+    projects' worktrees use it too, and counting it would starve a second project below its own slots."""
     if configured and configured >= 1:
         return min(MAX_PARALLEL, int(configured))
     by_cpu = max(1, (cpus or 1) // CPUS_PER_ISSUE)
-    by_ram = max(1, int((free_gb + running * GB_PER_ISSUE) // GB_PER_ISSUE)) if free_gb is not None else MAX_PARALLEL
-    return min(MAX_PARALLEL, by_cpu, by_ram)
+    short_of_ram = free_gb is not None and free_gb + running * GB_PER_ISSUE < GB_PER_ISSUE
+    return min(MAX_PARALLEL, by_cpu, 1 if short_of_ram else MAX_PARALLEL)
 
 
 def free_ram_gb():
@@ -556,6 +557,20 @@ def status_text(rec, now=None):
     return "\n".join(lines)
 
 
+def away_gone(rec, alive=None):
+    """A line when an away run's process (its id written by `saani auto away`) is gone while the run is still on; else None."""
+    if rec.get("mode") != "away":
+        return None
+    try:
+        pid = int(pid_path(rec["id"]).read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if (alive or queue.alive)(pid):
+        return None
+    return (f"  WARNING: the away run's process ({pid}) is gone but the run is still on: it stopped without ending. Read the log "
+            f"build/saani-auto-{rec['id']}.log, then end the run from a terminal: saani auto off --run {rec['id']}")
+
+
 def cmd_status(args):
     rec = read_record()
     if not rec:
@@ -568,6 +583,9 @@ def cmd_status(args):
         print("no auto run is on")
         return 0
     print(status_text(rec))
+    gone = away_gone(rec)
+    if gone:
+        print(gone)
     if not args.check:
         return 0
     hit = reached(rec)
@@ -760,13 +778,67 @@ def away_command(run_id, folder, only=(), deploy=False, claude="claude"):
     return [claude, "-p", prompt, "--permission-mode", "auto", "--permission-prompts", "none"]
 
 
+WAIT_VAR = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"   # `claude -p` stops its background tasks this long after the last turn; 0 = wait for them
+
+
+def away_env(environ=None):
+    """The headless session's environment: ours, and `claude -p` waits for its background coders (#52)."""
+    return {**(os.environ if environ is None else environ), WAIT_VAR: "0"}
+
+
+def by_hand(argv, windows=None):
+    """The command to type for an away run, with the variable the started session gets (PowerShell 5.1 on Windows, else sh)."""
+    if os.name == "nt" if windows is None else windows:
+        return f"$env:{WAIT_VAR}='0'; {shown(argv)}"
+    return f"{WAIT_VAR}=0 {shown(argv)}"
+
+
+def norm_key(path):
+    """A string-only, cross-OS key for a path in Claude Code's JSON config: slashes forward, no trailing slash, case folded for drive-letter
+    paths. It never resolves anything (the config may name folders of another OS or that no longer exist), so it is not core.same_path."""
+    text = str(path).replace("\\", "/").rstrip("/")
+    return text.casefold() if os.name == "nt" or re.match(r"^[A-Za-z]:/", text) else text
+
+
+def folder_and_parents(folder):
+    """The folder's normalized key and each parent's, nearest first."""
+    key = norm_key(folder)
+    keys = [key]
+    while key.rpartition("/")[0]:
+        key = key.rpartition("/")[0]
+        keys.append(key)
+    return keys
+
+
+def claude_config_file(home=None, environ=None):
+    """Claude Code's user file: `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set, else `<home>/.claude.json`."""
+    given = (os.environ if environ is None else environ).get("CLAUDE_CONFIG_DIR")
+    return pathlib.Path(given) / ".claude.json" if given else (pathlib.Path(home) if home else pathlib.Path.home()) / ".claude.json"
+
+
+def folder_trusted(folder, home=None, environ=None):
+    """True when Claude Code's user file says the trust dialog was accepted for the folder or one of its parents; a missing or unreadable
+    file, or key, is False (fail safe). Reads only that one flag of that file; never writes it."""
+    try:
+        data = json.loads(claude_config_file(home, environ).read_text(encoding="utf-8"))
+        wanted = set(folder_and_parents(folder))
+        return any(norm_key(k) in wanted and isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True
+                   for k, v in data["projects"].items())
+    except (OSError, ValueError, AttributeError, TypeError, KeyError, RecursionError, MemoryError):
+        return False
+
+
+def pid_path(run_id):
+    return build_dir() / f"saani-auto-{run_id}.pid"
+
+
 def start_detached(argv, cwd, log, popen=subprocess.Popen):
     """Start `argv` so it outlives the session that starts it, its output appended to `log`. Windows: its own console, shown minimized
     (the owner can see the run is there) and out of the starting session's job when the job allows it; elsewhere: a new session. The
     process id."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as out:
-        common = {"cwd": str(cwd), "stdout": out, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
+        common = {"cwd": str(cwd), "stdout": out, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL, "env": away_env()}
         if os.name != "nt":
             return popen(argv, start_new_session=True, **common).pid
         info = subprocess.STARTUPINFO()
@@ -794,13 +866,21 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     exe = (which or shutil.which)("claude")
     if exe is None:
         print("saani auto away: `claude` is not on the PATH, so the run cannot start by itself. Start it by hand, in a terminal, from "
-              f"{main}:\n  {shown(argv)}")
+              f"{main}:\n  {by_hand(argv)}")
         return 2
+    if not folder_trusted(main):
+        print(f"saani auto away: WARNING: {main} is not marked as trusted in Claude Code's config, so the project's allow rules may be "
+              "ignored by the headless session. Open Claude Code interactively in that folder once and accept the trust dialog "
+              "(the run starts anyway).")
     try:
         pid = start_detached([exe] + argv[1:], main, log, popen)
     except OSError as e:
-        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {shown(argv)}")
+        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}")
         return 2
+    try:
+        pid_path(run_id).write_text(str(pid), encoding="utf-8")
+    except OSError:
+        pass
     print(f"saani auto: away {run_id} started (process {pid}), in a minimized window" if os.name == "nt" else
           f"saani auto: away {run_id} started (process {pid})")
     print(f"  log:    {log}")

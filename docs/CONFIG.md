@@ -34,7 +34,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`). Only these three keys: any other is refused, and the old `longrun` is refused with its new name, `auto` |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |
-| `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(3, cores // 4, free RAM in GB // 4), each at least 1 (macOS: cores only); `n >= 1` = fixed; never more than 3 |
+| `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(2, cores // 4), at least 1, and 1 when free RAM cannot hold one issue (4 GB; macOS: cores only); `n >= 1` = fixed; at most 2 per project (another project's run has its own 2) |
 | | `ci_attempts` | `3` | an auto run: the most `saani ci pr` rounds (read why it is red, fix, land, run it again) before the pull request is left open |
 | `[ci]` | `workflow` | `ci.yml` | the GitHub Actions workflow `saani ci pr` starts (it must accept `workflow_dispatch`) |
 | | `free_minutes` | `2000` | free Actions minutes a month for the whole account |

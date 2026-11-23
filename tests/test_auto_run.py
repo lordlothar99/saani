@@ -28,6 +28,7 @@ def world(tmp_path, monkeypatch):
     """A main checkout with a .git folder, a worktrees folder with the run's folder, an empty guard registry."""
     home = tmp_path / "home"
     home.mkdir()
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     for var in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(var, str(home))
     root = tmp_path / "webshop"
@@ -521,6 +522,120 @@ def test_saani_land_journals_the_landing(world, monkeypatch, capsys):
     assert [(r["issue"], r["kind"]) for r in auto.read_journal("r1")] == [(12, "landed")]
 
 
+def land_args(**kw):
+    return type("A", (), {"worktree": None, "keep": False, "dry_run": False, "wait": 1, "no_comment": False, **kw})()
+
+
+def stub_landing(world, monkeypatch, on_git=None):
+    root = world.root
+    calls = []
+
+    def git(*a, cwd=None, check=True):
+        calls.append(a)
+        if on_git:
+            r = on_git(a)
+            if r is not None:
+                return r
+        out = {("rev-parse", "--show-toplevel"): str(world.run), ("rev-parse", "--abbrev-ref"): "task/12-cart",
+               ("rev-parse", "--git-common-dir"): str(root / ".git"), ("rev-parse", "--short"): "abc1234"}.get(a[:2], "")
+        return subprocess.CompletedProcess(a, 0, stdout=out, stderr="") if not check else out
+    monkeypatch.setattr(core, "git", git)
+    monkeypatch.setattr(core, "take_lock", lambda *a, **k: True)
+    monkeypatch.setattr(core, "release_lock", lambda *a, **k: None)
+    monkeypatch.setattr(core, "merge_and_rebuild", lambda *a, **k: None)
+    monkeypatch.setattr(core, "queued_run", lambda *a, **k: 0)
+    monkeypatch.setattr(core, "record", lambda *a, **k: None)
+    monkeypatch.setattr(core, "restore_generated", lambda *a, **k: None)
+    monkeypatch.setattr(core, "main_checkout", lambda *a, **k: world.root)
+    monkeypatch.chdir(world.run)
+    return calls
+
+
+def test_landing_does_its_post_push_steps_before_the_worktree_is_removed(world, monkeypatch):
+    record(world)
+    order = []
+    stub_landing(world, monkeypatch)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: order.append("comment") or True)
+    monkeypatch.setattr(auto, "journal", lambda *a, **k: order.append("journal"))
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: order.append("remove"))
+    assert core.cmd_land(land_args()) == 0
+    assert order == ["journal", "comment", "remove"]
+
+
+def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(world, monkeypatch, capsys):
+    record(world)
+    order = []
+    stub_landing(world, monkeypatch)
+
+    def boom(*a, **k):
+        raise ImportError("cannot import name 'auto' from 'saani'")
+    monkeypatch.setattr(auto, "journal", boom)
+    monkeypatch.setattr(core, "mark_on_dev", boom)
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: order.append("remove"))
+    assert core.cmd_land(land_args()) == 0
+    out = capsys.readouterr().out
+    assert "next: journal the landing of #12" in out and "next: comment the commit on #12" in out and order == ["remove"]
+
+
+def failing_removal(world, monkeypatch, listed=None, name="task-12-cart", error="in use"):
+    """A landed worktree's folder whose `git worktree remove` fails; `listed` is how `git worktree list` spells that folder (None: it is
+    not registered any more). Returns (folder, the git calls)."""
+    folder = world.wt / name
+    folder.mkdir()
+    listing = f"worktree {world.root}\nbranch refs/heads/dev\n"
+    if listed:
+        listing += f"\nworktree {listed(folder)}\nbranch refs/heads/task/12-cart\n"
+
+    def on_git(a):
+        if a[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(a, 1, stdout="", stderr=error)
+        if a[:2] == ("worktree", "list"):
+            return listing
+        return None
+    return folder, stub_landing(world, monkeypatch, on_git)
+
+
+def test_a_removal_that_half_fails_deletes_the_branch_and_names_the_folder_left(world, monkeypatch, capsys):
+    folder, calls = failing_removal(world, monkeypatch, error="Directory not empty")
+    core.remove_landed_worktree(folder, "task/12-cart")
+    out = capsys.readouterr().out
+    assert ("branch", "-D", "task/12-cart") in calls and str(folder) in out and "unregistered" in out
+
+
+def test_a_removal_that_fails_with_the_worktree_still_registered_keeps_it_and_the_branch(world, monkeypatch, capsys):
+    folder, calls = failing_removal(world, monkeypatch, listed=str)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
+
+
+def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_registered(world, monkeypatch, capsys):
+    other = lambda folder: str(folder).replace("\\", "/").upper() if os.name == "nt" else str(folder).replace("\\", "/")
+    folder, calls = failing_removal(world, monkeypatch, listed=other)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
+
+
+def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
+    folder, _ = failing_removal(world, monkeypatch, name="it's a folder", error="busy")
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
+
+
+def test_git_exiting_during_the_post_push_steps_still_prints_every_next_step(world, monkeypatch, capsys):
+    record(world)
+    stub_landing(world, monkeypatch)
+
+    def exits(*a, **k):
+        raise SystemExit("git worktree list failed")
+    monkeypatch.setattr(auto, "journal", exits)
+    monkeypatch.setattr(core, "mark_on_dev", exits)
+    monkeypatch.setattr(core, "remove_landed_worktree", exits)
+    assert core.cmd_land(land_args()) == 0
+    out = capsys.readouterr().out
+    assert "next: journal the landing of #12" in out and "next: remove the worktree" in out
+    assert "next: comment the commit on #12" in out and "git worktree list failed" in out.split("next: comment")[1]
+
+
 def test_the_marker_line_is_the_guards_contract(world, capsys, tmp_path):
     other = worktree(world.root, world.wt / "auto-x1")
     assert auto.cmd_on(args(id="x1", folder=str(other))) == 0
@@ -594,6 +709,94 @@ def test_a_session_that_cannot_start_falls_back_to_the_command_by_hand(world, ca
         raise OSError("policy")
     assert auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen) == 2
     assert "could not start (policy)" in capsys.readouterr().out
+
+
+def test_the_headless_session_waits_for_its_background_coders(world):
+    seen = []
+    def popen(argv, **kw):
+        seen.append(kw)
+        return type("P", (), {"pid": 4242})()
+    auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen)
+    assert seen[0]["env"][auto.WAIT_VAR] == "0" and seen[0]["env"]["PATH"] == os.environ["PATH"]
+    assert auto.away_env({"A": "1"}) == {"A": "1", auto.WAIT_VAR: "0"}
+
+
+def test_the_command_to_start_by_hand_carries_the_variable():
+    argv = ["claude", "-p", "x"]
+    assert auto.by_hand(argv, windows=True) == "$env:CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS='0'; claude -p x"
+    assert auto.by_hand(argv, windows=False) == "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p x"
+
+
+def test_away_warns_when_claude_code_does_not_trust_the_folder_but_still_starts(world, capsys):
+    popen = lambda argv, **kw: type("P", (), {"pid": 1})()
+    home = pathlib.Path(os.environ["USERPROFILE"])
+    assert auto.folder_trusted(world.root, home) is False                      # no file
+    assert auto.cmd_away(args(only=None), which=lambda name: "claude", popen=popen) == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "trust dialog" in out and "started (process 1)" in out
+    key = str(world.root).replace("\\", "/").upper() if os.name == "nt" else str(world.root)
+    (home / ".claude.json").write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": False}}, "secret": "x"}), encoding="utf-8")
+    assert auto.folder_trusted(world.root, home) is False
+    (home / ".claude.json").write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
+    assert auto.folder_trusted(world.root, home) is True
+    assert auto.cmd_away(args(only=None, id="r2"), which=lambda name: "claude", popen=popen) == 0
+    assert "WARNING" not in capsys.readouterr().out
+
+
+def test_status_says_when_an_away_run_s_process_is_gone(world, capsys, monkeypatch):
+    record(world, mode="away")
+    assert auto.away_gone(auto.read_record()) is None                          # no pid recorded
+    auto.pid_path("r1").write_text("4242", encoding="utf-8")
+    assert auto.away_gone(auto.read_record(), alive=lambda pid: False).startswith("  WARNING")      # the injected check
+    assert auto.away_gone(auto.read_record(), alive=lambda pid: True) is None
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: False)                # the default check is queue.alive
+    assert auto.cmd_status(args()) == 0
+    out = capsys.readouterr().out
+    assert "process (4242) is gone" in out and "saani auto off --run r1" in out and "saani-auto-r1.log" in out
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: True)
+    auto.cmd_status(args())
+    assert "is gone" not in capsys.readouterr().out
+    record(world, mode="here")                                                 # a here run has no process
+    monkeypatch.setattr(auto.queue, "alive", lambda pid: False)
+    auto.cmd_status(args())
+    assert "is gone" not in capsys.readouterr().out
+
+
+def test_trust_counts_for_a_parent_folder_and_any_spelling(tmp_path):
+    home = tmp_path / "h"
+    home.mkdir()
+    def write(key, trusted=True, where=home):
+        (where / ".claude.json").write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": trusted}}}), encoding="utf-8")
+    folder = tmp_path / "acme" / "webshop"
+    posix = str(folder).replace("\\", "/")
+    parent = posix.rsplit("/", 1)[0]
+    write(parent)
+    assert auto.folder_trusted(folder, home, {}) is True                         # a parent
+    write(parent, trusted=False)
+    assert auto.folder_trusted(folder, home, {}) is False
+    write(posix + "/")
+    assert auto.folder_trusted(folder, home, {}) is True                         # trailing slash
+    write(str(folder).replace("/", "\\"))
+    assert auto.folder_trusted(folder, home, {}) is True                         # backslashes
+    write(str(tmp_path / "other"))
+    assert auto.folder_trusted(folder, home, {}) is False                        # a sibling is not a parent
+
+
+def test_trust_reads_claude_config_dir_when_set(tmp_path):
+    home, cfgdir = tmp_path / "h", tmp_path / "c"
+    home.mkdir()
+    cfgdir.mkdir()
+    folder = str(tmp_path / "webshop")
+    (cfgdir / ".claude.json").write_text(json.dumps({"projects": {folder: {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
+    assert auto.folder_trusted(folder, home, {}) is False                        # home has no file
+    assert auto.folder_trusted(folder, home, {"CLAUDE_CONFIG_DIR": str(cfgdir)}) is True
+
+
+def test_a_hostile_config_file_is_not_trusted_and_does_not_crash(tmp_path):
+    (tmp_path / ".claude.json").write_text("[" * 200000, encoding="utf-8")          # RecursionError in the parser
+    assert auto.folder_trusted(tmp_path / "x", tmp_path, {}) is False
+    (tmp_path / ".claude.json").write_text('{"projects": []}', encoding="utf-8")
+    assert auto.folder_trusted(tmp_path / "x", tmp_path, {}) is False
 
 
 def test_away_refuses_a_folder_outside_the_worktrees(world, tmp_path):

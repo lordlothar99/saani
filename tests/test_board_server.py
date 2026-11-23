@@ -129,6 +129,23 @@ def test_a_plugin_agent_is_one_roster_row_with_its_role_and_the_page_gives_it_th
     assert 'String(name || "").split(":").pop().toLowerCase()' in page and "ROLE[roleOf(w.role)]" in page
 
 
+def test_two_running_subagents_of_one_role_keep_both_runs_with_their_issues_and_the_map_draws_a_figure_each():
+    """#53: the map showed one Coder on the last run's issue. The server keeps every run, with its description and its issue; the page makes
+    one figure per run and relies on `issue`, `description` and the pull request's number, title, url and ci."""
+    sessions = [{"name": "webshop", "subagents": [{"type": "coder", "description": "#3 guard", "state": "working"},
+                                                  {"type": "coder", "description": "#33 comments", "state": "working"},
+                                                  {"type": "coder", "description": "tidy up", "state": "working"},
+                                                  {"type": "coder", "description": "#9 old", "state": "done"}]}]
+    row = {r["name"]: r for r in fp.roster([{"name": "coder", "description": "writes code"}], sessions)}["coder"]
+    assert [(x["description"], x["issue"]) for x in row["running"]] == [("#3 guard", 3), ("#33 comments", 33), ("tidy up", None)]
+    assert row["runs"] == 4 and all(x["session"] == "webshop" and x["state"] == "working" for x in row["running"])
+    pr = fp.pr_row({"number": 7, "title": "dev into main", "url": "https://example.test/pull/7", "headRefOid": "x", "statusCheckRollup": []}, {})
+    assert {"number", "title", "url", "ci"} <= set(pr) and {"state", "text"} <= set(pr["ci"])
+    page = fp.MAP_FILE.read_text(encoding="utf-8")
+    assert "running.forEach((x, k) => {" in page and "function markLive(" in page and "All ${w.name} runs" in page and "function prPanel()" in page
+    assert json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))["cards"]                  # the map's fallback sample still loads
+
+
 def test_the_columns_have_short_names_and_their_explanations_are_tooltips():
     """Ready, Building, Testing, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
     assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "To close", "Deployed"]

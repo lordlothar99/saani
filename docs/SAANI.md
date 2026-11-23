@@ -71,7 +71,7 @@ flowchart TB
 |---|---|
 | `saani start <n>` | Reads issue `n`'s Type (refused without one), makes `<wt>/<n>-<slug>` on `<type>/<n>-<slug>` from `origin/<integration>` (or reuses the issue's existing branch), makes `build/` and copies in the newest timing report, switches on the commit-msg hook for that worktree when the project has `.githooks/`, assigns the issue to the owner. `--slug` names it, `--no-assign` skips the assignment, `--no-comment` skips the `Started` comment (branch, worktree folder name). Warns when the issue has no milestone. |
 | `saani start <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: the landing tests against production, the branch pushed, the pull request into production opened. |
-| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, the landing tests, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the worktree and its local branch removed, the landing commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
+| `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, the landing tests, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the landing journaled, commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too), then the worktree and its local branch removed (all of it runs before the removal, which deletes the worktree's own files; a step that fails prints a `next:` line and the others still run). When `git worktree remove` fails, the message says what is left: still registered (the worktree and branch stay), or unregistered with a folder left behind (the local branch is deleted and the folder named). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
 | `saani comment <n> <kind> [--text T] [--field K=V ...] [--dry-run]` | Posts a status comment on issue `n` and applies the kind's label change (Status comments, below). |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. First, a warning when the worktrees folder is outside every working directory of a Claude Code session of the project (not inside the main checkout, and under no `permissions.additionalDirectories` entry of `.claude/settings.json`, `.claude/settings.local.json` or the user's `settings.json`, in `CLAUDE_CONFIG_DIR` when set), with the line to add: without it every `cd` into a worktree, the agents' included, asks the owner. It only reads those files; a relative entry is taken from the main checkout (Claude Code does not document its base, so the warning gives an absolute path). |
 | `saani auto pick [--json] [--limit N] [--only N ...]` | The issues an auto run may take now, in the run's order (milestone: versions ascending, then other named milestones alphabetically, then none; then the Type whose `[issues] types` prefix is `bug`; then the number; up to 500 open issues are read; `--only` takes just those numbers, before the overlap check), read from one `gh issue list` and each issue's At a glance table: `Auto` yes or partly (no table: eligible, flagged), not blocked, no needs-the-owner row, none of the `answer`, `act`, `idea`, `in_dev` or `in_main` labels, not already in a worktree ("already in a worktree") or on a worker branch ("has a worker branch"), and a Type from `[issues] types`. The others are listed with their reason (`no Type`, `blocked by #n` (the still-open blockers), `overlaps #m (path)`...). A `gh` failure stops it with gh's message, never an empty list; options `--json`, `--limit` and `--only` need `pick`, `--id` does not go with it. It also says the free slots (`[auto] parallel` less the issues in worktrees). `--json`: `{slots, parallel, running, eligible, skipped}`. A script, no model, changes nothing. |
@@ -103,7 +103,8 @@ flowchart TB
 - **Generated files** (`[land] generated`, rebuilt by `[land] rebuild`) are rebuilt at landing and committed there, so workers never commit
   them.
 - **Landing tests red, or a push refused** (the integration branch moved): the landing merges again and retries, the landing tests
-  again only when the new commits touch the branch's files, at most `push_attempts` times; otherwise it stops and nothing reaches the integration branch.
+  again only when the new commits touch the branch's files, at most `push_attempts` times; otherwise it stops and nothing reaches the
+  integration branch.
 - **Landing while a pull request is open**: a finished task lands at once. Each landing makes that pull request's CI stale; the CI runs once
   more right before the merge, and that run is the one that counts.
 - **The measure**: each landing appends a line to `build/saani-landings.jsonl` of the main checkout; `saani status` sums it, `saani kpis`
@@ -154,8 +155,12 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above. Each lifecycle step is a zone along a road from START
   (bottom left) to END (top right), with branches (to deploy or to close) and the ways back (tests failed, CI red, needs you, hotfix, not
   planned). Each issue is a block (its colour is its milestone; a ring when it needs the owner; a pennant for whether an auto run can take
-  it); each worker is a figure. Hover for a summary, click for the full panel (context, acceptance criteria, history, auto fit, the
-  prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+  it); each worker is a figure: one per running subagent (two coders at once are two figures, each on its own issue; an idle role is one
+  figure in the camp, and a worker's panel lists all the runs of its role). The release pull request is the harvester: hover for its CI,
+  click to open its link, the issues it carries and a prompt for the whole PR. Hover for a summary, click for the full panel (context,
+  acceptance criteria, history, auto fit, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+- While Saani does not answer, the map keeps the last data on screen, shows "Stale" (since when) and asks less often (every 10, 20, 40,
+  then 60 s, back to 5 s once it answers). A hidden browser tab stops asking and pauses the animations.
 - Both pages have a top bar with the page switch (Map · Kanban), the project selector (a dot and a count when something waits for the owner in that project; the choice is in the address, `#acme-webshop`, so a bookmark opens it) and a refresh, and read the same `/api/state`.
 - The map is one HTML file (`saani/map.html`) that also works as a published artifact: it reads `/api/state`, and falls back to
   `mock-state.json` beside it. Its data: [map-data-contract.md](map-data-contract.md).
@@ -255,13 +260,16 @@ A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Start
 asked, what blocks the issue); the map and the auto run read it through that one parser.
 
 ### An auto run
-An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM, at most 3). Each
-issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`, the coder (in the background, so several issues
-progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a time (the lock). Claude Code asks `saani auto pick
---json` whenever a slot is free and takes the first eligible issue, so an issue that lands is replaced at once and the list is never a
-stale one. Two issues whose likely files overlap (the paths the issue body names between backticks, against the files the running
-worktrees changed and the other picked issues) are not run side by side: the later one waits, and `pick` says "overlaps #m (path)". The
-check is best effort and narrow: only paths named between backticks count (a folder such as `docs/` does not; a bare `saani.toml` is the root file only), and there is no fallback on title words, so an issue that names no paths never waits on overlap. The slots are sized from the machine, not from the memory the running issues already use; a conflict at landing goes back to the coder of that issue. `saani kpis` gives the cost per issue, role and model.
+An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM; at most 2 per
+project, another project's run has its own 2). Each issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`,
+the coder (in the background, so several issues progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a
+time (the lock). Claude Code asks `saani auto pick --json` whenever a slot is free and takes the first eligible issue, so an issue that
+lands is replaced at once and the list is never a stale one. Two issues whose likely files overlap (the paths the issue body names between
+backticks, against the files the running worktrees changed and the other picked issues) are not run side by side: the later one waits, and
+`pick` says "overlaps #m (path)". The check is best effort and narrow: only paths named between backticks count (a folder such as `docs/`
+does not; a bare `saani.toml` is the root file only), and there is no fallback on title words, so an issue that names no paths never waits
+on overlap. The slots are sized from the machine, not from the memory the running issues already use; a conflict at landing goes back to
+the coder of that issue. `saani kpis` gives the cost per issue, role and model.
 
 **Two sub-modes: interactive and away** (#50). `/saani:auto here` runs in the owner's session: the questions any time,
 `saani auto on --here` writes the run's record (stop rules, journal, report) without the guard's switch, so the session stays in present
@@ -270,11 +278,17 @@ folder> [--only N ...] [--deploy]` starts a headless session itself, detached fr
 new session elsewhere), in the project's main folder so its committed settings apply: `claude -p "/saani:auto run <id> --folder <path>"
 --permission-mode auto --permission-prompts none`, its output in `build/saani-auto-<id>.log`. That session runs `saani auto on`, so the
 guard registers it and never the owner's. Without `claude` on the PATH, or when the session cannot start, `saani auto away` exits 2 and
-prints the command to start by hand. With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides every call of
-a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after
-repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none` every
-such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
-classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
+prints the command to start by hand. The session is started with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (the hand command carries it:
+`$env:CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS='0'; claude -p ...` in PowerShell), because `claude -p` otherwise stops its background coders
+10 minutes after its last turn and exits (#52). Before it starts, `saani auto away` warns (it does not refuse) when Claude Code's config
+(`$CLAUDE_CONFIG_DIR/.claude.json` if set, else `~/.claude.json`) does not show the main folder, or a parent, as trusted
+(`hasTrustDialogAccepted`; it reads that flag only, never writes the file): open Claude Code in the folder once and accept the trust
+dialog. It records the process id in `build/saani-auto-<id>.pid`, and `saani auto status` says when that process is gone while the run is
+still on (then read the log and `saani auto off --run <id>`). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the
+guard decides every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code
+falls back to asking after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With
+`--permission-prompts none` every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's;
+`--permission-mode auto` lets Claude Code's classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
 
 **The run's record and its stop rules.** `saani auto on` is the last step before the work (after the owner's questions); `saani auto off --run <id>` the owner's, from a terminal, after the report. The stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied into the run's record at `on`:

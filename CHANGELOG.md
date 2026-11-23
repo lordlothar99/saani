@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.5.0 (2026-11-23)
+- Plugin 0.5.0: auto run fixes (at most 2 issues in flight per project, `saani land` after the worktree removal, an away run's
+  headless session that waits for its coders), and the map's crew: one figure per running subagent.
+- Map: one figure per running subagent, each on its own issue (several coders no longer show as one figure on the last one's issue), and
+  the panel lists all the runs of the role; clicking the harvester opens its release PR; the map says "Stale" and retries less often while
+  Saani does not answer, and a hidden tab stops polling; the ground is sharper at high zoom; Task and Feature colours and the deploy
+  route's bend changed. The roster's runs carry the `issue` they name (issue #53).
+- Away run: the headless session no longer stops its background coders 10 minutes after its last turn and exits. `saani auto away`
+  starts it with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (the command to start by hand carries it too) and the skill tells it to keep its
+  turn open until the coders are done. `saani auto away` warns when Claude Code does not mark the project's folder as trusted (its allow
+  rules may be ignored), and `saani auto status` says when an away run's process is gone while the run is still on (issue #52).
+- `saani land` journals, comments `On dev` and labels `in-dev` before it removes the worktree, and a failed `git worktree remove` says
+  what is left (issue #49).
+- An auto run keeps at most 2 issues in flight per project (was 3), and another project's worktrees no longer take its slots: the free-RAM
+  guard no longer divides memory per issue, it only drops a run to 1 when memory cannot hold one issue (issue #51).
+
 ## 0.4.0 (2026-11-23)
 - Plugin 0.4.0: auto runs end to end (the guard, stop rules, a two-part launch with the run headless, `saani merge`, `saani deploy`),
   fewer approval prompts (a relative `additionalDirectories` line, agents that never `cd`, `saani test --worktree`), status comments on

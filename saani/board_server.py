@@ -502,7 +502,9 @@ def roster(defined, sessions):
             entry = seen[sub["type"]]
             entry["runs"] += 1
             if sub["state"] != "done":
-                entry["running"].append({"description": sub["description"], "session": s.get("name"), "state": sub["state"]})
+                ref = ISSUE_REF.search(sub["description"] or "")       # the map draws one figure per run, on this issue (#53)
+                entry["running"].append({"description": sub["description"], "session": s.get("name"), "state": sub["state"],
+                                         "issue": int(ref.group(1)) if ref else None})
     rows = [{"name": d["name"], "kind": "defined", "model": d.get("model", ""), "what": d.get("description", ""),
              "file": d.get("file", f".claude/agents/{d['name']}.md")} for d in defined]
     names = {r["name"].lower() for r in rows}
