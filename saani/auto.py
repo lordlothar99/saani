@@ -13,7 +13,7 @@ import sys
 
 from . import config, core, glance
 
-MAX_PARALLEL = 3          # never more issues side by side than this, whatever the settings or the machine say
+MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
 GB_PER_ISSUE = 4          # free memory one running issue is given (its tests, its tools, its subagent)
 CPUS_PER_ISSUE = 4
 ISSUE_LIMIT = 500         # open issues read
@@ -30,14 +30,15 @@ def cfg():
 # ---------------------------------------------------------------- sizing
 
 def parallel_size(configured, cpus, free_gb, running=0):
-    """How many issues an auto run keeps in flight. `configured` 0: auto-sized, min(3, cpus // 4, free GB // 4), each at least 1 (free_gb None:
-    unknown, the cores alone decide); any n >= 1 is fixed, capped at 3. The memory the `running` issues already use is given back to
-    `free_gb`, so the size is the machine's, the same at every pick."""
+    """How many issues an auto run keeps in flight, per project (another project's run has its own slots). `configured` 0: auto-sized,
+    min(2, cpus // 4), at least 1, and 1 when the free memory (the `running` issues' own memory given back) cannot hold even one issue
+    (free_gb None: unknown, the cores alone decide); any n >= 1 is fixed, capped at 2. The memory is not divided per issue: other
+    projects' worktrees use it too, and counting it would starve a second project below its own slots."""
     if configured and configured >= 1:
         return min(MAX_PARALLEL, int(configured))
     by_cpu = max(1, (cpus or 1) // CPUS_PER_ISSUE)
-    by_ram = max(1, int((free_gb + running * GB_PER_ISSUE) // GB_PER_ISSUE)) if free_gb is not None else MAX_PARALLEL
-    return min(MAX_PARALLEL, by_cpu, by_ram)
+    short_of_ram = free_gb is not None and free_gb + running * GB_PER_ISSUE < GB_PER_ISSUE
+    return min(MAX_PARALLEL, by_cpu, 1 if short_of_ram else MAX_PARALLEL)
 
 
 def free_ram_gb():

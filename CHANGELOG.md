@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- An auto run keeps at most 2 issues in flight per project (was 3), and another project's worktrees no longer take its slots: the free-RAM
+  guard no longer divides memory per issue, it only drops a run to 1 when memory cannot hold one issue (issue #51).
 
 ## 0.4.0 (2026-11-23)
 - Plugin 0.4.0: auto runs end to end (the guard, stop rules, a two-part launch with the run headless, `saani merge`, `saani deploy`),

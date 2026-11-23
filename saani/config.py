@@ -46,7 +46,7 @@ class Config:
     deploy_key: str = ""                         # the PATH of the deploy key, never its content: only passed through
     deploy_timeout_minutes: float = 30
     board_port: int = 8771
-    parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory, capped at 3
+    parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory; at most 2 per project
     ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
