@@ -185,15 +185,56 @@ def commit_subject(sha):
     return message.strip().splitlines()[0].strip() if message.strip() else None
 
 
-def commit_lines(row):
-    """The subjects of the commits that landed the issue (its `On dev` comments), de-duplicated, without the one that repeats the title."""
+def is_merge_subject(subject):
+    return (subject or "").startswith("Merge ")
+
+
+def pr_commits(pr):
+    """The non-merge commits of a pull request (`gh pr view --json commits`), oldest first: [{"sha", "subject", "message"}].
+    A merge is known by git when the commit is local, else by git's own subject ("Merge ...")."""
+    commits = [{"sha": m.get("oid") or "", "subject": m.get("messageHeadline", ""), "message": f"{m.get('messageHeadline', '')}\n{m.get('messageBody', '')}"}
+               for m in pr.get("commits", [])]
+    merges = set()
+    shas = [c["sha"] for c in commits if c["sha"]]
+    for i in range(0, len(shas), 50):                                # in chunks: a long command line fails on Windows
+        out = git("rev-list", "--merges", "--no-walk=unsorted", *shas[i:i + 50])
+        merges.update((out or "").split())
+    return [c for c in commits if c["sha"] not in merges and not is_merge_subject(c["subject"])]
+
+
+def git_commits(number):
+    """The non-merge commits on origin/<production> and origin/<integration> whose message refs the issue, oldest first. None: git failed."""
+    c = cfg()
+    out = git("log", "--no-merges", "--reverse", "--format=%H%x1f%s%x1f%B%x1e", "-E", f"--grep=#{number}([^0-9]|$)",
+              f"origin/{c.production}", f"origin/{c.integration}")
+    if out is None:
+        return None
+    found = []
+    for record in out.split("\x1e"):
+        parts = record.strip("\n").split("\x1f", 2)
+        if len(parts) == 3 and number in kpis.issues_in(parts[2]):
+            found.append({"sha": parts[0], "subject": parts[1], "message": parts[2]})
+    return found
+
+
+def commit_lines(row, pool=None):
+    """The subjects of the non-merge commits that ref the issue (`refs #n`, as kpis.issues_in reads them), oldest first, without repeats
+    and without the one that repeats the title. `pool`: the pull request's commits (`pr_commits`); else git's log of the production and
+    integration branches. Only when that finds nothing, the commits named by the issue's `On dev` comments (a squash-merged repository);
+    a merge commit is never shown."""
+    number = row.get("number")
+    found = [c for c in pool if number in kpis.issues_in(c["message"])] if pool is not None else git_commits(number)
+    subjects = [c["subject"] for c in found or []]
+    if not subjects:
+        for sha in commit_shas(row.get("comments")):
+            subject = commit_subject(sha)
+            if subject is None:
+                print(f"warning: #{number}: commit {sha} not found, left out", file=sys.stderr)
+            elif not is_merge_subject(subject):
+                subjects.append(subject)
     title = (row.get("title") or "").strip().casefold()
     out, seen = [], {title}
-    for sha in commit_shas(row.get("comments")):
-        subject = commit_subject(sha)
-        if subject is None:
-            print(f"warning: #{row.get('number')}: commit {sha} not found, left out", file=sys.stderr)
-            continue
+    for subject in subjects:
         if subject.casefold() not in seen:
             seen.add(subject.casefold())
             out.append(subject)
@@ -240,8 +281,9 @@ def collect(args):
     if not rows:
         return heading, [], pr
     types = read_types()
+    pool = None if pr is None or short else pr_commits(pr)
     issues = [{"number": r["number"], "title": r.get("title", ""), "body": r.get("body") or "", "type": types.get(r["number"]),
-               "commits": [] if short else commit_lines(r)} for r in rows]
+               "commits": [] if short else commit_lines(r, pool)} for r in rows]
     return heading, issues, pr
 
 

@@ -430,3 +430,80 @@ def test_release_create_needs_exactly_one_notes_source():
         create("0.3.0")
     with pytest.raises(SystemExit, match="one of"):
         create("0.3.0", "--milestone", "m", "--from-pr", "1")
+
+
+# ---------------------------------------------------------------- the commit lines come from the log, not from the landed tip
+
+COMMITS = [   # oldest first: (sha, subject, message, is a merge)
+    ("1111111", "Cart: first cut", "Cart: first cut\n\nrefs #3\nWhy: x\nUndo: y", False),
+    ("2222222", "Both: shared helper", "Both: shared helper\n\nrefs #3, #1\nWhy: x", False),
+    ("3333333", "Merge remote-tracking branch 'origin/dev' into feat/3-cart", "Merge remote-tracking branch 'origin/dev' into feat/3-cart\n\nrefs #3", True),
+    ("4444444", "Cart: last small fix", "Cart: last small fix\n\nrefs #3", False),
+    ("5555555", "Unrelated #30 thing", "Unrelated #30 thing", False),
+]
+
+
+def fake_log(monkeypatch, commits=COMMITS, empty=False):
+    """git log --no-merges --grep=#n over COMMITS (what git would find); `rev-list --merges` knows the merges."""
+    seen = []
+
+    def git(*a):
+        seen.append(a)
+        if a[0] == "log" and "-1" not in a:                               # `log -1 %s <sha>` is the subject lookup
+            if empty:
+                return ""
+            n = a[a.index("-E") + 1].removeprefix("--grep=#").split("(")[0]
+            return "".join(f"{s}\x1f{subj}\x1f{msg}\x1e\n" for s, subj, msg, merge in commits if not merge and f"#{n}" in msg)
+        if a[0] == "rev-list":
+            return "\n".join(s for s, _, _, merge in commits if merge and s in a)
+        return LOCAL.get(a[-1])
+    monkeypatch.setattr(notes, "git", git)
+    return seen
+
+
+def test_the_commit_lines_are_the_non_merge_commits_that_ref_the_issue_not_the_on_dev_tip(monkeypatch, capsys):
+    LOCAL["3333333"] = COMMITS[2][1]                                      # the On dev comment names the merge tip
+    seen = fake_log(monkeypatch)
+    monkeypatch.setattr(notes, "gh", FakeGh(rows=with_comments({3: [on_dev("3333333")]})))
+    assert run("1.0") == 0
+    out = capsys.readouterr().out
+    assert "  - Cart: first cut\n  - Both: shared helper\n  - Cart: last small fix\n" in out          # oldest first
+    assert "Merge remote-tracking" not in out and "Unrelated" not in out
+    log = next(a for a in seen if a[0] == "log")
+    assert "--no-merges" in log and "origin/main" in log and "origin/dev" in log and "Why:" not in out
+
+
+def test_a_commit_that_refs_two_issues_is_under_both(monkeypatch, capsys):
+    fake_log(monkeypatch)
+    monkeypatch.setattr(notes, "gh", FakeGh())
+    assert run("1.0") == 0
+    out = capsys.readouterr().out
+    assert "- #3 Cart total: The cart shows the total.\n  - Cart: first cut\n  - Both: shared helper\n" in out
+    assert "- #1 Wishlist\n  - Both: shared helper\n" in out
+
+
+def test_the_on_dev_comments_are_only_a_fallback_when_git_finds_nothing(monkeypatch, capsys):
+    LOCAL.update({"abc1234": "Squashed: the cart", "3333333": COMMITS[2][1]})
+    fake_log(monkeypatch, empty=True)
+    monkeypatch.setattr(notes, "gh", FakeGh(rows=with_comments({3: [on_dev("abc1234"), on_dev("3333333")]})))
+    assert run("1.0") == 0
+    out = capsys.readouterr().out
+    assert "  - Squashed: the cart\n" in out and "Merge remote-tracking" not in out
+
+
+def test_pr_commit_lines_are_the_prs_non_merge_commits_that_ref_the_issue(monkeypatch, capsys):
+    pr = {"body": "", "commits": [{"oid": s, "messageHeadline": subj, "messageBody": msg.split("\n", 1)[1] if "\n" in msg else ""}
+                                   for s, subj, msg, _ in COMMITS]}
+    fake_log(monkeypatch)
+    monkeypatch.setattr(notes, "gh", FakeGh(pr=pr))
+    assert run("--pr", "12") == 0
+    out = capsys.readouterr().out
+    assert "- #3 Cart total: The cart shows the total.\n  - Cart: first cut\n  - Both: shared helper\n  - Cart: last small fix\n" in out
+    assert "Merge remote-tracking" not in out
+
+
+def test_a_merge_not_known_to_git_is_still_dropped_by_its_subject(monkeypatch):
+    monkeypatch.setattr(notes, "git", lambda *a: None)                    # nothing is local
+    pr = {"commits": [{"oid": "a" * 40, "messageHeadline": "Merge branch 'dev' into x", "messageBody": "refs #3"},
+                      {"oid": "b" * 40, "messageHeadline": "Real work", "messageBody": "refs #3"}]}
+    assert [c["subject"] for c in notes.pr_commits(pr)] == ["Real work"]
