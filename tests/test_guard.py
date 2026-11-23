@@ -385,6 +385,26 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
         assert (decision, code) == ("deny", "secret"), (t, name, reason)
 
 
+@pytest.mark.parametrize("name", ["{home}/.claude.json", "{home}/.claude/settings.json", "{home}/.claude/.credentials.json",
+                                  "{home}/.claude/projects/acme-webshop/tool-results/x.txt", "{home}/.claude", "~/.claude/settings.json",
+                                  "{home}/AppData/Roaming/npm/etc/npmrc", "putty.ppk", "release.jks", "app.keystore", "vault.kdbx",
+                                  "{home}/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt",
+                                  "{home}/.local/share/powershell/PSReadLine/ConsoleHost_history.txt", "{main}/.git/config",
+                                  "{work}/.git./config", "{main}/.git/config:x", ".git/config"])
+def test_more_secrets_are_refused_to_read(ctx, name):
+    decision, reason, code, _ = tool(ctx, "Read", file_path=name)
+    assert (decision, code) == ("deny", "secret"), (name, reason)
+
+
+def test_claude_s_memory_and_a_project_s_own_claude_folder_are_no_secret(ctx):
+    assert tool(ctx, "Read", file_path="{home}/.claude/projects/acme-webshop/memory/MEMORY.md")[0] == "allow"
+    assert tool(ctx, "Read", file_path="{work}/.claude/settings.json")[0] == "allow"
+    assert tool(ctx, "Read", file_path="{work}/.git/HEAD")[0] == "allow"
+    assert sh(ctx, "cat ~/.claude/settings.json")[2] == "secret"
+    assert sh(ctx, "cat {main}/.git/config")[2] == "secret"
+    assert sh(ctx, "git status")[0] == "allow"
+
+
 @pytest.mark.parametrize("command", ["cat .env", "head {home}/.ssh/id_ed25519", "grep x .env.local", "cat server.pem",
                                      "git add .env", "git show HEAD:.env", "git diff -- config/credentials.yml", "cat .envrc",
                                      "diff a.txt api_token.txt", "python -m pytest -q {work}/.env",
@@ -521,12 +541,12 @@ def test_edits_are_allowed_only_in_the_worktrees_the_run_s_folder_and_temp(ctx):
 @pytest.mark.parametrize("path", ["{work}/saani/guard.py", "{work}/saani.toml", "{work}/hooks/hooks.json", "{work}/hooks/other.sh",
                                   "{work}/.claude/settings.json", "{work}/.claude/settings.local.json", "{work}/.claude/agents/x.md",
                                   "{work}/.git", "{work}/.githooks/commit-msg", "{work}/.mcp.json", "{work}/CLAUDE.md",
-                                  "{work}/src/CLAUDE.md", "{temp}/saani/guard.py", "{temp}/.git/config", "{home}/.saani/auto/x.json",
+                                  "{work}/src/CLAUDE.md", "{temp}/saani/guard.py", "{temp}/.git/HEAD", "{home}/.saani/auto/x.json",
                                   "{home}/.saani/projects.toml", "{main}/saani.toml", "{main}/.git/hooks/pre-commit",
                                   "{work}/.github/workflows/ci.yml", "{work}/.github/actions/setup/action.yml", "{work}/.github/CODEOWNERS",
                                   "{work}/CODEOWNERS", "{work}/docs/CODEOWNERS", "{work}/.github/dependabot.yml", "{work}/CLAUDE.local.md",
-                                  "{work}/.git./config", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml",
-                                  "{work}/.gitignore", "{work}/src/.gitignore", "{work}/CLAUDE.md:stream", "{work}/.git:x/config",
+                                  "{work}/.git./HEAD", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml",
+                                  "{work}/.gitignore", "{work}/src/.gitignore", "{work}/CLAUDE.md:stream", "{work}/.git:x/HEAD",
                                   "{work}/saani.toml::$DATA", "{work}/.github/workflows:s/ci.yml"])
 def test_protected_files_are_never_edited_in_an_auto_run(ctx, path):
     decision, reason, code, _ = tool(ctx, "Write", file_path=path, content="x")

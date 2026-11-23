@@ -299,17 +299,33 @@ def context(cwd, st):
 
 # ---------------------------------------------------------------- secrets and protected files
 
-STRONG_NAMES = {".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass", ".envrc", ".git-credentials", "hosts.yml"}
-SECRET_DIRS = {".ssh", ".gnupg", ".kube"}
-KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+STRONG_NAMES = {".netrc", "_netrc", ".npmrc", "npmrc", ".pypirc", ".pgpass", ".envrc", ".git-credentials", "hosts.yml", ".claude.json",
+                "consolehost_history.txt"}
+SECRET_DIRS = {".ssh", ".gnupg", ".kube", "psreadline"}
+KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk", ".jks", ".keystore", ".kdbx")
 KEY_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
 
 
+def home_claude(c):
+    """True for a path inside ~/.claude/ (Claude Code's own settings, sessions, tool results), but its projects' memory folders."""
+    if not os.path.isabs(c):
+        return False
+    home = os.path.join(os.path.expanduser("~"), ".claude")
+    for base in {os.path.normcase(os.path.normpath(home)), norm(home)}:
+        p = os.path.normcase(os.path.normpath(c))
+        if inside(p, base):
+            rel = [x for x in re.split(r"[\\/]+", p[len(base):]) if x]
+            return not (len(rel) >= 3 and rel[0] == "projects" and rel[2] == "memory")
+    return False
+
+
 def secret_name(raw, resolved=None, strict=True):
-    """True when the path names a secret: .env, .env.*, .envrc, keys (*.pem, *.key, *.p12, *.pfx, id_rsa*, id_ed25519*...), anything with
-    "credentials" in its name, .netrc, .npmrc, .pypirc, .pgpass, .git-credentials, any hosts.yml, .docker/config.json, anything under
-    .ssh/, .gnupg/, .kube/ or /proc/, a name with "secret" or "token" in it. Not `strict` (a word of a shell command that may not be a file,
-    like a branch name): the "secret"/"token" rule needs a dot in the name or an existing file."""
+    """True when the path names a secret: .env, .env.*, .envrc, keys (*.pem, *.key, *.p12, *.pfx, *.ppk, *.jks, *.keystore, *.kdbx,
+    id_rsa*, id_ed25519*...), anything with "credentials" in its name, .netrc, .npmrc and npmrc, .pypirc, .pgpass, .git-credentials, any
+    hosts.yml, .docker/config.json, .git/config (tokens in remote URLs), ~/.claude.json and ~/.claude/ (but its projects' memory),
+    PowerShell's history (PSReadLine/, ConsoleHost_history.txt), anything under .ssh/, .gnupg/, .kube/ or /proc/, a name with "secret" or
+    "token" in it. Not `strict` (a word of a shell command that may not be a file, like a branch name): the "secret"/"token" rule needs a
+    dot in the name or an existing file."""
     for c in (raw, resolved):
         if not c:
             continue
@@ -319,7 +335,9 @@ def secret_name(raw, resolved=None, strict=True):
         parts = [x for x in low.split("/") if x]
         if not parts:
             continue
-        if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"]:
+        if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"] or home_claude(str(c)):
+            return True
+        if [x.split(":")[0].rstrip(". ") for x in parts[-2:]] == [".git", "config"]:      # Windows: `.git./config` is .git/config
             return True
         name = parts[-1].split(":")[0].rstrip(". ") or parts[-1]       # Windows: `.env::$DATA` and `.env.` are `.env`
         if name == ".env" or name.startswith(".env.") or name in STRONG_NAMES or "credentials" in name:
