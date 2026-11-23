@@ -798,15 +798,31 @@ def norm_key(path):
     return text.casefold() if os.name == "nt" or re.match(r"^[A-Za-z]:/", text) else text
 
 
-def folder_trusted(folder, home=None):
-    """True when Claude Code's user file (`~/.claude.json`) says the folder's trust dialog was accepted; a missing or unreadable file, or
-    key, is False. Reads only that one flag of that file; never writes it."""
+def folder_and_parents(folder):
+    """The folder's normalized key and each parent's, nearest first."""
+    key = norm_key(folder)
+    keys = [key]
+    while key.rpartition("/")[0]:
+        key = key.rpartition("/")[0]
+        keys.append(key)
+    return keys
+
+
+def claude_config_file(home=None, environ=None):
+    """Claude Code's user file: `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set, else `<home>/.claude.json`."""
+    given = (os.environ if environ is None else environ).get("CLAUDE_CONFIG_DIR")
+    return pathlib.Path(given) / ".claude.json" if given else (pathlib.Path(home) if home else pathlib.Path.home()) / ".claude.json"
+
+
+def folder_trusted(folder, home=None, environ=None):
+    """True when Claude Code's user file says the trust dialog was accepted for the folder or one of its parents; a missing or unreadable
+    file, or key, is False (fail safe). Reads only that one flag of that file; never writes it."""
     try:
-        data = json.loads((pathlib.Path(home) if home else pathlib.Path.home()).joinpath(".claude.json").read_text(encoding="utf-8"))
-        projects = data.get("projects")
-        want = norm_key(folder)
-        return any(norm_key(k) == want and isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True for k, v in projects.items())
-    except (OSError, ValueError, AttributeError, TypeError):
+        data = json.loads(claude_config_file(home, environ).read_text(encoding="utf-8"))
+        wanted = set(folder_and_parents(folder))
+        return any(norm_key(k) in wanted and isinstance(v, dict) and v.get("hasTrustDialogAccepted") is True
+                   for k, v in data["projects"].items())
+    except (OSError, ValueError, AttributeError, TypeError, KeyError, RecursionError, MemoryError):
         return False
 
 
@@ -814,14 +830,14 @@ def pid_path(run_id):
     return build_dir() / f"saani-auto-{run_id}.pid"
 
 
-def process_alive(pid, run=subprocess.run):
+def process_alive(pid, run=subprocess.run, windows=None):
     """Whether a process with this id exists (standard library only)."""
-    if os.name == "nt":
+    if os.name == "nt" if windows is None else windows:
         try:
-            out = run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30).stdout
-        except (OSError, subprocess.SubprocessError):
+            out = run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, timeout=30).stdout   # bytes: the OEM code page
+            return re.search(rf"\b{pid}\b".encode(), out) is not None
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError):
             return True                                                         # cannot tell: say nothing
-        return re.search(rf"\b{pid}\b", out) is not None
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -868,9 +884,9 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
               f"{main}:\n  {by_hand(argv)}")
         return 2
     if not folder_trusted(main):
-        print(f"saani auto away: WARNING: Claude Code does not trust {main} yet, so a headless session there ignores the project's allow "
-              "rules and every tool call is refused. Open Claude Code interactively in that folder once and accept the trust dialog, "
-              "then start the run again (the run starts anyway).")
+        print(f"saani auto away: WARNING: {main} is not marked as trusted in Claude Code's config, so the project's allow rules may be "
+              "ignored by the headless session. Open Claude Code interactively in that folder once and accept the trust dialog "
+              "(the run starts anyway).")
     try:
         pid = start_detached([exe] + argv[1:], main, log, popen)
     except OSError as e:

@@ -29,6 +29,7 @@ def world(tmp_path, monkeypatch):
     """A main checkout with a .git folder, a worktrees folder with the run's folder, an empty guard registry."""
     home = tmp_path / "home"
     home.mkdir()
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     for var in ("HOME", "USERPROFILE"):
         monkeypatch.setenv(var, str(home))
     root = tmp_path / "webshop"
@@ -651,6 +652,56 @@ def test_process_alive_knows_this_process_and_a_dead_one():
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
     assert auto.process_alive(dead.pid) is False
+
+
+def test_tasklist_output_in_another_code_page_does_not_crash_the_liveness_check():
+    def tasklist(out):
+        return lambda *a, **k: type("R", (), {"stdout": out})()
+    found = "claude.exe                   4242 Console   1   120 K ausgeführt".encode("cp850")
+    none = "INFO: Keine Task läuft mit den angegebenen Kriterien. äö".encode("cp850")
+    assert auto.process_alive(4242, tasklist(found), windows=True) is True
+    assert auto.process_alive(4242, tasklist(none), windows=True) is False
+    assert auto.process_alive(42, tasklist(found), windows=True) is False        # a whole word only
+    def broken(*a, **k):
+        raise ValueError("odd")
+    assert auto.process_alive(4242, broken, windows=True) is True                # cannot tell: quiet
+
+
+def test_trust_counts_for_a_parent_folder_and_any_spelling(tmp_path):
+    home = tmp_path / "h"
+    home.mkdir()
+    def write(key, trusted=True, where=home):
+        (where / ".claude.json").write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": trusted}}}), encoding="utf-8")
+    folder = tmp_path / "acme" / "webshop"
+    posix = str(folder).replace("\\", "/")
+    parent = posix.rsplit("/", 1)[0]
+    write(parent)
+    assert auto.folder_trusted(folder, home, {}) is True                         # a parent
+    write(parent, trusted=False)
+    assert auto.folder_trusted(folder, home, {}) is False
+    write(posix + "/")
+    assert auto.folder_trusted(folder, home, {}) is True                         # trailing slash
+    write(str(folder).replace("/", "\\"))
+    assert auto.folder_trusted(folder, home, {}) is True                         # backslashes
+    write(str(tmp_path / "other"))
+    assert auto.folder_trusted(folder, home, {}) is False                        # a sibling is not a parent
+
+
+def test_trust_reads_claude_config_dir_when_set(tmp_path):
+    home, cfgdir = tmp_path / "h", tmp_path / "c"
+    home.mkdir()
+    cfgdir.mkdir()
+    folder = str(tmp_path / "webshop")
+    (cfgdir / ".claude.json").write_text(json.dumps({"projects": {folder: {"hasTrustDialogAccepted": True}}}), encoding="utf-8")
+    assert auto.folder_trusted(folder, home, {}) is False                        # home has no file
+    assert auto.folder_trusted(folder, home, {"CLAUDE_CONFIG_DIR": str(cfgdir)}) is True
+
+
+def test_a_hostile_config_file_is_not_trusted_and_does_not_crash(tmp_path):
+    (tmp_path / ".claude.json").write_text("[" * 200000, encoding="utf-8")          # RecursionError in the parser
+    assert auto.folder_trusted(tmp_path / "x", tmp_path, {}) is False
+    (tmp_path / ".claude.json").write_text('{"projects": []}', encoding="utf-8")
+    assert auto.folder_trusted(tmp_path / "x", tmp_path, {}) is False
 
 
 def test_away_refuses_a_folder_outside_the_worktrees(world, tmp_path):

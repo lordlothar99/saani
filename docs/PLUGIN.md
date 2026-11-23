@@ -53,11 +53,11 @@ files overlap are not run side by side. See `skills/auto/SKILL.md`.
 ## The headless session of an away run (#52)
 `claude -p` stops its background tasks 10 minutes after the last turn and exits ("Background tasks still running 10m after the last turn
 (...); stopping them"). The away run has its coders in the background, so two measures keep it alive: `saani auto away` starts the
-session with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` in its environment (the mechanism: wait indefinitely), and the skill's away part
+session with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` in its environment (the mechanism: wait indefinitely; Claude Code's own log line says "Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely."), and the skill's away part
 tells it to keep its turn open until the coders are done. The command printed for a start by hand carries the variable
 (`$env:CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS='0'; claude -p ...` in PowerShell 5.1). A headless session in a folder Claude Code does not
-trust ignores the project's allow rules, so `saani auto away` warns when `~/.claude.json` lacks `hasTrustDialogAccepted` for the main
-folder: open Claude Code there once and accept the dialog.
+trust may ignore the project's allow rules, so `saani auto away` warns when Claude Code's config (`$CLAUDE_CONFIG_DIR/.claude.json`, else
+`~/.claude.json`) lacks `hasTrustDialogAccepted` for the main folder or a parent: open Claude Code there once and accept the dialog.
 
 ## Install (checked against the Claude Code docs and `claude plugin validate`, 2026-11-22)
 This repository is both the marketplace and the plugin: `.claude-plugin/marketplace.json` lists one plugin whose source is `./`, the repo
