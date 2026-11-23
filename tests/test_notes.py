@@ -21,6 +21,8 @@ class FakeGh:
         self.rows, self.fail, self.pr, self.releases = rows, fail, pr, releases
         self.calls = []
         self.edited = None
+        self.release_error = None
+        self.broken = set()                                              # issue numbers whose `gh issue view` fails
 
     def __call__(self, *args):
         self.calls.append(args)
@@ -29,13 +31,20 @@ class FakeGh:
         if args[:2] == ("issue", "list"):
             return json.dumps(self.rows)
         if args[:2] == ("issue", "view"):
-            return json.dumps(next(r for r in self.rows if r["number"] == int(args[2])))
+            if int(args[2]) in self.broken:
+                raise notes.GhFailed(args, "Could not resolve to an Issue")
+            return json.dumps({"url": f"https://github.com/acme/webshop/{'pull' if int(args[2]) == 6 else 'issues'}/{args[2]}",
+                               **next(r for r in self.rows if r["number"] == int(args[2]))})
         if args[:2] == ("pr", "view"):
             return json.dumps(self.pr)
         if args[:2] == ("api", "--paginate"):
             return TYPES
-        if args[:2] == ("release", "list"):
-            return json.dumps([{"tagName": t} for t in self.releases])
+        if args[:2] == ("release", "view"):
+            if self.release_error:
+                raise notes.GhFailed(args, self.release_error)
+            if args[2] not in self.releases:
+                raise notes.GhFailed(args, "release not found")
+            return json.dumps({"tagName": args[2]})
         if args[:2] in (("pr", "edit"), ("release", "edit")):
             self.edited = (args, open(args[args.index("--body-file" if "--body-file" in args else "--notes-file") + 1], encoding="utf-8").read())
             return ""
@@ -122,6 +131,53 @@ def test_post_edits_an_existing_release_and_refuses_a_missing_one(monkeypatch, c
     assert run("1.0", "--post") == 1
     assert f.edited is None
     assert "no GitHub release with the tag 1.0" in capsys.readouterr().err
+
+
+def test_the_sentence_does_not_end_at_an_abbreviation():
+    assert notes.result_sentence("## Result\nFor guests, e.g. with no account. Next one.") == "For guests, e.g. with no account."
+    assert notes.result_sentence("## Result\nBags, bins, etc. are listed. Done.") == "Bags, bins, etc. are listed."
+    assert notes.result_sentence("## Result\nVersion 1.2 is out. Yes.") == "Version 1.2 is out."
+
+
+def test_a_result_that_starts_with_a_table_or_a_fence_gives_the_title_alone():
+    assert notes.result_sentence("## Result\n| a | b |\n|---|---|\n| 1 | 2 |") == ""
+    assert notes.result_sentence("## Result\n```\ncode\n```\nText.") == ""
+
+
+def test_a_subheading_under_result_is_passed_over():
+    assert notes.result_sentence("## Result\n### Cart\nThe cart is fast. Really.\n## Next\nx") == "The cart is fast."
+    assert notes.result_sentence("## Result\n## Next\nx") == ""
+
+
+@pytest.mark.parametrize("heading", ["## Result", "## Results", "## Result:", "## RESULT", "### result"])
+def test_the_result_heading_variants(heading):
+    assert notes.result_sentence(f"{heading}\nIt works.") == "It works."
+
+
+def test_a_pr_that_names_no_issue_says_so(monkeypatch, capsys):
+    monkeypatch.setattr(notes, "gh", FakeGh(pr={"body": "nothing", "commits": []}))
+    assert run("--pr", "12") == 0
+    assert "The pull request names no issue (refs #n)." in capsys.readouterr().out
+
+
+def test_pr_skips_a_ref_that_is_a_pull_request_or_unreadable_and_warns(monkeypatch, capsys):
+    rows = ROWS + [{"number": 6, "title": "A PR", "state": "CLOSED", "labels": [], "body": ""}]
+    f = FakeGh(rows=rows, pr={"body": "refs #1, #6, #7", "commits": []})
+    f.broken = {7}
+    monkeypatch.setattr(notes, "gh", f)
+    assert run("--pr", "12") == 0
+    cap = capsys.readouterr()
+    assert "- #1 Wishlist" in cap.out and "#6" not in cap.out and "#7" not in cap.out
+    assert "#6 skipped" in cap.err and "#7 skipped" in cap.err
+
+
+def test_a_gh_error_other_than_release_not_found_stops(monkeypatch):
+    f = FakeGh(releases=["1.0"])
+    f.release_error = "HTTP 502"
+    monkeypatch.setattr(notes, "gh", f)
+    with pytest.raises(SystemExit) as e:
+        run("1.0", "--post")
+    assert "HTTP 502" in str(e.value)
 
 
 def test_with_section_appends_when_there_is_none():

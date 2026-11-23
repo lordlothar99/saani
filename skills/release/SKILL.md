@@ -1,6 +1,7 @@
 ---
 name: release
 description: Write the release notes from the GitHub issues of a milestone, or of a pull request, grouped by issue Type with each issue's Result line. Use when the owner types /saani:release notes <milestone> or /saani:release notes --pr <N>.
+disable-model-invocation: true
 argument-hint: "notes <milestone> | notes --pr <N> [--post]"
 ---
 

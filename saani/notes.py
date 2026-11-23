@@ -24,6 +24,13 @@ def cfg():
     return config.current()
 
 
+class GhFailed(SystemExit):
+    """A `gh` call that ended with an error; `.text` is gh's message."""
+    def __init__(self, args, text):
+        super().__init__(f"saani release notes: gh {' '.join(args[:2])} failed: {text}")
+        self.text = text
+
+
 def gh(*args):
     """The output of `gh`; a failure (not installed, timeout, refused) stops the command with gh's own message."""
     try:
@@ -34,7 +41,7 @@ def gh(*args):
     except subprocess.TimeoutExpired:
         raise SystemExit(f"saani release notes: gh {' '.join(args[:2])} took more than {GH_TIMEOUT} s")
     if r.returncode != 0:
-        raise SystemExit(f"saani release notes: gh {' '.join(args[:2])} failed: {(r.stderr or r.stdout).strip()}")
+        raise GhFailed(args, (r.stderr or r.stdout).strip())
     return r.stdout
 
 
@@ -48,22 +55,48 @@ def gh_json(*args):
 
 # ---------------------------------------------------------------- pure functions (tested)
 
+RESULT_HEADING = re.compile(r"^(#{1,6})\s+Results?\s*:?\s*$", re.I)
+HEADING = re.compile(r"^\s{0,3}(#{1,6})\s")
+ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "incl.", "no.")
+
+
+def first_sentence(paragraph):
+    """Up to the first `.`, `!` or `?` that is followed by a capital letter, a digit or a quote and does not end an abbreviation."""
+    for m in re.finditer(r"[.!?]\s+(?=[A-Z0-9\"'(\[`])", paragraph):
+        if not paragraph[:m.start() + 1].lower().endswith(ABBREVIATIONS):
+            return paragraph[:m.start() + 1].strip()
+    return paragraph.strip()
+
+
 def result_sentence(body):
-    """The first sentence under `## Result` in an issue body, or "" when there is none."""
+    """The first sentence under the issue's `## Result` section (also `## Results`, `## Result:`, any case), or "" when there is none or
+    it starts with a table or a code fence. A subheading under it is passed over: the prose below it counts."""
     lines = (body or "").replace("\r\n", "\n").split("\n")
     for i, line in enumerate(lines):
-        if re.match(r"^#{1,6}\s+Result\s*$", line.strip(), re.I):
-            text = []
-            for nxt in lines[i + 1:]:
-                if nxt.lstrip().startswith("#"):
+        found = RESULT_HEADING.match(line.strip())
+        if not found:
+            continue
+        level = len(found.group(1))
+        text = []
+        for nxt in lines[i + 1:]:
+            heading = HEADING.match(nxt)
+            if heading:
+                if len(heading.group(1)) <= level:
                     break
-                if not nxt.strip():
-                    if text:
-                        break
-                    continue
-                text.append(re.sub(r"^\s*(?:[-*]|\d+\.)\s+", "", nxt).strip() if not text else nxt.strip())
-            paragraph = " ".join(text)
-            return re.split(r"(?<=[.!?])\s", paragraph, maxsplit=1)[0].strip()
+                if text:
+                    break
+                continue
+            stripped = nxt.strip()
+            if not stripped:
+                if text:
+                    break
+                continue
+            if stripped.startswith(("|", "```", "~~~")):
+                if text:
+                    break
+                return ""
+            text.append(re.sub(r"^(?:[-*]|\d+\.)\s+", "", stripped) if not text else stripped)
+        return first_sentence(" ".join(text))
     return ""
 
 
@@ -100,7 +133,8 @@ def with_section(body, notes):
 # ---------------------------------------------------------------- reading the world
 
 def read_types():
-    """{issue number: Type name} of all the issues, from the REST API (`gh issue list` has no such field)."""
+    """{issue number: Type name} of all the issues, from the REST API (`gh issue list` has no such field).
+    Costly on a big repository (every issue of every state, 100 per request); it runs only when there is something to write."""
     out = gh("api", "--paginate", f"repos/{cfg().repo}/issues?state=all&per_page=100", "--jq",
              r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")"')
     pairs = (line.split("\t") for line in out.splitlines() if "\t" in line)
@@ -110,12 +144,23 @@ def read_types():
 def issue_rows(numbers=None, milestone=None):
     c = cfg()
     fields = "number,title,body,state,labels"
+    if numbers is not None:
+        rows = []
+        for n in numbers:
+            try:
+                row = gh_json("issue", "view", str(n), "--repo", c.repo, "--json", fields + ",url")
+            except GhFailed as e:
+                print(f"warning: #{n} skipped, gh issue view failed: {e.text}", file=sys.stderr)
+                continue
+            if "/pull/" in (row or {}).get("url", ""):
+                print(f"warning: #{n} skipped, it is a pull request, not an issue", file=sys.stderr)
+                continue
+            rows.append(row)
+        return rows
     if milestone is not None:
         rows = gh_json("issue", "list", "--repo", c.repo, "--milestone", milestone, "--state", "all", "--limit", str(ISSUE_LIMIT), "--json", fields)
         rows = [r for r in rows or []
                 if r.get("state") == "CLOSED" or c.labels["in_main"] in [x.get("name") for x in r.get("labels", [])]]
-    else:
-        rows = [gh_json("issue", "view", str(n), "--repo", c.repo, "--json", fields) for n in numbers]
     return rows
 
 
@@ -158,8 +203,14 @@ def post(args, notes, pr):
             os.unlink(path)
         print(f"posted: the {SECTION} section of pull request #{args.pr}")
         return 0
-    tags = [r.get("tagName") for r in gh_json("release", "list", "--repo", c.repo, "--json", "tagName", "--limit", "200") or []]
-    if args.milestone not in tags:
+    try:
+        gh("release", "view", args.milestone, "--repo", c.repo, "--json", "tagName")
+        found = True
+    except GhFailed as e:
+        if "release not found" not in e.text.lower():
+            raise
+        found = False
+    if not found:
         print(f"not posted: no GitHub release with the tag {args.milestone}; create it (the tag marks a commit), then run this again", file=sys.stderr)
         return 1
     path = via_file(notes, ".md")
@@ -178,7 +229,10 @@ def cmd_notes(args):
         raise SystemExit("saani release notes: a milestone or --pr, not both")
     heading, issues, pr = collect(args)
     if not issues:
-        print(f"## {heading}\n\nNo closed or {cfg().labels['in_main']} issue" + (" in the pull request." if pr is not None else " in this milestone."))
+        if pr is not None:
+            print(f"## {heading}\n\nThe pull request names no issue (refs #n).")
+        else:
+            print(f"## {heading}\n\nNo closed or {cfg().labels['in_main']} issue in this milestone.")
         return 0
     notes = render(heading, issues, list(cfg().types))
     print(notes, end="")
