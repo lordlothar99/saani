@@ -283,9 +283,8 @@ dialog. It records the process id in `build/saani-auto-<id>.pid`, and `saani aut
 still on (then read the log and `saani auto off --run <id>`). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the
 guard decides every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code
 falls back to asking after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With
-`--permission-prompts none` every
-such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
-classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
+`--permission-prompts none` every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's;
+`--permission-mode auto` lets Claude Code's classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
 
 **The run's record and its stop rules.** `saani auto on` is the last step before the work (after the owner's questions); `saani auto off --run <id>` the owner's, from a terminal, after the report. The stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied into the run's record at `on`:
