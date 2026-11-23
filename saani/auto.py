@@ -14,7 +14,7 @@ import sys
 from . import config, core, glance
 
 MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
-GB_PER_ISSUE = 4          # free memory one running issue is given (its tests, its tools, its subagent)
+GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
 CPUS_PER_ISSUE = 4
 ISSUE_LIMIT = 500         # open issues read
 GIT_TIMEOUT = 60
