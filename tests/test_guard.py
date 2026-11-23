@@ -548,7 +548,7 @@ def test_git_bash_paths_go_through_one_allowlist(ctx):
         pytest.skip("Git Bash's paths are read on Windows")
     depth = "../" * (len(pathlib.Path(ctx.places["work"]).parts) + 2)
     for path in (f"{depth}proc/self/environ", "/c/../proc/self/environ", "/tmp/../proc/x", "~/" + depth + "proc/self/environ",
-                 f"{depth}cygdrive/c/x.txt", "/cygdrive/c/x.txt", "/etc/passwd", "/", "/usr/bin/env", "/mnt/c/x", "/home/x",
+                 f"{depth}cygdrive/c/x.txt", "/cygdrive/c/x.txt", "/etc/passwd", "/", "/usr/bin/env", "/mnt/c/x", "/opt/x",
                  "C:/../proc/self/environ", "C:\\..\\etc\\passwd", "\\etc\\passwd"):
         word = f"'{path}'" if "\\" in path else path                                     # unquoted: bash expands ~
         assert sh(ctx, f"cat {word}")[2] == "posix path", path
