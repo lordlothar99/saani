@@ -407,23 +407,32 @@ def test_claude_s_memory_and_a_project_s_own_claude_folder_are_no_secret(ctx):
     assert sh(ctx, "git status")[0] == "allow"
 
 
-def test_claude_s_saved_tool_outputs_are_read_but_never_a_way_out_of_them(ctx):
-    results = pathlib.Path(ctx.places["home"]) / ".claude" / "projects" / "acme-webshop" / "tool-results"
-    results.mkdir(parents=True)
-    (results / "out.txt").write_text("x")
-    (results.parents[2] / "settings.json").write_text("{}")
-    tr = "{home}/.claude/projects/acme-webshop/tool-results"
+def test_only_this_session_s_saved_tool_outputs_are_read_never_a_way_out_of_them(ctx):
+    assert guard.context(ctx.cwd, {}, "sess-1").session == "sess-1"                     # main() passes the hook's session_id
+    ctx.session = "sess-1"
+    project = pathlib.Path(ctx.places["home"]) / ".claude" / "projects" / "acme-webshop"
+    for sid in ("sess-1", "sess-2"):
+        (project / sid / "tool-results").mkdir(parents=True)
+        (project / sid / "tool-results" / "out.txt").write_text("x")
+    (project.parents[1] / "settings.json").write_text("{}")
+    tr = "{home}/.claude/projects/acme-webshop/sess-1/tool-results"
     assert tool(ctx, "Read", file_path=tr + "/out.txt")[0] == "allow"
-    assert tool(ctx, "Read", file_path="~/.claude/projects/acme-webshop/tool-results/out.txt")[0] == "allow"
-    assert sh(ctx, "head -50 ~/.claude/projects/acme-webshop/tool-results/out.txt")[0] == "allow"
+    assert tool(ctx, "Read", file_path="~/.claude/projects/acme-webshop/sess-1/tool-results/out.txt")[0] == "allow"
+    assert sh(ctx, "head -50 ~/.claude/projects/acme-webshop/sess-1/tool-results/out.txt")[0] == "allow"
     assert sh(ctx, f"cat {tr}/out.txt")[0] == "allow"
-    for escape in (tr + "/../../../settings.json", tr + "/../../../projects/../settings.json", tr + "/.../settings.json",
-                   tr + "/.. /.. /.. /settings.json", "{home}/.claude/settings.json", "{home}/.claude/projects/acme-webshop/x.jsonl",
-                   "{home}/.claude/projects/acme-webshop/tool-results.jsonl", "{home}/.claude/tool-results/out.txt"):
+    for escape in ("{home}/.claude/projects/acme-webshop/sess-2/tool-results/out.txt",          # another session's outputs
+                   "{home}/.claude/projects/acme-webshop/sess-1.jsonl", "{home}/.claude/projects/acme-webshop/sess-1/x.jsonl",
+                   "{home}/.claude/projects/acme-webshop/tool-results/out.txt", tr + "/../../../../settings.json",
+                   tr + "/../../sess-2/tool-results/out.txt", tr + "/.../settings.json", tr + "/.. /.. /.. /.. /settings.json",
+                   "{home}/.claude/settings.json", "{home}/.claude/projects/acme-webshop/sess-1/tool-results.jsonl",
+                   "{home}/.claude/tool-results/out.txt"):
         assert tool(ctx, "Read", file_path=escape)[2] == "secret", escape
         assert sh(ctx, f"cat '{escape}'")[2] == "secret", escape
+    ctx.session = None                                                                   # no session id: no outputs at all
+    assert tool(ctx, "Read", file_path=tr + "/out.txt")[2] == "secret"
+    ctx.session = "sess-1"
     try:
-        os.symlink(results.parents[2] / "settings.json", results / "link.json")
+        os.symlink(project.parents[1] / "settings.json", project / "sess-1" / "tool-results" / "link.json")
     except (OSError, NotImplementedError):
         return                                                                           # no symlinks here (Windows without the right)
     assert tool(ctx, "Read", file_path=tr + "/link.json")[2] == "secret"                 # judged where it leads

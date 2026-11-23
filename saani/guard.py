@@ -274,8 +274,9 @@ class Context:
     """What the decision needs: the run's folders (normalized), the branches, the repository and the test commands."""
 
     def __init__(self, cwd, wt_dir=None, folder=None, temp=None, main=None, repo="", integration="dev", production="main",
-                 worker_branch=None, tests=(), home=None):
+                 worker_branch=None, tests=(), home=None, session=None):
         import tempfile
+        self.session = session                                # the hook's session_id: its own saved tool outputs are readable
         self.temp = norm(temp or tempfile.gettempdir())
         self.cwd = norm(cwd)
         self.wt_dir = norm(wt_dir) if wt_dir else None
@@ -312,10 +313,10 @@ class Context:
         return None
 
 
-def context(cwd, st):
+def context(cwd, st, session=None):
     return Context(cwd, wt_dir=st.get("wt_dir"), folder=st.get("folder"), main=st.get("main"), repo=st.get("repo", ""),
                    integration=st.get("integration", "dev"), production=st.get("production", "main"),
-                   worker_branch=st.get("worker_branch"), tests=st.get("tests") or ())
+                   worker_branch=st.get("worker_branch"), tests=st.get("tests") or (), session=session)
 
 
 # ---------------------------------------------------------------- secrets and protected files
@@ -327,23 +328,29 @@ KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk", ".jks", ".keystore", ".k
 KEY_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
 
 
-def home_claude(c):
-    """True for a path inside ~/.claude/ (Claude Code's own settings, sessions, credentials), but its projects' memory and saved tool
-    outputs (projects/<p>/memory/, projects/<p>/tool-results/). Judged on the path as given (`..` folded) and, by the caller, on the
-    resolved path too (a link out of tool-results/ is judged where it leads). A part's `:stream` and trailing dots and spaces are dropped as
-    Windows drops them; a part that is then empty (`...`) or `..` (`.. `) is not read for sure: a secret."""
+def home_claude(c, session=None):
+    """True for a path inside ~/.claude/ (Claude Code's own settings, sessions, credentials), but its projects' memory
+    (projects/<p>/memory/) and this session's own saved tool outputs (projects/<p>/<session>/tool-results/, never another session's: the
+    owner's may hold printed secrets). Judged on the path as given (`..` folded) and, by the caller, on the resolved path too (a link out
+    of tool-results/ is judged where it leads). A part's `:stream` and trailing dots and spaces are dropped as Windows drops them; a part
+    that is then empty (`...`) or `..` (`.. `) is not read for sure: a secret."""
     if not os.path.isabs(c):
         return False
     home = os.path.join(os.path.expanduser("~"), ".claude")
+    own = os.path.normcase(session) if isinstance(session, str) and SESSION.fullmatch(session) else None
     for base in {os.path.normcase(os.path.normpath(home)), norm(home)}:
         p = os.path.normcase(os.path.normpath(c))
         if inside(p, base):
             rel = [x.split(":")[0].rstrip(". ") for x in re.split(r"[\\/]+", p[len(base):]) if x]
-            return "" in rel or ".." in rel or not (len(rel) >= 3 and rel[0] == "projects" and rel[2] in ("memory", "tool-results"))
+            if "" in rel or ".." in rel or rel[:1] != ["projects"]:
+                return True
+            memory = len(rel) >= 3 and rel[2] == "memory"
+            results = own is not None and len(rel) >= 4 and rel[2] == own and rel[3] == "tool-results"
+            return not (memory or results)
     return False
 
 
-def secret_name(raw, resolved=None, strict=True):
+def secret_name(raw, resolved=None, strict=True, session=None):
     """True when the path names a secret: .env, .env.*, .envrc, keys (*.pem, *.key, *.p12, *.pfx, *.ppk, *.jks, *.keystore, *.kdbx,
     id_rsa*, id_ed25519*...), anything with "credentials" in its name, .netrc, .npmrc and npmrc, .pypirc, .pgpass, .git-credentials, any
     hosts.yml, .docker/config.json, .git/config (tokens in remote URLs), ~/.claude.json and ~/.claude/ (but its projects' memory),
@@ -359,7 +366,7 @@ def secret_name(raw, resolved=None, strict=True):
         parts = [x for x in low.split("/") if x]
         if not parts:
             continue
-        if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"] or home_claude(str(c)):
+        if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"] or home_claude(str(c), session):
             return True
         if [x.split(":")[0].rstrip(". ") for x in parts[-2:]] == [".git", "config"]:      # Windows: `.git./config` is .git/config
             return True
@@ -452,7 +459,7 @@ def decide_tool(event, ctx):
             value = inp.get(key)
             if value is not None and not isinstance(value, str):
                 return deny("unreadable path", f"{tool} with a {key} that is not text")
-            if value and secret_name(value, ctx.path(value, tilde=True)):
+            if value and secret_name(value, ctx.path(value, tilde=True), session=ctx.session):
                 return deny("secret", f"{tool} of a secret file (keys, .env, credentials, tokens are never read in an auto run)",
                             how=SECRETS_HOW)
         return allow(f"{tool} outside the secrets")
@@ -755,7 +762,7 @@ def secret_word(ctx, word, cwd):
         if url and network(piece) and not network(word):
             if secret_name(piece, strict=False):
                 return True
-        elif piece and secret_name(piece, ctx.path(piece, cwd), strict=False):
+        elif piece and secret_name(piece, ctx.path(piece, cwd), strict=False, session=ctx.session):
             return True
     if getattr(word, "glob", False):
         # The word as bash reads it (ctx.path: /c/..., /tmp, ~), matched here with a budget; never outside the run's places, never a
@@ -1644,7 +1651,7 @@ def main(raw=None):
     cwd = event.get("cwd")
     try:
         cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else os.getcwd()
-        decision, reason, code, word = decide(event, context(cwd, st))
+        decision, reason, code, word = decide(event, context(cwd, st, session_id))
     except (Exception, SystemExit) as e:
         decision, reason, code, word = "deny", error.format(type(e).__name__), "guard error", ""
     if decision == "deny":
