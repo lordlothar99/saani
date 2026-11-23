@@ -495,7 +495,10 @@ def run_folder(given, action):
     from . import guard
     c = cfg()
     cwd = os.getcwd()
-    folder = guard.resolve(given, cwd) if given else guard.norm(cwd)
+    try:
+        folder = guard.resolve(given, cwd) if given else guard.norm(cwd)
+    except guard.Refuse as e:
+        raise SystemExit(f"saani auto {action}: --folder {given}: {e.why}")
     wt = guard.norm(c.wt_dir)
     if not (guard.inside(folder, wt) and folder != wt and os.path.isdir(folder)):
         raise SystemExit(f"saani auto {action}: the run's folder must be a folder inside {c.wt_dir} (made by `saani auto`; "

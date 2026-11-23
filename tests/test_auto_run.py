@@ -91,6 +91,13 @@ def test_on_outside_the_worktrees_folder_is_refused(world, tmp_path):
     assert "inside" in str(e.value)
 
 
+@pytest.mark.parametrize("folder", ["\\\\host\\x", "//host/x", "/dev/clipboard"])
+def test_on_with_a_network_or_device_folder_stops_with_a_message(world, folder):
+    with pytest.raises(SystemExit) as e:
+        auto.cmd_on(args(folder=folder))
+    assert str(e.value).startswith(f"saani auto on: --folder {folder}: a ")
+
+
 def test_a_second_run_is_refused_until_the_first_is_off_or_stale(world):
     auto.cmd_on(args())
     with pytest.raises(SystemExit) as e:
