@@ -1270,7 +1270,7 @@ REF_PATTERNS = ("branches", "remotes", "tags")
 
 def owner_stash(sub, words):
     """A refusal when a git command would read the owner's stash: a stash revision anywhere, a :/ search, and in the commands that walk
-    revisions (log, show, rev-parse, diff) --all, -g, --walk-reflogs, --reflog, --glob, --stdin..., --branches/--remotes/--tags=<pattern>
+    revisions (log, show, rev-parse, diff) --all, -g, --walk-reflogs, --reflog, --glob, --stdin..., --branches, --remotes, --tags (with or without a pattern)
     (and their abbreviations)."""
     no = deny("git stash", f"git {sub} reading the owner's stash (refs/stash is shared by every worktree) or walking every ref", "git",
               how="name the revisions (HEAD, origin/<branch>, a commit)")
@@ -1285,7 +1285,7 @@ def owner_stash(sub, words):
             return no
         if sub == "commit":
             continue
-        if name and (any(x.startswith(name) for x in EVERY_REF) or (eq and any(x.startswith(name) for x in REF_PATTERNS))):
+        if name and (any(x.startswith(name) for x in EVERY_REF) or any(x.startswith(name) for x in REF_PATTERNS)):
             return no
         if re.match(r"-[a-zA-Z]", w):                   # -g alone or in a cluster of flags; never inside a value (-Sdebug, -Gregister)
             for ch in w[1:]:
