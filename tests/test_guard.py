@@ -246,6 +246,8 @@ DENIED = [
     ("cd src*", "cd outside the worktrees"),
     ("cd .. && ls", "cd outside the worktrees"), ("git -C {main} status", "cd outside the worktrees"),
     ("git -C {wt} status", "cd outside the worktrees"),
+    ("cd {work}/src && git -C {work} -C ../../webshop stash", "cd outside the worktrees"),        # -C after -C: from the first
+    ("cd {work}/src && git -C {work} -C ../../webshop checkout -- app.py", "cd outside the worktrees"),
     ("git -c core.sshCommand=x fetch", "git option"), ("git fetch --upload-pack=x origin", "git option"),
     ("git diff --output=/x", "git option"), ("git log --out=x", "git option"), ("git log --o=x", "git option"),
     ("git commit --no-verify -m x", "no-verify"), ("git commit --no-v -m x", "no-verify"), ("git commit -nm x", "no-verify"),

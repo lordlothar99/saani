@@ -971,7 +971,7 @@ def git_command(part, ctx, cwd):
     args, gcwd = list(part.words[1:]), cwd
     while args and args[0].startswith("-"):
         if args[0] == "-C" and len(args) > 1:
-            gcwd = ctx.path(args[1], cwd)
+            gcwd = ctx.path(args[1], gcwd)               # git reads a relative -C from the previous -C
             if args[1].glob or not ctx.cd_ok(gcwd):
                 return deny("cd outside the worktrees", "git -C outside a worktree and the run's folder", "git")
             args = args[2:]
