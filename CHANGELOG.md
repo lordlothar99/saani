@@ -1,5 +1,7 @@
 # Changelog
 
+Frozen at 0.5.0: the release notes now come from the milestones' issues, with `saani release notes <milestone>`; add no entry here.
+
 ## Unreleased
 
 ## 0.5.0 (2026-11-23)
