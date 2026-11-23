@@ -650,13 +650,14 @@ let DECO = null;
 let DETAIL_T = 0;
 function cacheDetail() {
   const el = $("#decohi"); if (!DECO || !el) return;
+  const ticket = ++DETAIL_T;                                               // first: a render started before zooming out must not set href afterwards
   const s = VIEW.s, base = Math.min(.5, Math.sqrt(14e6 / (DECO.w * DECO.h)));
   if (s * (devicePixelRatio || 1) < base * 1.4) { el.removeAttribute("href"); el.dataset.ok = ""; return; }
   const W = innerWidth / s, H = innerHeight / s, x = Math.max(DECO.x, -VIEW.tx / s - W * .5), y = Math.max(DECO.y, -VIEW.ty / s - H * .5);
   const w = Math.min(DECO.x + DECO.w, x + W * 2) - x, h = Math.min(DECO.y + DECO.h, y + H * 2) - y; if (w <= 0 || h <= 0) return;
   const res = Math.min(s * (devicePixelRatio || 1), 2, Math.sqrt(12e6 / (w * h))), cw = Math.round(w * res), ch = Math.round(h * res);
   const style = `<style>.edgetxt{font:500 11px ui-monospace,Consolas,monospace;letter-spacing:.08em;paint-order:stroke;stroke:rgba(20,13,8,.75);stroke-width:4px}.signtxt{font:400 10px sans-serif;letter-spacing:.3em;fill:${C.amber}}.smoke{opacity:0}</style>`;
-  const im = new Image(), ticket = ++DETAIL_T;
+  const im = new Image();
   im.onload = () => { if (ticket !== DETAIL_T) return; try { const cv = document.createElement("canvas"); cv.width = cw; cv.height = ch; cv.getContext("2d").drawImage(im, 0, 0, cw, ch);
     el.setAttribute("href", cv.toDataURL("image/png")); el.setAttribute("x", x.toFixed(0)); el.setAttribute("y", y.toFixed(0)); el.setAttribute("width", w.toFixed(0)); el.setAttribute("height", h.toFixed(0)); el.dataset.ok = "1"; } catch (_) {} };
   im.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${cw}" height="${ch}" preserveAspectRatio="none">${style}${DECO.svg}</svg>`);
@@ -986,7 +987,9 @@ function workers() {
     const running = r.running || [], base = {name: r.name, role: r.name, kind: r.kind, model: r.model, what: r.what, file: r.file, runs: r.runs || 0, running, staged: r.staged};
     if (!running.length) { out.push({...base, id: "r:" + r.name, state: r.kind === "planned" ? "planned" : "idle", issue: null}); continue; }   // one idle figure in the camp
     // #53: every running subagent is a figure of its own, on its own issue, with its own description (several coders: several Coders)
-    running.forEach((x, k) => out.push({...base, id: `r:${r.name}:${k}`, run: x, state: "working", issue: x.issue || +((x.description || "").match(/#(\d+)/) || [])[1] || null}));
+    // the id follows the run (session + description), the position only tells two identical runs apart: a figure keeps its place when another run ends
+    const seen = {};
+    running.forEach((x, k) => { const key = `${x.session || ""}|${x.description || ""}`; seen[key] = (seen[key] || 0) + 1; out.push({...base, id: `r:${r.name}:${key}:${seen[key]}`, run: x, state: "working", issue: x.issue || +((x.description || "").match(/#(\d+)/) || [])[1] || null}); });
   }
   (DATA.crew || []).forEach((s, i) => out.push({id: "s:" + (s.session || i), name: "Claude Code", role: "Claude Code", kind: "architect", model: s.model, folder: s.name, branch: s.branch,
     state: s.state, issue: s.issue || null, age: s.age_min}));
@@ -1315,7 +1318,7 @@ function prPanel() {
     el("div", {class: "body"},
       el("div", {}, el("div", {class: "sec"}, el("h3", {}, `Carries · ${cards.length}`), items)),
       el("div", {}, el("div", {class: "sec"}, el("h3", {}, "Pull request"), el("dl", {class: "grid"},
-        el("dt", {}, "Number"), el("dd", {}, pr.url ? el("a", {href: pr.url, target: "_blank", rel: "noopener"}, "#" + pr.number) : "#" + pr.number),
+        el("dt", {}, "Number"), el("dd", {}, /^https?:\/\//i.test(pr.url || "") ? el("a", {href: pr.url, target: "_blank", rel: "noopener"}, "#" + pr.number) : "#" + pr.number),
         el("dt", {}, "CI"), el("dd", {}, (pr.ci && pr.ci.text) || ci.word),
         el("dt", {}, "After the merge"), el("dd", {}, "the harvester drives its load to the Launch Pad (deploy) or the Archive (nothing to deploy)"))))),
     foot);
@@ -1455,6 +1458,10 @@ function tick(now) {
 }
 
 // ------------------------------------------------------------------ loading, refreshing, demo traffic
+function markLive(live, note) {                                  // the badge for data that just came in; "Stale" ends here
+  $("#src").textContent = live ? "Live" : "Sample data"; $("#src").className = "badge " + (live ? "live" : "sample");
+  $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : note || "Sample data";
+}
 function setData(d, live) {
   const old = PREV, prOld = DATA && DATA.pr, harvOld = HARV && {...HARV}; DATA = normalize(d); LIVE = live;
   REPO = (DATA.project && DATA.project.repo) || REPO;
@@ -1464,8 +1471,7 @@ function setData(d, live) {
   const merged = {}; for (const c of moved) if (old[c.number] === "pr" && (c.step === "deploy" || c.step === "close")) (merged[c.step] ||= []).push(c.number);
   const byTrip = new Set(); for (const [step, ns] of Object.entries(merged)) if (harvesterTrip(ns, step, harvOld, prOld)) ns.forEach(n => byTrip.add(n));
   for (const c of moved) if (!byTrip.has(c.number)) fly(c.number, before[c.number], POS[c.number]);
-  $("#src").textContent = live ? "Live" : "Sample data"; $("#src").className = "badge " + (live ? "live" : "sample");
-  $("#src").title = live ? "Read from this PC's Saani every 5 seconds" : (DATA.sample || {}).note || "Sample data";
+  markLive(live, (DATA.sample || {}).note);
   $("#clock").textContent = live ? "updated " + (DATA.time || "") : "snapshot " + ((DATA.sample || {}).taken || "");
   $("#demo").hidden = live; $("#pages").hidden = false; $("#refresh").hidden = false;      // the same menu in the artifact build, but the page switch and refresh need the server: shown inert there
   for (const x of document.querySelectorAll("#pages a")) { x.toggleAttribute("aria-disabled", !live); x.title = live ? "" : "Needs the Saani server on this PC"; }
@@ -1511,16 +1517,23 @@ function projects(list) {
 // Data the map cannot draw keeps the last good map on screen, with a notice. An unchanged state is not redrawn. A hidden tab stops asking.
 let TICKET = 0, FAILS = 0, LASTOK = 0, LASTKEY = "", POLL = 0;
 async function fetchState(fresh) {
-  const ticket = ++TICKET, key = PROJECT;
-  const r = await fetch(stateUrl(fresh), {cache: "no-store"});
-  if (!r.ok) { const e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
-  const d = await r.json();
-  return ticket === TICKET && key === PROJECT ? d : null;                 // null: a newer request or another project took over
+  const ticket = ++TICKET, key = PROJECT, current = () => ticket === TICKET && key === PROJECT;
+  try {
+    const r = await fetch(stateUrl(fresh), {cache: "no-store"});
+    if (!r.ok) { const e = new Error("HTTP " + r.status); e.status = r.status; throw e; }
+    const d = await r.json();
+    return current() ? d : null;                                            // null: a newer request or another project took over
+  } catch (err) { if (!current()) return null; throw err; }                 // a superseded failure is not a failure
+}
+// a project that is gone (404) goes back to the default project, as load() does
+function projectGone(err) {
+  if (!err || err.status !== 404 || !PROJECT) return false;
+  PROJECT = ""; history.replaceState(null, "", location.pathname); pinProject(); LASTKEY = ""; return true;
 }
 function notice(text) { const n = $("#notice"); n.textContent = text || ""; n.hidden = !text; }
 function drawState(d, live) {
-  const key = live ? JSON.stringify(d) : "";
-  if (live && key === LASTKEY && DATA) { $("#clock").textContent = "updated " + (d.time || ""); return true; }   // nothing changed: no redraw
+  const key = live ? JSON.stringify(d, function (k, v) { return this === d && (k === "time" || k === "resources") ? undefined : v; }) : "";   // per-poll fields (the clock, the PC's load) are not a change
+  if (live && key === LASTKEY && DATA) { markLive(true); notice(""); $("#clock").textContent = "updated " + (d.time || ""); return true; }   // nothing changed: no redraw
   const prev = DATA, prevPrev = PREV;
   try { setData(d, live); LASTKEY = key; notice(""); return true; }
   catch (err) {
@@ -1545,8 +1558,8 @@ async function load() {
 }
 async function refresh() {
   if (document.hidden) return schedule(5000);                            // a hidden tab: look again once it is visible (see below)
-  try { const d = await fetchState(); FAILS = 0; LASTOK = Date.now(); if (d) drawState(d, true); }
-  catch (_) { FAILS++; stale(); }
+  try { const d = await fetchState(); if (d) { FAILS = 0; LASTOK = Date.now(); drawState(d, true); } }
+  catch (err) { if (projectGone(err)) return schedule(0); FAILS++; stale(); }
   schedule(FAILS ? Math.min(60000, 5000 * 2 ** Math.min(FAILS, 4)) : 5000);   // 5 s, then 10, 20, 40, 60 s while Saani is away
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && LIVE) schedule(0); });
@@ -1554,7 +1567,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && LI
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function warp(load) {
   const st = $("#stage"), sm = $("#storm");
-  if (RM) { const apply = await load(); if (apply) apply(); return; }
+  if (RM) { const apply = await load().catch(() => null); if (apply) apply(); return; }
   st.classList.remove("warp-in"); void st.offsetWidth; st.classList.add("warp-out"); sm.classList.add("on");
   const [apply] = await Promise.all([load().catch(() => null), sleep(700)]);
   if (apply) apply();
@@ -1564,7 +1577,9 @@ async function warp(load) {
 async function switchProject(key) {
   PROJECT = key; pinProject(); for (const k in DETAILS) delete DETAILS[k];
   PREV = {}; FILTER.ms = ""; $("#ms").value = "";                            // another project's cards do not fly from the old one's places
-  LASTKEY = ""; await warp(async () => { const d = await fetchState(); return d ? () => { drawState(d, true); fit(); } : null; });
+  LASTKEY = ""; await warp(async () => {
+    let d; try { d = await fetchState(); } catch (err) { if (!projectGone(err)) throw err; d = await fetchState(); }   // a project no longer listed: the default one
+    return d ? () => { FAILS = 0; LASTOK = Date.now(); drawState(d, true); fit(); } : null; });
 }
 function mergeSamplePR() {
   // the sample's release PR is merged: everything in it goes to deploy (an issue labelled for tooling or docs would go to the Archive)
@@ -1583,7 +1598,8 @@ $("#proj").addEventListener("change", e => switchProject(e.target.value));
 addEventListener("hashchange", () => { const k = location.hash.slice(1); if (k && k !== PROJECT) switchProject(k); });
 $("#refresh").addEventListener("click", async e => {
   const b = e.currentTarget; if (b.disabled) return; b.disabled = true; b.textContent = "↻ Refreshing…";
-  try { const d = await fetchState(true); FAILS = 0; LASTOK = Date.now(); if (d) drawState(d, true); } catch (_) { FAILS++; stale(); }
+  try { const d = await fetchState(true); if (d) { FAILS = 0; LASTOK = Date.now(); drawState(d, true); } }
+  catch (err) { if (projectGone(err)) schedule(0); else { FAILS++; stale(); } }
   b.disabled = false; b.textContent = "↻ Refresh";
 });
 // the page switch: a fade where the browser has no cross-page View Transitions

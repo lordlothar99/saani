@@ -142,7 +142,7 @@ def test_two_running_subagents_of_one_role_keep_both_runs_with_their_issues_and_
     pr = fp.pr_row({"number": 7, "title": "dev into main", "url": "https://example.test/pull/7", "headRefOid": "x", "statusCheckRollup": []}, {})
     assert {"number", "title", "url", "ci"} <= set(pr) and {"state", "text"} <= set(pr["ci"])
     page = fp.MAP_FILE.read_text(encoding="utf-8")
-    assert "running.forEach((x, k) => out.push(" in page and "All ${w.name} runs" in page and "function prPanel()" in page
+    assert "running.forEach((x, k) => {" in page and "function markLive(" in page and "All ${w.name} runs" in page and "function prPanel()" in page
     assert json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))["cards"]                  # the map's fallback sample still loads
 
 
