@@ -23,6 +23,10 @@ class FakeGh:
         self.edited = None
         self.release_error = None
         self.broken = set()                                              # issue numbers whose `gh issue view` fails
+        self.created = []
+        self.files = {}                                                  # ref -> the version file's text
+        self.parents = {}                                                # merge sha -> its first parent
+        self.remote_messages = {}                                        # sha -> commit message, for commits git does not have
 
     def __call__(self, *args):
         self.calls.append(args)
@@ -39,6 +43,21 @@ class FakeGh:
             return json.dumps(self.pr)
         if args[:2] == ("api", "--paginate"):
             return TYPES
+        if args[0] == "api" and args[1] == "-H":                         # a file of the repository at a commit
+            ref = args[3].rsplit("ref=", 1)[1]
+            if ref not in self.files:
+                raise notes.GhFailed(args, "HTTP 404: Not Found")
+            return self.files[ref]
+        if args[0] == "api" and "/commits/" in args[1]:
+            sha = args[1].rsplit("/", 1)[1]
+            if args[-1] == ".parents[0].sha":
+                return self.parents[sha] + "\n"
+            if sha not in self.remote_messages:
+                raise notes.GhFailed(args, "HTTP 404: Not Found")
+            return self.remote_messages[sha]
+        if args[:2] == ("release", "create"):
+            self.created.append((args, open(args[args.index("--notes-file") + 1], encoding="utf-8").read()))
+            return ""
         if args[:2] == ("release", "view"):
             if self.release_error:
                 raise notes.GhFailed(args, self.release_error)
@@ -49,6 +68,19 @@ class FakeGh:
             self.edited = (args, open(args[args.index("--body-file" if "--body-file" in args else "--notes-file") + 1], encoding="utf-8").read())
             return ""
         raise AssertionError(args)
+
+
+LOCAL = {}                                                               # sha -> subject of the commits git has
+
+
+@pytest.fixture(autouse=True)
+def local_git(monkeypatch):
+    LOCAL.clear()
+    monkeypatch.setattr(notes, "git", lambda *a: LOCAL.get(a[-1]))
+
+
+def on_dev(sha):
+    return {"body": f"### ✅ On dev\n| Commit | Tests | Next |\n|---|---|---|\n| {sha} | landing tests green, landed in 3 s | goes to main with the next pull request |"}
 
 
 @pytest.fixture
@@ -183,3 +215,144 @@ def test_a_gh_error_other_than_release_not_found_stops(monkeypatch):
 def test_with_section_appends_when_there_is_none():
     assert notes.with_section("Body", "## T\n\n- a\n") == "Body\n\n## Release notes\n\n- a\n"
     assert notes.with_section("", "## T\n\n- a\n") == "## Release notes\n\n- a\n"
+
+
+# ---------------------------------------------------------------- the commits under each issue, the releases (#55)
+
+def with_comments(rows_comments):
+    return [{**r, "comments": rows_comments.get(r["number"], [])} for r in ROWS]
+
+
+def test_commit_shas_come_from_the_commit_cell_of_the_on_dev_comments():
+    comments = [{"body": "### ▶ Started\n| Commit |\n|---|\n| aaaaaaa |"}, on_dev("abc1234"), on_dev("abc1234"), on_dev("def5678 and 0123456789abcdef"),
+                {"body": "just text abc1234"}]
+    assert notes.commit_shas(comments) == ["abc1234", "def5678", "0123456789abcdef"]
+
+
+def test_the_commit_subjects_go_under_the_issue_line(monkeypatch, capsys):
+    LOCAL.update({"abc1234": "Cart: show the total", "def5678": "Cart total"})            # the second repeats the issue title
+    f = FakeGh(rows=with_comments({3: [on_dev("abc1234"), on_dev("def5678"), on_dev("abc1234")], 1: [on_dev("9999999")]}))
+    f.remote_messages["9999999"] = "Wishlist: first cut\n\nWhy: x\nUndo: y"                 # not local: GitHub's first line, no trailers
+    monkeypatch.setattr(notes, "gh", f)
+    assert run("1.0") == 0
+    out = capsys.readouterr().out
+    assert "- #3 Cart total: The cart shows the total.\n  - Cart: show the total\n" in out
+    assert out.count("Cart: show the total") == 1 and "  - Cart total" not in out
+    assert "- #1 Wishlist\n  - Wishlist: first cut\n" in out and "Why:" not in out
+
+
+def test_an_unknown_commit_is_left_out_with_a_warning(monkeypatch, capsys):
+    monkeypatch.setattr(notes, "gh", FakeGh(rows=with_comments({3: [on_dev("abc1234")]})))
+    assert run("1.0") == 0
+    cap = capsys.readouterr()
+    assert "abc1234" not in cap.out and "commit abc1234 not found" in cap.err
+
+
+def test_short_gives_one_line_per_issue_and_reads_no_comments(monkeypatch, capsys):
+    LOCAL["abc1234"] = "Cart: show the total"
+    f = FakeGh(rows=with_comments({3: [on_dev("abc1234")]}))
+    monkeypatch.setattr(notes, "gh", f)
+    assert run("1.0", "--short") == 0
+    assert "Cart: show the total" not in capsys.readouterr().out
+    assert all("comments" not in c[-1] for c in f.calls if c[:2] == ("issue", "list"))
+
+
+def version_world(before, after):
+    f = FakeGh(pr={"body": "refs #1", "commits": []})
+    f.parents = {"m" * 40: "p" * 40}
+    f.files = {"p" * 40: f'__version__ = "{before}"\n', "m" * 40: f'__version__ = "{after}"\n'}
+    return f
+
+
+def test_a_version_change_creates_the_release_on_the_merge_commit(monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+    f = version_world("1.0.0", "1.1.0")
+    monkeypatch.setattr(notes, "gh", f)
+    assert notes.release_after_merge(7, "m" * 40) == "v1.1.0"
+    args, body = f.created[0]
+    assert args[:3] == ("release", "create", "v1.1.0") and args[args.index("--target") + 1] == "m" * 40
+    assert args[args.index("--title") + 1] == "v1.1.0" and "- #1 Wishlist" in body
+    assert "created the release v1.1.0" in capsys.readouterr().out
+
+
+def test_no_version_change_creates_nothing_and_says_so(monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+    f = version_world("1.0.0", "1.0.0")
+    monkeypatch.setattr(notes, "gh", f)
+    assert notes.release_after_merge(7, "m" * 40) is None
+    assert f.created == [] and "does not change the version" in capsys.readouterr().out
+
+
+def test_without_a_version_file_nothing_is_read(monkeypatch, capsys):
+    monkeypatch.setattr(notes, "gh", lambda *a: pytest.fail("gh called"))
+    assert notes.release_after_merge(7, "m" * 40) is None
+    assert "version_file is not set" in capsys.readouterr().out
+
+
+def test_an_existing_release_gets_its_notes_edited_never_a_new_tag(monkeypatch, cfg):
+    cfg.version_file = "pkg/__init__.py"
+    f = version_world("1.0.0", "1.1.0")
+    f.releases = ["v1.1.0"]
+    monkeypatch.setattr(notes, "gh", f)
+    assert notes.release_after_merge(7, "m" * 40) == "v1.1.0"
+    assert f.created == [] and f.edited[0][:3] == ("release", "edit", "v1.1.0") and "- #1 Wishlist" in f.edited[1]
+
+
+def test_a_failing_release_raises_with_the_version(monkeypatch, cfg):
+    cfg.version_file = "pkg/__init__.py"
+    f = version_world("1.0.0", "1.1.0")
+    f.release_error = "HTTP 502"
+    monkeypatch.setattr(notes, "gh", f)
+    with pytest.raises(notes.ReleaseFailed) as e:
+        notes.release_after_merge(7, "m" * 40)
+    assert e.value.version == "1.1.0" and "HTTP 502" in str(e.value)
+
+
+@pytest.mark.parametrize("text, version", [('__version__ = "0.5.0"', "0.5.0"), ('version = "1.2"', "1.2"), ('{"version": "3.0.1"}', "3.0.1"),
+                                           ("nothing", None)])
+def test_version_of(text, version):
+    assert notes.version_of(text) == version
+
+
+def create(*argv):
+    p = argparse.ArgumentParser()
+    notes.add_parsers(p.add_subparsers(dest="cmd"))
+    args = p.parse_args(["release", "create", *argv])
+    return args.run(args)
+
+
+def test_release_create_by_hand_from_a_pr(monkeypatch, capsys):
+    f = FakeGh(pr={"body": "refs #1", "commits": []})
+    monkeypatch.setattr(notes, "gh", f)
+    assert create("0.4.0", "--target", "abcdef1234567", "--from-pr", "9") == 0
+    args, body = f.created[0]
+    assert args[:3] == ("release", "create", "v0.4.0") and "abcdef1234567" in args and "- #1 Wishlist" in body
+    assert "created the release v0.4.0 on abcdef1" in capsys.readouterr().out
+
+
+def test_release_create_by_hand_from_a_milestone_and_a_file(monkeypatch, tmp_path, capsys):
+    f = FakeGh()
+    monkeypatch.setattr(notes, "gh", f)
+    assert create("v0.3.0", "--milestone", "0.3.0") == 0
+    assert f.created[0][0][2] == "v0.3.0" and "--target" not in f.created[0][0] and "- #3 Cart total" in f.created[0][1]
+    text = tmp_path / "notes.md"
+    text.write_text("Hand written.", encoding="utf-8")
+    assert create("0.2.0", "--notes-file", str(text)) == 0
+    assert f.created[1][1] == "Hand written."
+
+
+def test_release_create_on_an_existing_release_edits_it(monkeypatch, tmp_path, capsys):
+    f = FakeGh(releases=["v0.3.0"])
+    monkeypatch.setattr(notes, "gh", f)
+    text = tmp_path / "n.md"
+    text.write_text("New.", encoding="utf-8")
+    assert create("0.3.0", "--notes-file", str(text)) == 0
+    assert f.created == [] and f.edited[1] == "New."
+    assert "its tag stays where it is" in capsys.readouterr().out
+
+
+def test_release_create_needs_exactly_one_notes_source():
+    with pytest.raises(SystemExit, match="one of"):
+        create("0.3.0")
+    with pytest.raises(SystemExit, match="one of"):
+        create("0.3.0", "--milestone", "m", "--from-pr", "1")

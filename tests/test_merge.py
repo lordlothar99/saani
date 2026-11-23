@@ -26,7 +26,7 @@ class FakeGh:
         if cmd[:3] == ("gh", "pr", "list"):
             return self.prs
         if cmd[:3] == ("gh", "pr", "view"):
-            return {"state": self.after} if cmd[-1] == "state" else self.pr
+            return {"state": self.after, "mergeCommit": {"oid": "m" * 40}} if cmd[-1] == "state,mergeCommit" else self.pr
         if cmd[2].endswith("/status"):
             return self.status
         if "/check-runs" in cmd[2]:
@@ -179,3 +179,36 @@ def test_deploy_hands_over_to_the_deployer_when_there_is_one(world, monkeypatch)
 def test_the_deployer_lookup_is_none_while_there_is_no_deploy_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "saani.deploy", None)               # an import of it fails
     assert merge.deployer() is None
+
+
+# ---------------------------------------------------------------- the GitHub release after the merge (#55)
+
+def test_no_version_file_means_no_release_step(world, monkeypatch):
+    monkeypatch.setattr(merge.notes, "release_after_merge", lambda *a: pytest.fail("called"))
+    assert merge.run_command(args()) == 0
+
+
+def test_the_release_step_gets_the_pull_request_and_its_merge_commit(world, monkeypatch, cfg):
+    cfg.version_file = "pkg/__init__.py"
+    given = []
+    monkeypatch.setattr(merge.notes, "release_after_merge", lambda n, sha: given.append((n, sha)) or "v1.0.0")
+    assert merge.run_command(args()) == 0
+    assert given == [(7, "m" * 40)]
+
+
+def test_a_failing_release_step_leaves_the_merge_done_and_prints_the_next_command(world, monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+
+    def boom(n, sha):
+        raise merge.notes.ReleaseFailed("gh release create failed: HTTP 502", "1.2.0")
+    monkeypatch.setattr(merge.notes, "release_after_merge", boom)
+    assert merge.run_command(args()) == 1
+    out = capsys.readouterr().out
+    assert world.merged and ("gh", "pr", "merge", "7", "--repo", "acme/webshop", "--merge", "--match-head-commit", SHA) in world.gh.written
+    assert f"next: saani release create 1.2.0 --target {'m' * 40} --from-pr 7" in out
+
+
+def test_a_dry_run_mentions_the_release(world, monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+    assert merge.run_command(args(dry=True)) == 0
+    assert "GitHub release v<version>" in capsys.readouterr().out

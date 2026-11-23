@@ -144,7 +144,8 @@ In **Claude Code**, type the slash command, or ask in your own words.
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (never `dev`, `main` or checked-out ones). Claude shows the list and asks first |
 | `saani ci status\|sync\|pr\|merged\|place` | `/saani:ci pr` | hybrid CI: GitHub Actions within the free minutes, the PC for the rest |
 | `saani kpis [--baseline]` | `/saani:kpis --baseline` | issues landed per day, conflicts by file, test waits, tokens and estimated cost, compared with the previous window |
-| `saani release notes <milestone> \| --pr N` | `/saani:release notes <milestone>` | the release notes from the GitHub issues: by issue Type, each with its Result line |
+| `saani release notes <milestone> \| --pr N` | `/saani:release notes <milestone>` | the release notes from the GitHub issues: by issue Type, each with its Result line and the commits that landed it (`--short`: no commits) |
+| `saani release create <version>` | `/saani:release create <version>` | the GitHub release `v<version>` by hand (`saani merge` makes it when a merge changes the version) |
 | `saani progress run\|show\|watch` | `/saani:progress` | progress bar and time left for a background test run |
 | `saani check-msg <file>` | (none) | the commit-msg hook: git runs it, not you |
 | `saani guard` | (none) | the plugin's Claude Code hook: Claude Code runs it before each tool call, not you |

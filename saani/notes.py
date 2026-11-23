@@ -12,8 +12,11 @@ import subprocess
 import sys
 import tempfile
 
-from . import config, kpis
+import argparse
 
+from . import comments, config, kpis
+
+VERSION = re.compile(r"""["']?(?:__version__|version)["']?\s*[:=]\s*["']([^"']+)["']""", re.I)
 GH_TIMEOUT = 60
 ISSUE_LIMIT = 1000
 OTHER = "Other"
@@ -116,6 +119,7 @@ def render(heading, issues, types):
             line = f"- #{i['number']} {i['title']}"
             sentence = result_sentence(i.get("body"))
             out.append(f"{line}: {sentence}" if sentence else line)
+            out.extend(f"  - {s}" for s in i.get("commits", []))
         out.append("")
     return "\n".join(out).rstrip() + "\n"
 
@@ -141,9 +145,64 @@ def read_types():
     return {int(n): t for n, t in pairs if t}
 
 
-def issue_rows(numbers=None, milestone=None):
+def commit_shas(issue_comments):
+    """The commits the `On dev` comments (saani/comments.py) name, oldest first, without repeats: the `Commit` cell of their table."""
+    heading = comments.KINDS["on-dev"][0]
+    shas = []
+    for body in issue_comments or []:
+        text = (body.get("body") if isinstance(body, dict) else body) or ""
+        if heading not in text:
+            continue
+        rows = [[c.strip() for c in line.strip().strip("|").split("|")] for line in text.splitlines() if line.strip().startswith("|")]
+        if len(rows) < 3 or "Commit" not in rows[0]:
+            continue
+        cell = rows[2][rows[0].index("Commit")] if rows[0].index("Commit") < len(rows[2]) else ""
+        for sha in re.findall(r"\b[0-9a-f]{7,40}\b", cell):
+            if sha not in shas:
+                shas.append(sha)
+    return shas
+
+
+def git(*args):
+    """The output of a git command in the main checkout, or None when it fails (a commit that is not local)."""
+    try:
+        r = subprocess.run(["git", *args], cwd=cfg().root, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=GH_TIMEOUT, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def commit_subject(sha):
+    """The first line of a commit's message (never the trailers): from git, else from GitHub; None when neither knows it."""
+    line = git("log", "-1", "--format=%s", sha)
+    if line:
+        return line
+    try:
+        message = gh("api", f"repos/{cfg().repo}/commits/{sha}", "--jq", ".commit.message")
+    except GhFailed:
+        return None
+    return message.strip().splitlines()[0].strip() if message.strip() else None
+
+
+def commit_lines(row):
+    """The subjects of the commits that landed the issue (its `On dev` comments), de-duplicated, without the one that repeats the title."""
+    title = (row.get("title") or "").strip().casefold()
+    out, seen = [], {title}
+    for sha in commit_shas(row.get("comments")):
+        subject = commit_subject(sha)
+        if subject is None:
+            print(f"warning: #{row.get('number')}: commit {sha} not found, left out", file=sys.stderr)
+            continue
+        if subject.casefold() not in seen:
+            seen.add(subject.casefold())
+            out.append(subject)
+    return out
+
+
+def issue_rows(numbers=None, milestone=None, short=False):
     c = cfg()
-    fields = "number,title,body,state,labels"
+    fields = "number,title,body,state,labels" + ("" if short else ",comments")
     if numbers is not None:
         rows = []
         for n in numbers:
@@ -165,22 +224,24 @@ def issue_rows(numbers=None, milestone=None):
 
 
 def collect(args):
-    """(heading, issues, the pull request's data or None)."""
+    """(heading, issues, the pull request's data or None). `short`: no commit lines (and the comments are not read)."""
     c = cfg()
+    short = getattr(args, "short", False)
     pr = None
     if args.pr is not None:
         pr = gh_json("pr", "view", str(args.pr), "--repo", c.repo, "--json", "body,commits") or {}
         text = [pr.get("body") or ""] + [f"{m.get('messageHeadline', '')}\n{m.get('messageBody', '')}" for m in pr.get("commits", [])]
         numbers = sorted({n for t in text for n in kpis.issues_in(t)})
-        rows = issue_rows(numbers=numbers)
+        rows = issue_rows(numbers=numbers, short=short)
         heading = f"Release notes: pull request #{args.pr}"
     else:
-        rows = issue_rows(milestone=args.milestone)
+        rows = issue_rows(milestone=args.milestone, short=short)
         heading = f"Release notes: {args.milestone}"
     if not rows:
         return heading, [], pr
     types = read_types()
-    issues = [{"number": r["number"], "title": r.get("title", ""), "body": r.get("body") or "", "type": types.get(r["number"])} for r in rows]
+    issues = [{"number": r["number"], "title": r.get("title", ""), "body": r.get("body") or "", "type": types.get(r["number"]),
+               "commits": [] if short else commit_lines(r)} for r in rows]
     return heading, issues, pr
 
 
@@ -189,6 +250,17 @@ def via_file(text, suffix):
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
     return path
+
+
+def release_exists(tag):
+    """True when the GitHub release with exactly this tag exists; any gh error but "release not found" stops."""
+    try:
+        gh("release", "view", tag, "--repo", cfg().repo, "--json", "tagName")
+    except GhFailed as e:
+        if "release not found" not in e.text.lower():
+            raise
+        return False
+    return True
 
 
 def post(args, notes, pr):
@@ -203,14 +275,7 @@ def post(args, notes, pr):
             os.unlink(path)
         print(f"posted: the {SECTION} section of pull request #{args.pr}")
         return 0
-    try:
-        gh("release", "view", args.milestone, "--repo", c.repo, "--json", "tagName")
-        found = True
-    except GhFailed as e:
-        if "release not found" not in e.text.lower():
-            raise
-        found = False
-    if not found:
+    if not release_exists(args.milestone):
         print(f"not posted: no GitHub release with the tag {args.milestone}; create it (the tag marks a commit), then run this again", file=sys.stderr)
         return 1
     path = via_file(notes, ".md")
@@ -241,12 +306,117 @@ def cmd_notes(args):
     return 0
 
 
+# ---------------------------------------------------------------- the GitHub release
+
+class ReleaseFailed(SystemExit):
+    """The release step failed; `.version` is the version being released (None when not yet known)."""
+    def __init__(self, message, version=None):
+        super().__init__(message)
+        self.version = version
+
+
+def tag_of(version):
+    return version if version.startswith("v") else f"v{version}"
+
+
+def version_of(text):
+    """The version a version file holds (`__version__ = "1.2.3"`, `version = "1.2.3"`, `"version": "1.2.3"`), or None."""
+    m = VERSION.search(text or "")
+    return m.group(1) if m else None
+
+
+def file_at(ref, path):
+    """The text of a file of the repository at a commit, from GitHub; None when the file is not there."""
+    try:
+        return gh("api", "-H", "Accept: application/vnd.github.raw", f"repos/{cfg().repo}/contents/{path}?ref={ref}")
+    except GhFailed as e:
+        if "not found" in e.text.lower() or "404" in e.text:
+            return None
+        raise
+
+
+def create_release(version, target, notes):
+    """The GitHub release `v<version>` with `notes` as its body: created on `target` (a commit; None: GitHub's default branch head), or,
+    when it already exists, only its notes are edited. An existing tag is never moved or deleted. Returns what it did."""
+    tag, c = tag_of(version), cfg()
+    path = via_file(notes, ".md")
+    try:
+        if release_exists(tag):
+            gh("release", "edit", tag, "--repo", c.repo, "--notes-file", path)
+            return f"the release {tag} exists: its notes are edited, its tag stays where it is"
+        gh("release", "create", tag, "--repo", c.repo, "--title", tag, "--notes-file", path, *(["--target", target] if target else []))
+        return f"created the release {tag}" + (f" on {target[:7]}" if target else " on the default branch's head")
+    finally:
+        os.unlink(path)
+
+
+def pr_notes(number):
+    """The notes of the issues a pull request names, as the body of a release."""
+    heading, issues, _ = collect(argparse.Namespace(pr=number, milestone=None, short=False))
+    return render(heading, issues, list(cfg().types)) if issues else f"## {heading}\n\nThe pull request names no issue.\n"
+
+
+def release_after_merge(number, merge_sha):
+    """After the merge of pull request `number` into production (merge commit `merge_sha`): when `[release] version_file` changed its
+    version, the GitHub release v<version> on the merge commit, with the notes of the pull request's issues. Prints what it did, returns
+    the release's tag or None (nothing to release). A failure raises ReleaseFailed."""
+    c = cfg()
+    if not c.version_file:
+        print("no release: [release] version_file is not set")
+        return None
+    version = None
+    try:
+        parent = gh("api", f"repos/{c.repo}/commits/{merge_sha}", "--jq", ".parents[0].sha").strip()
+        before, after = version_of(file_at(parent, c.version_file)), version_of(file_at(merge_sha, c.version_file))
+        if after is None:
+            print(f"no release: no version found in {c.version_file}")
+            return None
+        if before == after:
+            print(f"no release: the pull request does not change the version ({after}, {c.version_file})")
+            return None
+        version = after
+        print(create_release(version, merge_sha, pr_notes(number)))
+    except ReleaseFailed:
+        raise
+    except SystemExit as e:
+        raise ReleaseFailed(str(e.code or e), version)
+    return tag_of(version)
+
+
+def cmd_create(args):
+    sources = [x for x in (args.from_pr, args.milestone, args.notes_file) if x is not None]
+    if len(sources) != 1:
+        raise SystemExit("saani release create: name the notes with one of --from-pr N, --milestone TITLE, --notes-file FILE")
+    if args.notes_file:
+        try:
+            with open(args.notes_file, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as e:
+            raise SystemExit(f"saani release create: cannot read {args.notes_file}: {e}")
+    elif args.from_pr is not None:
+        text = pr_notes(args.from_pr)
+    else:
+        heading, issues, _ = collect(argparse.Namespace(pr=None, milestone=args.milestone, short=False))
+        text = render(heading, issues, list(cfg().types)) if issues else f"## {heading}\n\nNo closed or in-main issue in this milestone.\n"
+    print(create_release(args.version, args.target, text))
+    return 0
+
+
 def add_parsers(sub):
-    p = sub.add_parser("release", help="release notes from the GitHub issues: `release notes <milestone>` or `--pr N`")
-    p.add_argument("what", choices=["notes"])
-    p.add_argument("milestone", nargs="?", help="the milestone's title")
-    p.add_argument("--pr", type=int, help="the issues this pull request names with `refs #n` (body and commits) instead of a milestone")
-    p.add_argument("--post", action="store_true",
+    p = sub.add_parser("release", help="release notes from the GitHub issues (`release notes`) and the GitHub releases (`release create`)")
+    rs = p.add_subparsers(dest="what", required=True)
+    n = rs.add_parser("notes", help="the notes of a milestone's issues, or of a pull request's (`--pr N`)")
+    n.add_argument("milestone", nargs="?", help="the milestone's title")
+    n.add_argument("--pr", type=int, help="the issues this pull request names with `refs #n` (body and commits) instead of a milestone")
+    n.add_argument("--short", action="store_true", help="one line per issue: no commit lines under it")
+    n.add_argument("--post", action="store_true",
                    help="write the notes to GitHub: with --pr, the pull request body's `## Release notes` section; with a milestone, the notes "
                         "of the release tagged with its title (must exist). Without it nothing is written")
-    p.set_defaults(run=cmd_notes)
+    n.set_defaults(run=cmd_notes)
+    c = rs.add_parser("create", help="create the GitHub release v<version> (or edit its notes when it exists; its tag is never moved)")
+    c.add_argument("version", help="1.2.3 or v1.2.3: the tag is v1.2.3")
+    c.add_argument("--target", help="the commit to tag (default: GitHub's default branch head)")
+    c.add_argument("--from-pr", type=int, help="notes: the issues of this pull request")
+    c.add_argument("--milestone", help="notes: the issues of this milestone")
+    c.add_argument("--notes-file", help="notes: this Markdown file")
+    c.set_defaults(run=cmd_create)
