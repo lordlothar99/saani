@@ -105,19 +105,34 @@ def test_jobs_run_one_at_a_time_and_a_landing_overtakes_waiting_landing_tests(tm
 
 
 def test_the_second_identical_landing_run_takes_the_first_ones_result(tmp_path):
-    log, calls = tmp_path / "saani-tests.jsonl", []
+    """#44: no guessed delays. The first run holds the runner until the second is queued, both seen in this test's own queue folder
+    (tmp_path), so another job on the PC or a slow start cannot change the order."""
+    log, calls, started, release = tmp_path / "saani-tests.jsonl", [], threading.Event(), threading.Event()
+    folder = tmp_path / q.QUEUE_DIR
 
     def runner(command, cwd):
         calls.append(command)
-        time.sleep(0.3)
+        started.set()
+        release.wait(15)
         return 3
+
+    def waits_for(condition):
+        deadline = time.monotonic() + 15
+        while not condition() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert condition()
 
     a = threading.Thread(target=q.run, args=("landing", ["t"], tmp_path, tmp_path / "wt", "h", log), kwargs={"poll": 0.02, "runner": runner})
     a.start()
-    time.sleep(0.1)
-    assert q.run("landing", ["t"], tmp_path, tmp_path / "wt", "h", log, poll=0.02, runner=runner) == 3
-    a.join(5)
-    assert len(calls) == 1 and [r.get("shared", False) for r in q.rows(log)] == [False, True]
+    waits_for(started.is_set)                                 # the first run really runs
+    result = []
+    b = threading.Thread(target=lambda: result.append(q.run("landing", ["t"], tmp_path, tmp_path / "wt", "h", log, poll=0.02, runner=runner)))
+    b.start()
+    waits_for(lambda: len(list(folder.glob("job-*.json"))) == 2)     # the second is queued behind it
+    release.set()
+    a.join(15)
+    b.join(15)
+    assert result == [3] and len(calls) == 1 and [r.get("shared", False) for r in q.rows(log)] == [False, True]
 
 
 def test_an_unknown_kind_is_refused(tmp_path):

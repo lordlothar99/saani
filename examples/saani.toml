@@ -53,7 +53,7 @@ session_match = "webshop"        # Claude Code sessions whose project folder nam
 port = 8771
 
 [auto]
-parallel = 0                      # issues an auto run keeps in flight: 0 = sized from the cores and free RAM, else n (at most 3)
+parallel = 0                      # issues an auto run keeps in flight: 0 = sized from the cores and free RAM, else n (at most 2 per project)
 ci_attempts = 3                   # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
 
 [ci]

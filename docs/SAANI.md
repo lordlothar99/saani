@@ -255,7 +255,7 @@ A comment starts with one of the kinds in `.github/COMMENT_KINDS.md` (`▶ Start
 asked, what blocks the issue); the map and the auto run read it through that one parser.
 
 ### An auto run
-An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM, at most 3). Each
+An auto run (`/saani:auto`) keeps up to `[auto] parallel` issues in flight (`0`: sized from the cores and the free RAM; at most 2 per project, another project's run has its own 2). Each
 issue goes through the pipeline of docs/PLUGIN.md in its own worktree: `saani start`, the coder (in the background, so several issues
 progress at once), the reviewer, fixes, `saani land --worktree`. Landings stay one at a time (the lock). Claude Code asks `saani auto pick
 --json` whenever a slot is free and takes the first eligible issue, so an issue that lands is replaced at once and the list is never a

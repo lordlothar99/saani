@@ -27,28 +27,35 @@ def choose(issues, started=(), running=None, today="2026-11-22"):
 # ---------------------------------------------------------------- sizing
 
 @pytest.mark.parametrize("configured,cpus,gb,want", [
-    (0, 16, 32, 3), (0, 16, 100, 3),            # capped at 3
+    (0, 16, 32, 2), (0, 16, 100, 2),            # capped at 2 per project
     (0, 8, 64, 2), (0, 4, 64, 1), (0, 2, 64, 1),        # the cores decide, at least 1
-    (0, 32, 9, 2), (0, 32, 3, 1), (0, 32, 0.5, 1),      # the free RAM decides, at least 1
-    (0, 16, None, 3), (0, 8, None, 2),                  # RAM unknown: the cores alone
+    (0, 32, 9, 2), (0, 32, 4, 2), (0, 32, 3, 1), (0, 32, 0.5, 1),   # RAM that cannot hold one issue: 1
+    (0, 16, None, 2), (0, 8, None, 2),                  # RAM unknown: the cores alone
     (0, None, 32, 1),
-    (0, 12, 16, 3),                                     # the 12-core, 16 GB machine
-    (0, 12, 4, 1),
-    (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 3), (3, 4, 2, 3),   # fixed, capped at 3, whatever the machine says
+    (0, 12, 16, 2),                                     # the 12-core, 16 GB machine
+    (0, 12, 4, 2),                                      # other projects hold the rest: still its 2
+    (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 2), (3, 4, 2, 2),   # fixed, capped at 2, whatever the machine says
 ])
 def test_the_size_of_the_run(configured, cpus, gb, want):
     assert auto.parallel_size(configured, cpus, gb) == want
 
 
 def test_the_size_does_not_shrink_for_the_memory_running_issues_already_use():
-    # 12 cores, 16 GB in all: 3 issues running leave 4 GB free, and the size is still 3 (not 1)
-    assert auto.parallel_size(0, 12, 4, running=3) == 3
-    assert auto.parallel_size(0, 12, 4, running=0) == 1
-    assert auto.parallel_size(0, 12, 16, running=0) == 3
+    # 12 cores: 2 issues running leave 0.5 GB free, and the size is still 2 (not 1)
+    assert auto.parallel_size(0, 12, 0.5, running=2) == 2
+    assert auto.parallel_size(0, 12, 0.5, running=0) == 1
+    assert auto.parallel_size(0, 12, 16, running=0) == 2
+
+
+def test_a_second_project_gets_its_two_slots_while_another_has_two_in_flight(monkeypatch):
+    # this project runs nothing; another project's 2 issues hold the memory, 4 GB free is left
+    fake_world(monkeypatch, [issue(1), issue(2)], running={}, cpus=12, gb=4)
+    got = auto.pick("2026-11-22")
+    assert got["parallel"] == 2 and got["slots"] == 2
 
 
 def test_slots_are_the_size_less_the_running_issues_never_below_zero():
-    assert auto.free_slots(3, 1) == 2
+    assert auto.free_slots(2, 1) == 1
     assert auto.free_slots(2, 2) == 0
     assert auto.free_slots(1, 4) == 0
 
@@ -261,7 +268,7 @@ def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32):
 def test_pick_says_the_slots_the_running_issues_and_the_rest(monkeypatch):
     fake_world(monkeypatch, [issue(1), issue(2, "v1.0.0", "Bug"), issue(3, labels=["in-dev"]), issue(5)], running={5: ["x/y.py"]})
     got = auto.pick("2026-11-22")
-    assert got["parallel"] == 3 and got["slots"] == 2 and got["running"] == [5]
+    assert got["parallel"] == 2 and got["slots"] == 1 and got["running"] == [5]
     assert [e["number"] for e in got["eligible"]] == [2, 1]
     assert got["skipped"] == [{"number": 3, "reason": "already on dev"}, {"number": 5, "reason": "already in a worktree"}]
 
@@ -286,7 +293,7 @@ def test_saani_auto_pick_prints_and_saani_auto_still_makes_the_worktree(monkeypa
     fake_world(monkeypatch, [issue(1, title="First"), issue(2, text=body("⛔ No"))])
     assert run_saani(monkeypatch, ["auto", "pick"]) == 0
     out = capsys.readouterr().out
-    assert "slots: 3 free of 3" in out and "#1 First [Task; no milestone]" in out and "#2 Auto: no" in out
+    assert "slots: 2 free of 2" in out and "#1 First [Task; no milestone]" in out and "#2 Auto: no" in out
 
     assert run_saani(monkeypatch, ["auto", "pick", "--json", "--limit", "0"]) == 0
     data = json.loads(capsys.readouterr().out)
