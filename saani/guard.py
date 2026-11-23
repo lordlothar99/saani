@@ -1237,7 +1237,7 @@ def git_command(part, ctx, cwd):
         for k, w in enumerate(rest):
             if w == "--message" or re.fullmatch(r"-[a-zA-Z]*m", w):
                 text.add(k + 1)
-            elif w.startswith("--message=") or re.fullmatch(r"-[a-zA-Z]*m.+", w):
+            elif w.startswith("--message=") or glued_message(w):
                 text.add(k)
     if any(w.heredoc for k, w in enumerate(rest) if k not in text) or (sub != "commit" and any(w.heredoc for w in rest)):
         return deny("unsure", "a $(cat <<'EOF' ...) other than the value of git commit -m", "git")
@@ -1342,6 +1342,14 @@ def allowed_rev(w, ctx, write=False):
     if base == "HEAD" or base == f"origin/{ctx.integration}" or (not write and base == f"origin/{ctx.production}"):
         return True
     return bool(ctx.worker_branch.match(base.removeprefix("origin/")))
+
+
+def glued_message(w):
+    """True for -<flags>m<message> (the message glued to -m, no newline in it), read linearly: what re.fullmatch(r"-[a-zA-Z]*m.+") meant,
+    without its quadratic backtracking on a long word ending in a newline."""
+    m = w.find("m")
+    return (w[:1] == "-" and m > 0 and w[1:m].isascii() and (w[1:m].isalpha() or m == 1) and len(w) > m + 1
+            and "\n" not in w[m + 1:])
 
 
 def takes_text(sub, w):

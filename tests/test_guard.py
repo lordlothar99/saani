@@ -1094,6 +1094,17 @@ def test_a_decision_that_blocks_is_cut_off_with_a_deny_within_the_budget(tmp_pat
     assert out["permissionDecision"] == "deny" and "could not decide" in out["permissionDecisionReason"]
 
 
+def test_a_long_glued_message_ending_in_a_newline_is_decided_fast(ctx):
+    import time
+    word = "-" + "m" * 32_000 + "\n"
+    began = time.monotonic()
+    assert not guard.glued_message(word)
+    sh(ctx, "git commit '" + word + "'")
+    assert time.monotonic() - began < 1
+    for w, glued in (("-mx", True), ("-amx", True), ("-qam x", True), ("-m", False), ("-mx\ny", False), ("-1mx", False), ("x", False)):
+        assert guard.glued_message(w) is glued, w
+
+
 def test_a_huge_revision_word_is_decided_fast(ctx):
     import time
     began = time.monotonic()
