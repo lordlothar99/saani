@@ -93,21 +93,27 @@ def run_command(args):
 
 
 def release_step(number, merge_sha):
-    """The GitHub release when the merged pull request changed the version (saani/notes.py); 0 when it was made or none was due.
-    A failure never undoes the merge: it prints `next:` with the command for the owner, and returns 1."""
+    """The GitHub release when the merged pull request changed the version (saani/notes.py): (0, None) when it was made or none was due.
+    A failure of any kind never undoes the merge: it prints `next:` with the command for the owner, and gives (1, that line)."""
     if not cfg().version_file:
-        return 0
+        return 0, None
     if not merge_sha:
         print(f"no release made: GitHub names no merge commit for #{number} yet")
-        print(f"next: saani release create <version> --target <merge commit> --from-pr {number}")
-        return 1
+        line = f"next: saani release create <version> --target <merge commit> --from-pr {number}"
+        print(line)
+        return 1, line
+    version = None
     try:
         notes.release_after_merge(number, merge_sha)
-    except notes.ReleaseFailed as e:
+    except BaseException as e:                                   # ReleaseFailed (a SystemExit), OSError, odd gh data...
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        version = getattr(e, "version", None)
         print(f"the merge is done; the release step failed: {e}")
-        print(f"next: saani release create {e.version or '<version>'} --target {merge_sha} --from-pr {number}")
-        return 1
-    return 0
+        line = f"next: saani release create {version or '<version>'} --target {merge_sha} --from-pr {number}"
+        print(line)
+        return 1, line
+    return 0, None
 
 
 def merge_it(args):
@@ -141,14 +147,20 @@ def merge_it(args):
         return 1
     print(f"merged #{n} into {c.production}")
     code = ci.cmd_merged(gh, n)
-    code = release_step(n, (after.get("mergeCommit") or {}).get("oid")) or code
+    release_code, next_line = release_step(n, (after.get("mergeCommit") or {}).get("oid"))
+    code = release_code or code
     if not args.deploy:
         return code
     deploy = deployer()
     if deploy is None:
         print("deploy is not available yet (saani/deploy.py is missing): the merge is done, nothing was deployed")
+        if next_line:
+            print(next_line)
         return 2
-    return deploy(args) or code
+    result = deploy(args) or code
+    if next_line:
+        print(next_line)                                         # the last line, after the deploy's own output
+    return result
 
 
 def add_parsers(sub):

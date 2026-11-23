@@ -6,7 +6,7 @@
   merge [PR] [--deploy]                         merge the green integration -> production pull request, then relabel and clean up (saani/merge.py)
   deploy [--dry-run]                            the checks, the deploy, the log read, the prod tag moved, the issues closed (saani/deploy.py)
   kpis                                          the numbers over a window of days (saani/kpis.py)
-  release notes <milestone> | --pr N [--post]   the release notes from the GitHub issues; release create <version>: a GitHub release (saani/notes.py)
+  release notes <milestone> | --pr N [--short] [--post] the release notes from the GitHub issues; release create <version>: a GitHub release (saani/notes.py)
   ui (aliases: map, board)                      the local status page and the isometric map (saani/board_server.py)
   progress                                      a progress bar for a test run in the background (saani/progress.py)
   guard                                         the plugin's Claude Code hook (PreToolUse, PostToolUse): JSON on stdin (saani/guard.py)

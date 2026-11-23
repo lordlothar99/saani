@@ -24,6 +24,9 @@ class FakeGh:
         self.release_error = None
         self.broken = set()                                              # issue numbers whose `gh issue view` fails
         self.created = []
+        self.head = "m" * 40                                             # the production branch's head
+        self.tags = {}                                                   # tag -> (object type, sha)
+        self.annotated = {}                                              # annotated tag object sha -> the commit it points at
         self.files = {}                                                  # ref -> the version file's text
         self.parents = {}                                                # merge sha -> its first parent
         self.remote_messages = {}                                        # sha -> commit message, for commits git does not have
@@ -48,6 +51,16 @@ class FakeGh:
             if ref not in self.files:
                 raise notes.GhFailed(args, "HTTP 404: Not Found")
             return self.files[ref]
+        if args[0] == "api" and "/git/ref/tags/" in args[1]:
+            tag = args[1].rsplit("/", 1)[1]
+            if tag not in self.tags:
+                raise notes.GhFailed(args, "HTTP 404: Not Found")
+            kind, sha = self.tags[tag]
+            return json.dumps({"object": {"type": kind, "sha": sha}})
+        if args[0] == "api" and "/git/tags/" in args[1]:
+            return json.dumps({"object": {"type": "commit", "sha": self.annotated[args[1].rsplit("/", 1)[1]]}})
+        if args[0] == "api" and args[1].endswith("/commits/main") and args[-1] == ".sha":
+            return self.head + "\n"
         if args[0] == "api" and "/commits/" in args[1]:
             sha = args[1].rsplit("/", 1)[1]
             if args[-1] == ".parents[0].sha":
@@ -289,15 +302,6 @@ def test_without_a_version_file_nothing_is_read(monkeypatch, capsys):
     assert "version_file is not set" in capsys.readouterr().out
 
 
-def test_an_existing_release_gets_its_notes_edited_never_a_new_tag(monkeypatch, cfg):
-    cfg.version_file = "pkg/__init__.py"
-    f = version_world("1.0.0", "1.1.0")
-    f.releases = ["v1.1.0"]
-    monkeypatch.setattr(notes, "gh", f)
-    assert notes.release_after_merge(7, "m" * 40) == "v1.1.0"
-    assert f.created == [] and f.edited[0][:3] == ("release", "edit", "v1.1.0") and "- #1 Wishlist" in f.edited[1]
-
-
 def test_a_failing_release_raises_with_the_version(monkeypatch, cfg):
     cfg.version_file = "pkg/__init__.py"
     f = version_world("1.0.0", "1.1.0")
@@ -308,8 +312,16 @@ def test_a_failing_release_raises_with_the_version(monkeypatch, cfg):
     assert e.value.version == "1.1.0" and "HTTP 502" in str(e.value)
 
 
-@pytest.mark.parametrize("text, version", [('__version__ = "0.5.0"', "0.5.0"), ('version = "1.2"', "1.2"), ('{"version": "3.0.1"}', "3.0.1"),
-                                           ("nothing", None)])
+PACKAGE_JSON = '{\n  "name": "webshop",\n  "version": "3.0.1",\n  "engines": {\n    "version": "18"\n  }\n}\n'
+PYPROJECT_DYNAMIC = '[project]\nname = "webshop"\ndynamic = ["version"]\nrequires-python = ">=3.11"\n\n[tool.black]\ntarget-version = ["py311"]\npython_version = "3.11"\n'
+PYPROJECT_STATIC = '[tool.mypy]\npython_version = "3.11"\n\n[project]\n# version = "9.9.9"\nversion = "2.0.0"\n'
+
+
+@pytest.mark.parametrize("text, version", [
+    ('__version__ = "0.5.0"', "0.5.0"), ('version = "1.2"', "1.2"), ("nothing", None),
+    (PACKAGE_JSON, "3.0.1"), (PYPROJECT_DYNAMIC, None), (PYPROJECT_STATIC, "2.0.0"),
+    ('python_version = "3.11"', None), ('target-version = "py311"', None), ('# version = "1.0"', None), ('  version: "4.1"', "4.1"),
+])
 def test_version_of(text, version):
     assert notes.version_of(text) == version
 
@@ -327,14 +339,76 @@ def test_release_create_by_hand_from_a_pr(monkeypatch, capsys):
     assert create("0.4.0", "--target", "abcdef1234567", "--from-pr", "9") == 0
     args, body = f.created[0]
     assert args[:3] == ("release", "create", "v0.4.0") and "abcdef1234567" in args and "- #1 Wishlist" in body
+    assert "--latest=false" in args                                      # a past version is not the latest release
     assert "created the release v0.4.0 on abcdef1" in capsys.readouterr().out
+
+
+def test_a_release_on_the_production_head_is_the_latest(monkeypatch):
+    f = FakeGh(pr={"body": "refs #1", "commits": []})
+    monkeypatch.setattr(notes, "gh", f)
+    assert create("1.0.0", "--target", "m" * 40, "--from-pr", "9") == 0
+    assert "--latest=false" not in f.created[0][0]
+
+
+def test_without_target_the_release_goes_on_the_production_head_and_says_so(monkeypatch, capsys):
+    f = FakeGh(pr={"body": "refs #1", "commits": []})
+    f.head = "c" * 40
+    monkeypatch.setattr(notes, "gh", f)
+    assert create("1.0.0", "--from-pr", "9") == 0
+    args = f.created[0][0]
+    assert args[args.index("--target") + 1] == "c" * 40 and "--latest=false" not in args
+    assert "ccccccc (the head of main)" in capsys.readouterr().out
+
+
+def test_an_existing_tag_at_another_commit_is_refused(monkeypatch, tmp_path):
+    f = FakeGh()
+    f.tags["v1.0.0"] = ("commit", "a" * 40)
+    monkeypatch.setattr(notes, "gh", f)
+    text = tmp_path / "n.md"
+    text.write_text("x", encoding="utf-8")
+    with pytest.raises(SystemExit, match="never moved"):
+        create("1.0.0", "--target", "b" * 40, "--notes-file", str(text))
+    assert f.created == []
+
+
+def test_an_existing_tag_at_the_same_commit_or_without_target_makes_the_release_on_the_tags_commit(monkeypatch, tmp_path, capsys):
+    f = FakeGh()
+    f.tags["v1.0.0"] = ("commit", "a" * 40)
+    f.tags["v1.1.0"] = ("tag", "t" * 40)                                 # annotated: peeled
+    f.annotated["t" * 40] = "d" * 40
+    monkeypatch.setattr(notes, "gh", f)
+    text = tmp_path / "n.md"
+    text.write_text("x", encoding="utf-8")
+    assert create("1.0.0", "--target", "aaaaaaa", "--notes-file", str(text)) == 0
+    assert create("1.1.0", "--notes-file", str(text)) == 0
+    for args, _ in f.created:
+        assert "--target" not in args and "--latest=false" in args
+    out = capsys.readouterr().out
+    assert "existing tag's commit aaaaaaa" in out and "existing tag's commit ddddddd" in out
+
+
+def test_the_version_that_a_merge_changes_to_one_with_a_release_is_left_alone(monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+    f = version_world("1.1.0", "1.0.0")                                  # a revert
+    f.releases = ["v1.0.0"]
+    monkeypatch.setattr(notes, "gh", f)
+    assert notes.release_after_merge(7, "m" * 40) is None
+    assert f.created == [] and f.edited is None
+    assert "no release: v1.0.0 already exists" in capsys.readouterr().out
+
+
+def test_an_empty_notes_file_or_milestone_is_refused():
+    with pytest.raises(SystemExit, match="empty"):
+        create("1.0.0", "--notes-file", "")
+    with pytest.raises(SystemExit, match="empty"):
+        create("1.0.0", "--milestone", "")
 
 
 def test_release_create_by_hand_from_a_milestone_and_a_file(monkeypatch, tmp_path, capsys):
     f = FakeGh()
     monkeypatch.setattr(notes, "gh", f)
     assert create("v0.3.0", "--milestone", "0.3.0") == 0
-    assert f.created[0][0][2] == "v0.3.0" and "--target" not in f.created[0][0] and "- #3 Cart total" in f.created[0][1]
+    assert f.created[0][0][2] == "v0.3.0" and f.created[0][0][f.created[0][0].index("--target") + 1] == "m" * 40 and "- #3 Cart total" in f.created[0][1]
     text = tmp_path / "notes.md"
     text.write_text("Hand written.", encoding="utf-8")
     assert create("0.2.0", "--notes-file", str(text)) == 0

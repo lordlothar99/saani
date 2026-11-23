@@ -16,7 +16,10 @@ Only the owner starts it; an auto run never does.
    open, mergeable and its CI is green on the exact head (the `[ci] status_context` status and every check run), merges it with a merge commit
    (the trailers stay; the integration branch is never deleted), then does what `saani ci merged` does: relabel the issues, remove the
    finished auto runs. `--dry-run` runs the checks and prints what would happen, merging nothing.
-2. `--deploy`: after the merge, `saani deploy` (the checks, the deploy, the log, the prod tag, the issues; `/saani:deploy`). If it refuses
+   When `[release] version_file` is set and the pull request changed the version in it, it then creates the GitHub release `v<version>`
+   with the notes of the pull request's issues (nothing otherwise; it says so). If that release step fails, the merge stands: show the
+   `next: saani release create ...` line and tell the owner to run it; never run it yourself.
+2. `--deploy`: after the merge (and the release step), `saani deploy` (the checks, the deploy, the log, the prod tag, the issues; `/saani:deploy`). If it refuses
    or fails, the merge stands; say that, and what the deploy's message says to do.
 3. Merged: say the pull request, that the issues were relabelled and which auto runs were removed. Refused: show the reason and the step it
    names (usually `saani ci pr`); never merge by another route, never force, never weaken a check.

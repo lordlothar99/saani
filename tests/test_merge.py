@@ -212,3 +212,34 @@ def test_a_dry_run_mentions_the_release(world, monkeypatch, cfg, capsys):
     cfg.version_file = "pkg/__init__.py"
     assert merge.run_command(args(dry=True)) == 0
     assert "GitHub release v<version>" in capsys.readouterr().out
+
+
+def test_any_error_of_the_release_step_keeps_the_merge_and_prints_the_next_command(world, monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+
+    def boom(n, sha):
+        raise OSError("no space left on device")
+    monkeypatch.setattr(merge.notes, "release_after_merge", boom)
+    assert merge.run_command(args()) == 1
+    out = capsys.readouterr().out
+    assert "nothing was merged" not in out and "no space left" in out
+    assert f"next: saani release create <version> --target {'m' * 40} --from-pr 7" in out
+    assert world.merged
+
+
+def test_a_failed_release_does_not_stop_the_deploy_and_its_next_line_comes_last(world, monkeypatch, cfg, capsys):
+    cfg.version_file = "pkg/__init__.py"
+
+    def boom(n, sha):
+        raise merge.notes.ReleaseFailed("HTTP 502", "1.2.0")
+
+    def deploy(a):
+        print("deploying...")
+        return 0
+    monkeypatch.setattr(merge.notes, "release_after_merge", boom)
+    monkeypatch.setattr(merge, "deployer", lambda: deploy)
+    assert merge.run_command(args(deploy=True)) == 1
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert "deploying..." in lines
+    assert lines[-1] == f"next: saani release create 1.2.0 --target {'m' * 40} --from-pr 7"
+    assert lines.index("deploying...") < len(lines) - 1

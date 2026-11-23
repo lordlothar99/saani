@@ -16,7 +16,7 @@ import argparse
 
 from . import comments, config, kpis
 
-VERSION = re.compile(r"""["']?(?:__version__|version)["']?\s*[:=]\s*["']([^"']+)["']""", re.I)
+VERSION = re.compile(r"""^\s*["']?(?:__version__|version)["']?\s*[:=]\s*["']([^"']+)["']""", re.I | re.M)
 GH_TIMEOUT = 60
 ISSUE_LIMIT = 1000
 OTHER = "Other"
@@ -335,17 +335,62 @@ def file_at(ref, path):
         raise
 
 
+def not_found(e):
+    return "not found" in e.text.lower() or "404" in e.text
+
+
+def production_head():
+    """The commit the production branch points at now (a full SHA)."""
+    return gh("api", f"repos/{cfg().repo}/commits/{cfg().production}", "--jq", ".sha").strip()
+
+
+def tag_commit(tag):
+    """The commit an existing tag points at (an annotated tag is peeled), or None when there is no such tag."""
+    repo = cfg().repo
+    try:
+        obj = (gh_json("api", f"repos/{repo}/git/ref/tags/{tag}") or {}).get("object") or {}
+        for _ in range(5):                                           # an annotated tag may point at another tag
+            if obj.get("type") != "tag":
+                break
+            obj = (gh_json("api", f"repos/{repo}/git/tags/{obj.get('sha')}") or {}).get("object") or {}
+    except GhFailed as e:
+        if not_found(e):
+            return None
+        raise
+    return obj.get("sha") or None
+
+
+def same_commit(a, b):
+    return bool(a and b) and (a.startswith(b) or b.startswith(a))
+
+
 def create_release(version, target, notes):
-    """The GitHub release `v<version>` with `notes` as its body: created on `target` (a commit; None: GitHub's default branch head), or,
-    when it already exists, only its notes are edited. An existing tag is never moved or deleted. Returns what it did."""
+    """The GitHub release `v<version>` with `notes` as its body. A release that exists: only its notes are edited. A tag without a release
+    stays where it is: the release is made on the tag's commit, and a different `target` is refused. Otherwise it is made on `target`
+    (default: the production branch's head, a SHA). A release is "latest" only when it is on the production head. A tag is never moved
+    or deleted. Returns what it did."""
     tag, c = tag_of(version), cfg()
     path = via_file(notes, ".md")
     try:
         if release_exists(tag):
             gh("release", "edit", tag, "--repo", c.repo, "--notes-file", path)
             return f"the release {tag} exists: its notes are edited, its tag stays where it is"
-        gh("release", "create", tag, "--repo", c.repo, "--title", tag, "--notes-file", path, *(["--target", target] if target else []))
-        return f"created the release {tag}" + (f" on {target[:7]}" if target else " on the default branch's head")
+        head = production_head()
+        existing = tag_commit(tag)
+        extra = []
+        if existing:
+            if target and not same_commit(existing, target):
+                raise SystemExit(f"saani release create: the tag {tag} exists and points at {existing[:7]}, not at {target[:7]}: a tag is never moved; "
+                                 f"leave out --target to make the release on {existing[:7]}, or delete the tag yourself")
+            commit, where = existing, f"the existing tag's commit {existing[:7]}"
+        else:
+            commit = target or head
+            extra = ["--target", commit]
+            where = f"{commit[:7]}" + ("" if target else f" (the head of {c.production})")
+        if not same_commit(commit, head):
+            extra.append("--latest=false")
+        gh("release", "create", tag, "--repo", c.repo, "--title", tag, "--notes-file", path, *extra)
+        return f"created the release {tag} on {where}" + ("" if same_commit(commit, head) else " (not the latest: it is not the head of production)")
     finally:
         os.unlink(path)
 
@@ -375,11 +420,16 @@ def release_after_merge(number, merge_sha):
             print(f"no release: the pull request does not change the version ({after}, {c.version_file})")
             return None
         version = after
+        if release_exists(tag_of(version)):
+            print(f"no release: {tag_of(version)} already exists (a revert?); its notes are left as they are")
+            return None
         print(create_release(version, merge_sha, pr_notes(number)))
     except ReleaseFailed:
         raise
     except SystemExit as e:
         raise ReleaseFailed(str(e.code or e), version)
+    except Exception as e:                                           # OSError from a temp file, gh data of an odd shape
+        raise ReleaseFailed(f"{type(e).__name__}: {e}", version)
     return tag_of(version)
 
 
@@ -387,7 +437,9 @@ def cmd_create(args):
     sources = [x for x in (args.from_pr, args.milestone, args.notes_file) if x is not None]
     if len(sources) != 1:
         raise SystemExit("saani release create: name the notes with one of --from-pr N, --milestone TITLE, --notes-file FILE")
-    if args.notes_file:
+    if "" in (args.notes_file, args.milestone):
+        raise SystemExit("saani release create: --notes-file and --milestone need a value, not an empty one")
+    if args.notes_file is not None:
         try:
             with open(args.notes_file, encoding="utf-8") as fh:
                 text = fh.read()
@@ -415,7 +467,8 @@ def add_parsers(sub):
     n.set_defaults(run=cmd_notes)
     c = rs.add_parser("create", help="create the GitHub release v<version> (or edit its notes when it exists; its tag is never moved)")
     c.add_argument("version", help="1.2.3 or v1.2.3: the tag is v1.2.3")
-    c.add_argument("--target", help="the commit to tag (default: GitHub's default branch head)")
+    c.add_argument("--target", help="the commit to tag (default: the head of the production branch, resolved to its SHA and printed); "
+                                    "an existing tag is never moved: at another commit, it is refused")
     c.add_argument("--from-pr", type=int, help="notes: the issues of this pull request")
     c.add_argument("--milestone", help="notes: the issues of this milestone")
     c.add_argument("--notes-file", help="notes: this Markdown file")
