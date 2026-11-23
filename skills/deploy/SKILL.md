@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Deploy production: CI green, no issue says do not deploy, the checks, the dry run, the deploy, the log, then the prod tag moved and the issues closed. Use when the owner types /saani:deploy or says "deploy" in their own words.
+description: 'Deploy production: CI green, no issue says do not deploy, the checks, the dry run, the deploy, the log, then the prod tag moved and the issues closed. Use when the owner types /saani:deploy or says "deploy" in their own words.'
 argument-hint: "[--dry-run]"
 disable-model-invocation: true
 ---
