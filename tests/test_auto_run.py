@@ -607,6 +607,54 @@ def test_a_removal_that_fails_with_the_worktree_still_registered_keeps_it_and_th
     assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
 
 
+def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_registered(world, monkeypatch, capsys):
+    folder = world.wt / "task-12-cart"
+    folder.mkdir()
+    other = str(folder).replace("\\", "/")
+    if os.name == "nt":
+        other = other.upper()
+
+    def on_git(a):
+        if a[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(a, 1, stdout="", stderr="in use")
+        if a[:2] == ("worktree", "list"):
+            return f"worktree {world.root}\nbranch refs/heads/dev\n\nworktree {other}\nbranch refs/heads/task/12-cart\n"
+        return None
+    calls = stub_landing(world, monkeypatch, on_git)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
+
+
+def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
+    folder = world.wt / "it's a folder"
+    folder.mkdir()
+
+    def on_git(a):
+        if a[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(a, 1, stdout="", stderr="busy")
+        if a[:2] == ("worktree", "list"):
+            return f"worktree {world.root}\nbranch refs/heads/dev\n"
+        return None
+    stub_landing(world, monkeypatch, on_git)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
+
+
+def test_git_exiting_during_the_post_push_steps_still_prints_every_next_step(world, monkeypatch, capsys):
+    record(world)
+    stub_landing(world, monkeypatch)
+
+    def exits(*a, **k):
+        raise SystemExit("git worktree list failed")
+    monkeypatch.setattr(auto, "journal", exits)
+    monkeypatch.setattr(core, "mark_on_dev", exits)
+    monkeypatch.setattr(core, "remove_landed_worktree", exits)
+    assert core.cmd_land(land_args()) == 0
+    out = capsys.readouterr().out
+    assert "next: journal the landing of #12" in out and "next: remove the worktree" in out
+    assert "next: comment the commit on #12" in out and "git worktree list failed" in out.split("next: comment")[1]
+
+
 def test_the_marker_line_is_the_guards_contract(world, capsys, tmp_path):
     other = worktree(world.root, world.wt / "auto-x1")
     assert auto.cmd_on(args(id="x1", folder=str(other))) == 0

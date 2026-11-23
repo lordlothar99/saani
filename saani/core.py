@@ -609,18 +609,19 @@ def cmd_land(args):
     n = m.group(2)
     try:
         auto.journal(n, "landed")
-    except Exception as e:                 # noqa: BLE001
+    except (Exception, SystemExit) as e:   # noqa: BLE001 (git() exits on a failed command)
         print(f"next: journal the landing of #{n} (saani auto journal failed: {e})")
+    why = ""
     try:
         commented = (not args.no_comment) and mark_on_dev(n, row)
-    except Exception:                      # noqa: BLE001
-        commented = False
+    except (Exception, SystemExit) as e:   # noqa: BLE001
+        commented, why = False, f" ({e})"
     if not commented:
-        print(f"next: comment the commit on #{n} and label it {c.labels.get('in_dev', 'in-dev')}")
+        print(f"next: comment the commit on #{n} and label it {c.labels.get('in_dev', 'in-dev')}{why}")
     if not args.keep:
         try:
             remove_landed_worktree(cwd, branch)
-        except Exception as e:             # noqa: BLE001
+        except (Exception, SystemExit) as e:   # noqa: BLE001
             print(f"next: remove the worktree: git worktree remove {cwd}; git branch -D {branch} ({e})")
     return 0
 
@@ -635,15 +636,17 @@ def remove_landed_worktree(cwd, branch):
         git("branch", "-D", branch, cwd=home, check=False)
         print(f"removed: {cwd} and the local branch {branch}")
         return
-    here = pathlib.Path(cwd).resolve()
-    registered = any(pathlib.Path(p).resolve() == here for p, _ in worktrees(home))
+    def same(p):                           # spelling (slashes, letter case on Windows) must not matter
+        return os.path.normcase(pathlib.Path(p).resolve())
+    registered = any(same(p) == same(cwd) for p, _ in worktrees(home))
     if registered:
         print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
         return
     git("branch", "-D", branch, cwd=home, check=False)
+    quoted = str(cwd).replace("'", "''")
     left = f"the folder {cwd} is left" if pathlib.Path(cwd).exists() else "nothing is left"
     print(f"the worktree is unregistered but git could not delete its folder: the local branch {branch} is deleted; {left}"
-          + (f", remove it yourself (e.g. Remove-Item -Recurse -Force {cwd})" if pathlib.Path(cwd).exists() else ""))
+          + (f", remove it yourself (e.g. Remove-Item -LiteralPath '{quoted}' -Recurse -Force)" if pathlib.Path(cwd).exists() else ""))
 
 
 def landing_fields(row):

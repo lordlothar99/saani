@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `saani land` journals, comments `On dev` and labels `in-dev` before it removes the worktree, and a failed `git worktree remove` says what is left (issue #49).
 
 ## 0.4.0 (2026-11-23)
 - Plugin 0.4.0: auto runs end to end (the guard, stop rules, a two-part launch with the run headless, `saani merge`, `saani deploy`),
