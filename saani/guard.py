@@ -1015,11 +1015,44 @@ def git_command(part, ctx, cwd):
     if sub not in GIT_READ_ANYWHERE and not ctx.cd_ok(gcwd):
         return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
                     "git", how="cd <worktree> && git ...")
-    verdict = git_sub(sub, words, ctx, gcwd, part)
+    verdict = commit_takes_paths(rest) if sub == "commit" else None
+    verdict = verdict or git_sub(sub, words, ctx, gcwd, part)
     if verdict:
         return verdict
     if scan(ctx, rest, gcwd, text):
         return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
+    return None
+
+
+COMMIT_VALUED = {"-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message", "--fixup", "--squash", "--author",
+                 "--date", "-t", "--template", "--cleanup", "--trailer"}
+COMMIT_PATHS = ("all", "include", "only", "pathspec-from-file")
+
+
+def commit_takes_paths(rest):
+    """A refusal when git commit would take files itself rather than what `git add` staged: -a/--all, -i/--include, -o/--only,
+    --pathspec-from-file (and their abbreviations), any path argument (a word that is not an option or its value, anything after --).
+    Read on every word, message values included, so a glued `-amx` is seen as -a."""
+    refused = deny("git commit paths", "git commit -a, -i, -o, --pathspec-from-file or a path (it would commit files git add refuses)",
+                   "git", how="git add <file> <file>, then git commit -m <message>")
+    k = 0
+    while k < len(rest):
+        w = rest[k]
+        if not w.startswith("-") or w in ("-", "--"):
+            return refused
+        if w.startswith("--"):
+            name, eq, _ = w[2:].partition("=")
+            if any(x.startswith(name) for x in COMMIT_PATHS):
+                return refused
+            k += 2 if ("--" + name in COMMIT_VALUED and not eq) else 1
+            continue
+        for j, ch in enumerate(w[1:], 1):              # a cluster: flags, until an option that takes the rest (or the next word)
+            if ch in "aio":
+                return refused
+            if ch in "mFCctSu":
+                k += 1 if (j == len(w) - 1 and ch in "mFCct") else 0
+                break
+        k += 1
     return None
 
 
