@@ -527,6 +527,7 @@ def named_worktree(path):
 
 
 def cmd_land(args):
+    from . import auto                     # up front: the worktree's own files may be gone by the end of the landing
     c = cfg()
     cwd = named_worktree(args.worktree)
     branch = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
@@ -602,21 +603,47 @@ def cmd_land(args):
         raise
     print(f"LANDED: {branch} -> {c.integration} at {row['head']} in {row['seconds']} s"
           + (f"; conflicts: {', '.join(row['conflicts'])}" if row["conflicts"] else ""))
+    # Every step after the push runs before the worktree goes (its own saani files are deleted with it), and each one on its own:
+    # a failure prints the step it left undone, never skips the others.
     restore_generated(cwd)                 # the landing tests may rewrite them with other line endings
+    n = m.group(2)
+    try:
+        auto.journal(n, "landed")
+    except Exception as e:                 # noqa: BLE001
+        print(f"next: journal the landing of #{n} (saani auto journal failed: {e})")
+    try:
+        commented = (not args.no_comment) and mark_on_dev(n, row)
+    except Exception:                      # noqa: BLE001
+        commented = False
+    if not commented:
+        print(f"next: comment the commit on #{n} and label it {c.labels.get('in_dev', 'in-dev')}")
     if not args.keep:
-        home = main_checkout(cwd)
-        os.chdir(home)
-        gone = git("worktree", "remove", str(cwd), cwd=home, check=False)
-        if gone.returncode == 0:
-            git("branch", "-D", branch, cwd=home, check=False)
-            print(f"removed: {cwd} and the local branch {branch}")
-        else:
-            print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
-    from . import auto
-    auto.journal(m.group(2), "landed")
-    if args.no_comment or not mark_on_dev(m.group(2), row):
-        print(f"next: comment the commit on #{m.group(2)} and label it {c.labels.get('in_dev', 'in-dev')}")
+        try:
+            remove_landed_worktree(cwd, branch)
+        except Exception as e:             # noqa: BLE001
+            print(f"next: remove the worktree: git worktree remove {cwd}; git branch -D {branch} ({e})")
     return 0
+
+
+def remove_landed_worktree(cwd, branch):
+    """Removes a landed worktree and its local branch, and says what is actually left when git fails: still registered (it stays, the
+    branch too) or unregistered with a folder left behind (the branch goes, the owner removes the folder)."""
+    home = main_checkout(cwd)
+    os.chdir(home)
+    gone = git("worktree", "remove", str(cwd), cwd=home, check=False)
+    if gone.returncode == 0:
+        git("branch", "-D", branch, cwd=home, check=False)
+        print(f"removed: {cwd} and the local branch {branch}")
+        return
+    here = pathlib.Path(cwd).resolve()
+    registered = any(pathlib.Path(p).resolve() == here for p, _ in worktrees(home))
+    if registered:
+        print(f"the worktree stays (in use?): git worktree remove {cwd}; git branch -D {branch}")
+        return
+    git("branch", "-D", branch, cwd=home, check=False)
+    left = f"the folder {cwd} is left" if pathlib.Path(cwd).exists() else "nothing is left"
+    print(f"the worktree is unregistered but git could not delete its folder: the local branch {branch} is deleted; {left}"
+          + (f", remove it yourself (e.g. Remove-Item -Recurse -Force {cwd})" if pathlib.Path(cwd).exists() else ""))
 
 
 def landing_fields(row):

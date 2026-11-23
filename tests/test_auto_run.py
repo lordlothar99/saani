@@ -521,6 +521,92 @@ def test_saani_land_journals_the_landing(world, monkeypatch, capsys):
     assert [(r["issue"], r["kind"]) for r in auto.read_journal("r1")] == [(12, "landed")]
 
 
+def land_args(**kw):
+    return type("A", (), {"worktree": None, "keep": False, "dry_run": False, "wait": 1, "no_comment": False, **kw})()
+
+
+def stub_landing(world, monkeypatch, on_git=None):
+    root = world.root
+    calls = []
+
+    def git(*a, cwd=None, check=True):
+        calls.append(a)
+        if on_git:
+            r = on_git(a)
+            if r is not None:
+                return r
+        out = {("rev-parse", "--show-toplevel"): str(world.run), ("rev-parse", "--abbrev-ref"): "task/12-cart",
+               ("rev-parse", "--git-common-dir"): str(root / ".git"), ("rev-parse", "--short"): "abc1234"}.get(a[:2], "")
+        return subprocess.CompletedProcess(a, 0, stdout=out, stderr="") if not check else out
+    monkeypatch.setattr(core, "git", git)
+    monkeypatch.setattr(core, "take_lock", lambda *a, **k: True)
+    monkeypatch.setattr(core, "release_lock", lambda *a, **k: None)
+    monkeypatch.setattr(core, "merge_and_rebuild", lambda *a, **k: None)
+    monkeypatch.setattr(core, "queued_run", lambda *a, **k: 0)
+    monkeypatch.setattr(core, "record", lambda *a, **k: None)
+    monkeypatch.setattr(core, "restore_generated", lambda *a, **k: None)
+    monkeypatch.setattr(core, "main_checkout", lambda *a, **k: world.root)
+    monkeypatch.chdir(world.run)
+    return calls
+
+
+def test_landing_does_its_post_push_steps_before_the_worktree_is_removed(world, monkeypatch, capsys):
+    record(world)
+    order = []
+    calls = stub_landing(world, monkeypatch)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: order.append("comment") or True)
+    monkeypatch.setattr(auto, "journal", lambda *a, **k: order.append("journal"))
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: order.append("remove"))
+    assert core.cmd_land(land_args()) == 0
+    assert order == ["journal", "comment", "remove"]
+
+
+def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(world, monkeypatch, capsys):
+    record(world)
+    order = []
+    stub_landing(world, monkeypatch)
+
+    def boom(*a, **k):
+        raise ImportError("cannot import name 'auto' from 'saani'")
+    monkeypatch.setattr(auto, "journal", boom)
+    monkeypatch.setattr(core, "mark_on_dev", boom)
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: order.append("remove"))
+    assert core.cmd_land(land_args()) == 0
+    out = capsys.readouterr().out
+    assert "next: journal the landing of #12" in out and "next: comment the commit on #12" in out and order == ["remove"]
+
+
+def test_a_removal_that_half_fails_deletes_the_branch_and_names_the_folder_left(world, monkeypatch, capsys):
+    folder = world.wt / "task-12-cart"
+    folder.mkdir()
+
+    def on_git(a):
+        if a[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(a, 1, stdout="", stderr="Directory not empty")
+        if a[:2] == ("worktree", "list"):
+            return f"worktree {world.root}\nbranch refs/heads/dev\n"
+        return None
+    calls = stub_landing(world, monkeypatch, on_git)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    out = capsys.readouterr().out
+    assert ("branch", "-D", "task/12-cart") in calls and str(folder) in out and "unregistered" in out
+
+
+def test_a_removal_that_fails_with_the_worktree_still_registered_keeps_it_and_the_branch(world, monkeypatch, capsys):
+    folder = world.wt / "task-12-cart"
+    folder.mkdir()
+
+    def on_git(a):
+        if a[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(a, 1, stdout="", stderr="in use")
+        if a[:2] == ("worktree", "list"):
+            return f"worktree {world.root}\nbranch refs/heads/dev\n\nworktree {folder}\nbranch refs/heads/task/12-cart\n"
+        return None
+    calls = stub_landing(world, monkeypatch, on_git)
+    core.remove_landed_worktree(folder, "task/12-cart")
+    assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
+
+
 def test_the_marker_line_is_the_guards_contract(world, capsys, tmp_path):
     other = worktree(world.root, world.wt / "auto-x1")
     assert auto.cmd_on(args(id="x1", folder=str(other))) == 0
