@@ -42,7 +42,7 @@ class RegistryError(Exception):
 
 
 class Refuse(Exception):
-    """A refusal found deep inside a check, before the guard touches the filesystem or past its budget (a network path, a glob outside
+    """A refusal found deep inside a check, before the guard touches the filesystem or past its budget (a network path, a path outside
     the run's places, a walk too long): `decide` turns it into a deny."""
 
     def __init__(self, code, why, how=HOW):
@@ -50,7 +50,7 @@ class Refuse(Exception):
         self.code, self.why, self.how = code, why, how
 
 
-BUDGET_SECONDS = 7.0                # the guard's own time for one decision, every walk and glob together: past it, refused (too big)
+BUDGET_SECONDS = 7.0                # the guard's own time for one decision, every folder walk together: past it, refused (too big)
 HARD_STOP_SECONDS = 9.0             # past this the hook denies and ends (too slow), well before its 15 s timeout
 
 
@@ -385,14 +385,14 @@ class Context:
         self.deadline = None                                  # set by decide(): one deadline for the whole decision
 
     def in_time(self):
-        """Refuses once the decision's time (BUDGET_SECONDS for the whole call, every walk and glob together) is spent."""
+        """Refuses once the decision's time (BUDGET_SECONDS for the whole call, every folder walk together) is spent."""
         import time
         now = time.monotonic()
         if self.deadline is None:
             self.deadline = now + BUDGET_SECONDS
         if now >= self.deadline:
-            raise Refuse("too big", "more to look through than the guard's time for one decision (folder walks, globs)",
-                         how="name the files, or a narrower path or glob")
+            raise Refuse("too big", "more to look through than the guard's time for one decision (folder walks)",
+                         how="name the files, or a narrower path")
 
     def path(self, p, cwd=None, tilde=False):
         return resolve(p, cwd or self.cwd, self.temp, tilde)
@@ -878,8 +878,9 @@ def pieces(word):
 
 
 def secret_word(ctx, word, cwd):
-    """True when a word of a command names a secret: the word, its pieces around : and =, and what its glob matches. A network path is
-    refused (by ctx.path) before any lookup; the //host/... piece of a URL (https://...) is judged by its name only, never looked up."""
+    """True when a word of a command names a secret: the word and its pieces around :, = and @ (an unquoted glob never gets here:
+    command() refuses it). A network path is refused (by ctx.path) before any lookup; the //host/... piece of a URL (https://...) is
+    judged by its name only, never looked up."""
     url = re.match(r"[A-Za-z][A-Za-z0-9+.-]+://", word)
     for piece in {word, *pieces(word)}:
         if url and network(piece) and not network(word):
@@ -887,67 +888,7 @@ def secret_word(ctx, word, cwd):
                 return True
         elif piece and secret_name(piece, ctx.path(piece, cwd), strict=False, session=ctx.session):
             return True
-    if getattr(word, "glob", False):
-        # The word as bash reads it (ctx.path: /c/..., /tmp, ~), matched here with a budget; never outside the run's places, never a
-        # [...] (bash reads [^x] as "not x", Python's fnmatch as "^ or x", and bash has [[:alpha:]]).
-        if "[" in word:
-            raise Refuse("unsure", "a glob with [...] (the guard does not read it as bash does)", how="name the files, or use * and ?")
-        if "**" in word:                                         # with globstar on, bash reads ** as any depth: the matcher does not
-            raise Refuse("unsure", "a glob with ** (any depth when bash's globstar is on)", how="name the files, or use * and ?")
-        pattern = ctx.path(word, cwd)
-        if not ctx.in_run(pattern):
-            raise Refuse("glob outside the worktrees", "a glob outside the worktrees folder and the run's folder",
-                         how="name the file, or Read it; globs only inside a worktree")
-        for match in glob_matches(pattern, ctx):
-            if secret_name(match) or not ctx.in_run(norm(match)):
-                return True
     return False
-
-
-def glob_option(ctx, word, cwd):
-    """True when bash would expand the glob `word` into an option: its first path part holds * or ? and matches a name starting with -.
-    An absolute word (/x, C:/x, ~ already expanded) expands to absolute paths, never an option."""
-    if re.match(r"^([\\/]|[A-Za-z]:)", word):
-        return False
-    first = re.split(r"[\\/]", word, maxsplit=1)[0]
-    if not re.search(r"[*?]", first):
-        return False
-    if "[" in first:
-        raise Refuse("unsure", "a glob with [...] (the guard does not read it as bash does)", how="name the files, or use * and ?")
-    return any(os.path.basename(m).startswith("-") for m in glob_matches(ctx.path(first, cwd), ctx))
-
-
-def glob_matches(pattern, ctx):
-    """The paths matching the absolute, normalized `pattern`, one path part at a time with * and ? (in any case, hidden names too: never
-    fewer than bash lists). Refused past WALK_CAP entries or once the decision's time is spent."""
-    import fnmatch
-    seen = [0]
-
-    def tick():
-        seen[0] += 1
-        ctx.in_time()
-        if seen[0] > WALK_CAP:
-            raise Refuse("too big", "a glob that reaches more entries than the guard looks through in its time",
-                         how="name the files, or a narrower glob")
-    drive, rest = os.path.splitdrive(pattern)
-    level = [drive + os.sep]
-    for part in [x for x in re.split(r"[\\/]+", rest) if x]:
-        found = []
-        for d in level:                                # (a plain part: one lookup per path already counted)
-            if not re.search(r"[*?]", part):
-                if os.path.lexists(os.path.join(d, part)):
-                    found.append(os.path.join(d, part))
-                continue
-            try:
-                with os.scandir(d) as entries:
-                    for e in entries:
-                        tick()
-                        if fnmatch.fnmatchcase(e.name.lower(), part.lower()):
-                            found.append(e.path)
-            except OSError:
-                continue
-        level = found
-    return level
 
 
 def scan(ctx, words, cwd, skip=()):
@@ -963,6 +904,11 @@ def command(part, ctx, cwd):
     """(verdict or None for allowed, the folder after it) for one simple command."""
     words = part.words
     cmd, args = words[0], words[1:]
+    # Bash expands an unquoted *, ? or [ after the guard has looked, into any number of words (options and -- included, from files the
+    # run wrote): no such word passes, in any position. A quoted one stays text for bash and is judged as text.
+    if any(w.glob for w in words):
+        return deny("unsure", "an unquoted glob", cmd, how="list files with the Glob tool, read with Read or Grep, or quote a git pathspec "
+                    "after --: git diff -- 'src/*.py'"), cwd
     if part.stdin and not (cmd == "git" and args[:1] == ["commit"]):
         return deny("unsure", "a here-document other than git commit -F -", cmd), cwd
     if any(w.heredoc for w in words) and cmd not in ("git", "gh"):
@@ -972,22 +918,13 @@ def command(part, ctx, cwd):
     if cmd == "sudo":
         return deny("sudo", "sudo", cmd), cwd
     if cmd == "cd":
-        if len(args) != 1 or args[0].startswith("-") or args[0].glob:
+        if len(args) != 1 or args[0].startswith("-"):
             return deny("cd outside the worktrees", "cd needs one plain folder", cmd), cwd
         target = ctx.path(args[0], cwd)
         if not ctx.cd_ok(target):
             return deny("cd outside the worktrees", "cd outside a worktree and the run's folder", cmd,
                         how="work in the run's folder or an issue's worktree"), cwd
         return None, target
-    # Bash expands an unquoted * or ? after the guard has looked, and both match a leading `-`: a file named --all, -- or -exec would
-    # become an option. git and find take no glob at all (git expands a quoted pathspec itself); elsewhere a glob may not match one.
-    globs = [w for w in args if getattr(w, "glob", False)]
-    if globs and cmd in ("git", "find"):
-        return deny("unsure", "a glob in git or find (bash would expand it, an option included): quote it", cmd,
-                    how="quote the pattern ('src/*.py'): git and find match it themselves"), cwd
-    if any(glob_option(ctx, w, cwd) for w in globs):
-        return deny("unsure", "a glob that expands to an option (a file whose name starts with -)", cmd,
-                    how="name the files"), cwd
     start = saani_start(words, cwd, ctx.temp)
     if start:
         return saani_command(words[start:], ctx, cwd), cwd
@@ -1043,7 +980,7 @@ def saani_command(args, ctx, cwd):
     sub = "ui" if sub in ("map", "board") else sub
     if sub == "test":
         # saani test [--kind K] [--worktree P] [--] <command>: it runs in the top folder of a checkout, so the test command's paths are
-        # checked from there: the named worktree (exactly a worktree's top folder or the run's folder, no glob), else the top of the
+        # checked from there: the named worktree (exactly a worktree's top folder or the run's folder), else the top of the
         # worktree the current folder is in (a `cd` into a subfolder must not shift the check).
         rest, opts = list(args[1:]), []
         if "--" in rest:
@@ -1058,12 +995,11 @@ def saani_command(args, ctx, cwd):
             name, eq, value = w.partition("=")
             if name not in ("--kind", "--worktree"):
                 return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
-            glob = bool(getattr(w, "glob", False))           # `--worktree=<glob>`: the word as a whole carries it
             if not eq:
                 if k + 1 >= len(opts):
                     return deny("saani command", f"saani test {name} without a value", "saani")
                 k += 1
-                value, glob = opts[k], bool(getattr(opts[k], "glob", False))
+                value = opts[k]
             if name == "--kind" and value not in ("landing", "full", "tier1"):
                 return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
             if name == "--worktree":
@@ -1071,7 +1007,7 @@ def saani_command(args, ctx, cwd):
                 # are checked from the folder they run in (a folder deeper down would let `../..` reach out of the run).
                 where = ctx.path(value, cwd)
                 top = where == ctx.folder or (ctx.wt_dir is not None and os.path.dirname(where) == ctx.wt_dir)
-                if glob or not top or not ctx.cd_ok(where):
+                if not top or not ctx.cd_ok(where):
                     return deny("cd outside the worktrees", "saani test --worktree that is not a worktree's top folder or the run's folder",
                                 "saani")
             k += 1
@@ -1222,7 +1158,7 @@ def git_command(part, ctx, cwd):
     while args and args[0].startswith("-"):
         if args[0] == "-C" and len(args) > 1:
             gcwd = ctx.path(args[1], gcwd)               # git reads a relative -C from the previous -C
-            if args[1].glob or not ctx.cd_ok(gcwd):
+            if not ctx.cd_ok(gcwd):
                 return deny("cd outside the worktrees", "git -C outside a worktree and the run's folder", "git")
             args = args[2:]
         elif args[0] == "--no-pager":
@@ -1374,7 +1310,7 @@ def revisions(sub, words, ctx, gcwd):
         return deny("revision", f"git {sub} with {what[:40]} (only HEAD, HEAD~n, origin/{ctx.integration}, origin/{ctx.production}, worker "
                     "branches and ranges of these; no commit id)", "git", how="name HEAD, origin/<branch> or a worker branch")
     # git takes the FIRST literal -- (even one that looks like an option's value) as the end of the revisions: with one, every word
-    # before it is read as a revision, never as a path, so no path or glob exemption applies there.
+    # before it is read as a revision, never as a path, so no path exemption applies there.
     # (rev-parse reads its arguments in order: -n, --default, --prefix take a following -- as their value, so it gets no -- rule.)
     dashdash = words.index("--") if "--" in words and sub != "rev-parse" else None
     k = 0
@@ -1416,8 +1352,8 @@ def revisions(sub, words, ctx, gcwd):
                         break
             elif takes_text(sub, w):
                 k += 1
-        elif sub in ("ls-files", "commit", "branch") or (getattr(w, "glob", False) and dashdash is None):
-            pass                                         # paths (ls-files, a glob bash expands), refused paths (commit), patterns (branch)
+        elif sub in ("ls-files", "commit", "branch"):
+            pass                                         # paths (ls-files), refused paths (commit), patterns (branch)
         elif sub == "show" and ":" in w:
             if not allowed_rev(w.split(":", 1)[0], ctx):
                 return no(w)
@@ -1776,8 +1712,6 @@ def rm_command(args, ctx, cwd):
     if not paths:
         return deny("unsure", "rm without a path", "rm")
     for w in paths:
-        if w.glob:
-            return deny("unsure", "rm with a glob", "rm", how="name each file")
         p = ctx.path(w, cwd)
         if secret_name(w, p, strict=False):
             return deny("secret", "rm of a secret file", "rm", how=SECRETS_HOW)
