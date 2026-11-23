@@ -1253,6 +1253,12 @@ def git_paths_writable(paths, ctx, gcwd, sub):
     return None
 
 
+def own_source(rev, ctx):
+    """True for a source files may be restored from: HEAD (HEAD~n, HEAD^, HEAD^2...) or origin/<integration>, never any other revision
+    (a fetched pull request, a stash, a commit nobody reviewed)."""
+    return bool(re.fullmatch(r"HEAD(~\d*|\^\d?)*", rev)) or rev == f"origin/{ctx.integration}"
+
+
 def git_sub(sub, words, ctx, gcwd, part):
     no = deny("not on the list", f"git {sub} {' '.join(words[:1])[:30]}".strip() + " is not on the guard's list", "git")
     if part.stdin and sub != "commit":
@@ -1307,9 +1313,12 @@ def git_sub(sub, words, ctx, gcwd, part):
                 paths.append(w)
             elif w == "--":
                 ended = True
-            elif w in ("-s", "--source"):
-                k += 1
-            elif not (w.startswith("--source=") or w in ("-S", "--staged", "-W", "--worktree", "-q", "--quiet", "--ours", "--theirs")):
+            elif w in ("-s", "--source") or w.startswith("--source="):
+                source = w.partition("=")[2] if "=" in w else (words[k + 1] if k + 1 < len(words) else "")
+                k += 0 if "=" in w else 1
+                if not own_source(source, ctx):
+                    return deny("not on the list", f"git restore from a source other than HEAD or origin/{ctx.integration}", "git")
+            elif not (w in ("-S", "--staged", "-W", "--worktree", "-q", "--quiet", "--ours", "--theirs")):
                 return deny("not on the list", f"the git restore option {w[:30]}", "git")
             k += 1
         return git_paths_writable(paths, ctx, gcwd, sub)
@@ -1339,6 +1348,8 @@ def git_sub(sub, words, ctx, gcwd, part):
         if "--" in words:
             before, after = words[:words.index("--")], words[words.index("--") + 1:]
             if len(before) <= 1 and not any(w.startswith("-") for w in before):
+                if before and not own_source(before[0], ctx):
+                    return deny("not on the list", f"git {sub} <ref> -- of a ref other than HEAD or origin/{ctx.integration}", "git")
                 return git_paths_writable(after, ctx, gcwd, sub)
             return no
         options = {"-b", "-c", "--create", "-q", "--quiet", "--track", "--no-track", "-t"}
