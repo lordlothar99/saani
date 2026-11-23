@@ -789,7 +789,7 @@ def split_bash(text):
 
 # ---------------------------------------------------------------- the rules for one command
 
-READ_ONLY = {"ls", "cat", "head", "tail", "grep", "wc", "sort", "find", "echo", "test", "[", "pwd", "diff"}
+READ_ONLY = {"ls", "cat", "head", "tail", "grep", "wc", "sort", "find", "echo", "test", "pwd", "diff"}
 FIND_WRITES = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 SORT_FLAGS = set("bdfghiMnRrsuVz")
 SORT_LONG = {"--numeric-sort", "--reverse", "--unique", "--ignore-case", "--human-numeric-sort", "--version-sort", "--stable",
