@@ -19,11 +19,12 @@ and lands it, while Saani's commands and its guard keep the work safe.
    `/saani:auto` asks which.
 2. **The run.** At most 2 issues in flight per project. For each: its own worktree (`saani start`), a coder subagent, a reviewer
    subagent on the diff (a change of a few lines Claude makes itself), then `saani land`: a lock, a merge, the landing tests, a push
-   to `dev`. As soon as one issue lands, the next eligible one starts. Stop rules end it early (40 refusals, 10 of the same reason in a row, 10 hours).
+   to `dev`. As soon as one issue lands, the next eligible one starts. Stop rules end it early (40 refusals, 10 of the same reason in
+   a row, 10 hours).
 3. **The guard.** A plugin hook that decides every tool call of the run at once, never asking: it allows the run's work and refuses
    what a run must never do (push outside `saani land`, merge, read secrets, edit outside its worktrees, run anything off its list).
 4. **The end.** One `dev` -> `main` pull request, its CI run (`saani ci`), and a report on it: what landed, what waits for you and
-   why, the refusals, the cost. `saani auto status` shows a running run; you end it from a terminal with `saani auto off --run <id>`.
+   why, the refusals, the cost. `saani auto status` shows a running run; you end it with `/saani:auto off` in your session.
 5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
    when the merge changes the version, creates the GitHub release `v<version>` with notes written from the issues.
    `/saani:merge --deploy` (or `/saani:deploy` later) then deploys, if the project deploys.
