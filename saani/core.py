@@ -897,7 +897,7 @@ def queued_run(kind, command, cwd, fresh=False):
     """Run a test command through the test queue from the worktree `cwd`; its exit code. A clean checkout whose tree and command have a green
     result in the queue's store reuses it (`fresh`: run anyway; saani/queue.py)."""
     return queue.run(kind, command, lock_path(cwd).parent, cwd, git("rev-parse", "HEAD", cwd=cwd),
-                     main_checkout(cwd) / "build" / TESTS_LOG, tree=clean_tree(cwd), fresh=fresh)
+                     main_checkout(cwd) / "build" / TESTS_LOG, tree=lambda: clean_tree(cwd), fresh=fresh)
 
 
 def test_kind(kind):

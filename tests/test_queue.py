@@ -254,6 +254,54 @@ def test_a_result_expires_after_seven_days_and_the_store_stays_small(tmp_path, m
     assert len(list(folder.glob("result-*.json"))) == 3
 
 
+def scripted_tree(values, on_call=None):
+    """A tree function that answers the given values in turn (the last one again and again); on_call(n) runs before answer n (1-based)."""
+    seen = []
+
+    def read():
+        seen.append(1)
+        if on_call:
+            on_call(len(seen))
+        return values[min(len(seen), len(values)) - 1]
+    return read
+
+
+def green_job(tmp_path, tree):
+    q.store_result(tmp_path / q.QUEUE_DIR, {"id": "other", "kind": "landing", "command": ["t"]}, tree, 0)
+
+
+def stored(tmp_path):
+    return list((tmp_path / q.QUEUE_DIR).glob("result-*.json"))
+
+
+def test_a_result_stored_by_another_job_while_this_one_waited_is_taken(tmp_path):
+    tree = scripted_tree(["tree1"], on_call=lambda n: green_job(tmp_path, "tree1") if n == 2 else None)
+    assert run_job(tmp_path, tree=tree) == (0, [])
+
+
+def test_a_tree_that_changed_while_waiting_gets_no_stale_reuse(tmp_path):
+    tree = scripted_tree(["tree1", "tree2", "tree2", "tree2"], on_call=lambda n: green_job(tmp_path, "tree1") if n == 2 else None)
+    assert run_job(tmp_path, tree=tree) == (0, [["t"]])                       # green for tree1 exists, but the checkout is tree2 now
+    assert q.find_green(tmp_path / q.QUEUE_DIR, "tree2", ["t"], "landing") is not None
+
+
+def test_a_tree_that_changes_or_gets_dirty_during_the_run_stores_nothing(tmp_path):
+    assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", "tree1", "tree2"]))[1] == [["t"]]
+    assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", "tree1", None]))[1] == [["t"]]
+    assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", None, None]))[1] == [["t"]]
+    assert not stored(tmp_path)
+    assert run_job(tmp_path, tree=scripted_tree(["tree1"]))[1] == [["t"]]     # the plain path: same tree before and after
+    assert len(stored(tmp_path)) == 1
+
+
+def test_the_newest_results_are_kept_even_in_the_same_second(tmp_path, monkeypatch):
+    monkeypatch.setattr(q, "RESULT_MAX", 2)
+    base = q.datetime.datetime.now()
+    for n in range(4):
+        q.store_result(tmp_path, {"id": str(n), "kind": "landing", "command": ["t"]}, f"x{n}", 0, base + q.datetime.timedelta(microseconds=n))
+    assert sorted(q.read_json(p)["tree"] for p in tmp_path.glob("result-*.json")) == ["x2", "x3"]
+
+
 def test_an_unreadable_or_foreign_result_file_is_not_a_result(tmp_path):
     folder = tmp_path / q.QUEUE_DIR
     folder.mkdir()

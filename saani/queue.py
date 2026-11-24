@@ -118,7 +118,7 @@ def store_result(folder, job, tree, code, now=None):
     path = folder / f"result-{result_key(tree, job['command'], kind)}.json"
     if code == 0:
         write_json(path, {"tree": tree, "command": list(job["command"]), "kind": kind, "code": 0, "id": job["id"],
-                          "finished": now.isoformat(timespec="seconds")})
+                          "finished": now.isoformat(timespec="microseconds")})
     else:
         remove(path)
     keep = []
@@ -259,8 +259,12 @@ def reuse(folder, job, tree, fresh, log_path, queued):
 
 
 def run(kind, command, git_common, worktree, head, log_path, poll=POLL_SECONDS, runner=subprocess.call, tree=None, fresh=False):
-    """Queue the command, wait for its turn, run it with the whole PC; returns its exit code. With `tree` (a clean checkout's tree id) a
-    stored green result of the same tree and command is taken instead of a run, and a finished run is stored (module doc)."""
+    """Queue the command, wait for its turn, run it with the whole PC; returns its exit code. With `tree` (a clean checkout's tree id, or a
+    function that reads it: the checkout can change while the job waits, so it is read again at each use) a stored green result of the same
+    tree and command is taken instead of a run, and a finished run is stored only when the tree was the same, clean, before and after it."""
+    def read_tree():
+        return tree() if callable(tree) else tree
+
     kind = kind_of(kind)
     if kind not in PRIORITY:
         raise SystemExit(f"unknown kind '{kind}': one of {', '.join(PRIORITY)}")
@@ -269,7 +273,7 @@ def run(kind, command, git_common, worktree, head, log_path, poll=POLL_SECONDS, 
     job = {"id": uuid.uuid4().hex[:12], "pid": os.getpid(), "kind": kind, "worktree": str(worktree), "head": head,
            "command": command, "state": "waiting", "created": datetime.datetime.now().isoformat(timespec="microseconds")}
     path = folder / f"job-{job['id']}.json"
-    if reuse(folder, job, tree, fresh, log_path, time.time()) is not None:
+    if reuse(folder, job, read_tree(), fresh, log_path, time.time()) is not None:
         return 0
     write_json(path, job)
     queued, told = time.time(), None
@@ -288,7 +292,7 @@ def run(kind, command, git_common, worktree, head, log_path, poll=POLL_SECONDS, 
                 again = first_waiting(jobs_in(folder))
                 if not again or again["id"] == job["id"]:
                     # A job that ran while this one waited may have made the result this one needs.
-                    if reuse(folder, job, tree, fresh, log_path, queued) is not None:
+                    if reuse(folder, job, read_tree(), fresh, log_path, queued) is not None:
                         release_runner(folder, job)
                         remove(path)
                         return 0
@@ -302,17 +306,20 @@ def run(kind, command, git_common, worktree, head, log_path, poll=POLL_SECONDS, 
             time.sleep(poll)
         job["state"] = "running"
         write_json(path, job)
+        before = read_tree()
         started = time.time()
         try:
             code = runner(command, cwd=worktree)
         finally:
             release_runner(folder, job)
+        after = read_tree()
         job.update(state="done", code=code, finished=datetime.datetime.now().isoformat(timespec="microseconds"))
         write_json(path, job)
         record(log_path, job, queued, started, time.time(), code)
         try:
-            store_result(folder, job, tree, code)
-        except OSError:                                      # no stored result is only a missed reuse
+            if before and before == after:                   # a checkout that changed or got dirty meanwhile has no result to keep
+                store_result(folder, job, before, code)
+        except OSError:                                     # no stored result is only a missed reuse
             pass
         return code
     except BaseException:

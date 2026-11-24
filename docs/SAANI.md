@@ -133,9 +133,11 @@ whole PC.
   ignored) with the same tree, command and kind does not run: it prints `reused: green on <tree> at <time> (job <id>)` and the log line says
   `reused`. `saani land` reuses when its merged tree equals a tested one; a `full` run (the end of an auto run) also takes a green `landing`
   result of the same tree and command. Never reused: a dirty checkout, a red result (a red run also deletes the green one it contradicts),
-  another command or tree, and `saani ci pr` (it always runs). `saani test --fresh` forces a run. Ignored files (such as `build/`) are not
-  part of the tree: a test that reads them can differ, so use `--fresh` then. A result expires after 7 days and the store keeps at most the
-  100 newest.
+  another command or tree, and `saani ci pr` (it always runs). `saani test --fresh` forces a run. The tree is read again when the job gets
+  its turn and after the run: a result is stored only when the checkout was the same and clean before and after the run. The key is the
+  tracked tree, the command and the kind only: anything outside the tracked tree is not in it (ignored files such as `build/`, git refs such
+  as a `--base` branch, commit messages, environment variables, the interpreter and its packages), so use `--fresh` when a run depends on
+  those. A result expires after 7 days and the store keeps at most the 100 newest (by finishing time, to the microsecond).
 - **The measure:** one line per job in `build/saani-tests.jsonl` of the main checkout (`reused: true` for a reuse).
 
 ## Test tiers
