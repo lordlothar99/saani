@@ -233,7 +233,14 @@ the workers are covered too); nothing the model can write or the folder it is in
 
 Each refusal adds a line to `~/.saani/auto/refusals.jsonl`: time, run id, tool, short reason, and the refused command's first word only
 (never the command's text, never a file's contents), and the project (the run's main checkout, normalized), so two projects' runs
-never mix. `refusals(run, project)` counts them, in total and by reason, for the run's stop rules.
+never mix. `refusals(run, project)` counts them, in total and by reason, for the run's stop rules. The short reason names what the
+message to the session names, so `saani auto status` and the report's refusals by reason say what was refused: among others `glob` (an
+unquoted `*`, `?` or `[`), `redirect` (a redirection but `2>&1` and `>/dev/null`, `|&`, `&>`, process substitution), `here-document`,
+`environment assignment`, `revision` (off the allowlist), `every ref` (`--all`, `-g`, `--reflog`, `--branches`..., a `:/` search),
+`git stash` (the owner's stash), `pathspec` (a folder or a pattern in `add`, `restore`, `checkout`), `network path`, `posix path`,
+`drive-relative path`, `secret`, `cd outside the worktrees`, `not on the list`; `unsure` only for what the guard cannot read (`$`,
+backticks, subshells, an unclosed quote, a control character). When several rules apply, the first that refuses gives both the message
+and the logged reason (`git -C <main checkout> log --all` is `cd outside the worktrees`).
 
 "The run's places" are the worktrees folder (`[worktrees] folder`), the run's folder and the system temp folder. **Protected**, never
 written in an auto run, wherever they are: any path through `.git`, `.githooks` or `.claude`, `.mcp.json`, `CLAUDE.md`,

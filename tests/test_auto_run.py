@@ -270,6 +270,18 @@ def test_the_report_has_every_section(world, monkeypatch, capsys):
     assert "`/saani:merge 7`" in text and "`/saani:merge 7 --deploy`" in text
 
 
+def test_status_and_report_name_each_refusal_by_its_own_reason(world, monkeypatch):
+    """The guard's precise codes (#64) reach saani auto status and the report's refusals by reason as they are, never merged."""
+    rec = record(world, started=auto.utc_now() - datetime.timedelta(hours=1))
+    log_refusals(["glob", "glob", "redirect", "every ref", "revision", "unsure"])
+    status = auto.status_text(rec)
+    assert "refusals: 6: glob 2, " in status and "redirect 1" in status and "every ref 1" in status and "unsure 1" in status
+    fake_world(monkeypatch)
+    assert auto.cmd_report(args()) == 0
+    text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    assert "## Refusals by the guard (6)" in text and "- glob: 2" in text and "- redirect: 1" in text and "- every ref: 1" in text
+
+
 def test_the_report_without_anything(world, monkeypatch):
     record(world, started=auto.utc_now())
     fake_world(monkeypatch)
