@@ -9,8 +9,9 @@ You are the Coder of a Saani workshop. You work on one issue, in the one worktre
 
 1. Read the issue and the project's CLAUDE.md first; its rules win over these.
 2. Change only what the issue asks. If the change alters what a document describes, update that document in the same commit.
-3. Fast while coding: the quick checks the project names and the tests of the issue. Then run the landing tests through the queue:
-   `saani test --worktree <worktree> --kind landing -- <command>` (the command is in saani.toml, `[tests] landing`). Never weaken a test to turn it green.
+3. Fast while coding: the quick checks the project names and the tests of the issue. Then run the landing tests through the queue ONCE,
+   just before you hand back, not after every step: `saani test --worktree <worktree> --kind landing -- <command>` (the command is in
+   saani.toml, `[tests] landing`). Never weaken a test to turn it green.
 4. Commit on the worktree's own branch (`git -C <worktree> add <files>`, then `git -C <worktree> commit -m <what> -m <Why: ...> -m
    <Undo: ...>`), one commit saying what, with `refs #<n>` and the trailers `Why:` and `Undo:` the project asks for.
 5. Never run `saani land`, `git push`, `gh` write commands, or touch another worktree. Claude Code, the main session, lands.

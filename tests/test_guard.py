@@ -21,6 +21,11 @@ def fwd(p):
     return str(p).replace("\\", "/")
 
 
+def ROOT_CODE(code):
+    """The refusal of a path Git Bash maps outside the drives (/, /usr, /proc): on Windows it is refused first, as a POSIX path."""
+    return "posix path" if os.name == "nt" else code
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """A home of its own, so the registry (~/.saani/auto) and ~ are the test's."""
@@ -39,6 +44,8 @@ def ctx(tmp_path, home):
         d.mkdir(parents=True, exist_ok=True)
     (wt / "12-cart-total" / "saani" / "guard.py").write_text("")
     (wt / "12-cart-total" / ".git").write_text("gitdir: x")
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_rsa").write_text("x")                                           # a key a glob must never reach
     c = guard.Context(wt / "12-cart-total", wt_dir=wt, folder=wt / "auto-2026-01-02_0300", temp=temp, main=main, repo="acme/webshop",
                       integration="dev", production="main", tests=[["{python}", "-m", "pytest", "-q"], ["npm", "test"]])
     c.places = {"main": fwd(main), "wt": fwd(wt), "run": fwd(wt / "auto-2026-01-02_0300"), "work": fwd(wt / "12-cart-total"),
@@ -110,20 +117,29 @@ ALLOWED = [
     "ls -la", "cat src/app.py", "head -n 5 README.md", "tail -20 build/log.txt", "grep -n total src/app.py", "grep -e x -e y a.txt",
     "grep -inA3 total src/app.py", "grep -C 2 -w total src/app.py", "grep --color=never -c total a.txt", "grep -- -x a.txt",
     "diff -u a.txt b.txt", "diff --brief a.txt b.txt", "git diff -- src/app.py", "git diff HEAD src", "cd {run}",
-    "wc -l src/*.py", "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
-    "test -f README.md", "[ -d src ]", "[ a = b ]", "pwd", "diff a.txt b.txt",
+    "sort names.txt", "sort -rn -k 2 names.txt", "sort --unique names.txt", "find . -name '*.py'", "echo hello",
+    "test -f README.md", "test -d src", "pwd", "diff a.txt b.txt",
     "git status", "git diff origin/dev", "git log --oneline -5", "git log --format=%H", "git show HEAD", "git show HEAD:src/app.py", "git add src/app.py", "git add -- src/app.py README.md",
-    "git stash push -q -m 'wip'", "git stash pop -q", "git stash list", "saani auto status --check", "saani auto report --pr 3 --post",
+    "git stash list", "saani auto status --check",
+    "git -C {work} diff origin/dev...HEAD", "git log --oneline origin/dev..HEAD", "git diff origin/main...origin/dev",   # the agents'
+    "git log feat/12-cart-total", "git log origin/feat/12-cart-total..HEAD", "git show HEAD~2", "git log -n 5", "git log --author Bob",
+    "git branch --merged origin/dev", "git commit --fixup=HEAD", "git log --ancestry-path=origin/dev HEAD~3..HEAD", "git diff HEAD^ HEAD",
+    "git log -Sdebug", "git log -S debug", "git log -Gx", "git log -Gregister -p", "git log --grep=stash", "git log -pSdebug",
+    "git rev-parse --abbrev-ref HEAD", "git rev-parse --default HEAD --verify", "git rev-parse --verify origin/dev", "git show HEAD:README.md", "git -C {work} log --oneline -5 origin/dev..", "git log --stat -3", "git show HEAD:docs/stash.md",
+    "git diff HEAD~1 -- src/stash.py", "git restore --source=HEAD~2 src/app.py", "git restore -s origin/dev src/app.py",
+    "git restore --source HEAD^ --staged src/app.py", "git checkout HEAD -- src/app.py", "git checkout HEAD~1 -- src/app.py", "git switch -c feat/12-stash-fix origin/dev", "saani auto report --pr 3 --post",
     "git commit -m 'Cart: total in cents (refs #12)' -m 'Why: rounding' -m 'Undo: revert'", "git commit --amend --no-edit",
-    "git commit -am 'Cart: -f is only text here, as is .env'",
+    "git commit -m 'Cart: -f is only text here, as is .env'", "git commit -F msg.txt", "git commit --file=msg.txt -q",
+    "git commit -m x -m 'y z'", "git commit --amend -m x", "git commit -s -m x",
     "git commit -m \"$(cat <<'EOF'\nCart: total (refs #12)\n\nWhy: x\nUndo: y\nEOF\n)\"",
     "git commit -F - <<'EOF'\nCart: total (refs #12)\n\nWhy: x\nUndo: y\nEOF",
     "git commit -F - <<'EOF'\nCart: total\nEOF\ngit status",
     "git switch feat/12-cart-total", "git switch -c bug/13-cart-rounding origin/dev", "git checkout -b task/14-docs",
     "git checkout -- src/app.py", "git checkout origin/dev -- src/app.py", "git merge origin/dev", "git merge --no-edit origin/dev",
     "git merge --abort", "git rebase origin/dev", "git rebase --continue", "git fetch origin dev", "git fetch -q origin",
+    "git fetch origin main", "git fetch origin feat/12-cart-total", "git switch -c feat/12-x origin/dev", "git checkout -b feat/12-x HEAD",
     "git worktree list --porcelain", "git rev-parse HEAD", "git branch --list 'feat/*'", "git branch --show-current", "git branch -a",
-    "git branch", "git ls-files", "git stash", "git stash push -m 'wip on .env text'", "git stash pop", "git restore src/app.py",
+    "git branch", "git ls-files", "git restore src/app.py",
     "git -C {work} status", "git --no-pager log", "git diff --exit-code",
     "python -m pytest -q", "python -m pytest -q tests/test_cart.py", "python -m pytest -q -x -k cart", "python -m pytest -q --tb=short",
     "npm test", "'{python_exe}' -m pytest -q",
@@ -155,8 +171,8 @@ DENIED = [
     ("saani auto away", "saani command"), ("saani auto away --id r2 --folder {run}", "saani command"),   # #50: never from inside a run
     ("saani test --worktree {main} -- python -m pytest -q", "cd outside the worktrees"),
     ("saani test --worktree {wt} -- python -m pytest -q", "cd outside the worktrees"),
-    ("saani test --worktree {wt}/* -- python -m pytest -q", "cd outside the worktrees"),
-    ("saani test --worktree={wt}/* -- python -m pytest -q", "cd outside the worktrees"),
+    ("saani test --worktree {wt}/* -- python -m pytest -q", "unsure"),
+    ("saani test --worktree={wt}/* -- python -m pytest -q", "unsure"),
     ("saani test --worktree {work}/src -- python -m pytest -q ../../../evil/tests", "cd outside the worktrees"),   # deeper than the top
     ("cd {work}/src && saani test -- python -m pytest -q ../../evil/tests", "test option"),   # checked from the worktree's top, where it runs
     ("saani test --worktree={home} -- python -m pytest -q", "cd outside the worktrees"),
@@ -176,6 +192,34 @@ DENIED = [
     ("git stash push -a", "git stash"), ("git stash push --all", "git stash"), ("git stash push -p", "git stash"),
     ("git stash push --only-untracked", "git stash"), ("git stash show", "git stash"), ("git stash show -p 'stash@{{0}}'", "git stash"),
     ("git stash apply", "git stash"), ("git stash push src/app.py", "git stash"),
+    ("git diff HEAD refs/stash^3", "git stash"), ("git log --all -p", "git stash"), ("git log --al -p", "git stash"),
+    ("git diff 'stash@{{0}}'", "git stash"), ("git diff HEAD..stash", "git stash"), ("git log HEAD...STASH", "git stash"),
+    ("git log ^stash HEAD", "git stash"), ("git show 'refs\\stash'", "git stash"), ("git rev-parse stash", "git stash"),
+    ("git rev-parse --all", "git stash"), ("git log -g", "git stash"), ("git log --walk-reflogs", "git stash"),
+    ("git log --reflog", "git stash"), ("git log --glob='refs/st*'", "git stash"), ("git log --branches='x*'", "git stash"),
+    ("git log --tags='v*'", "git stash"), ("git log --remotes='*'", "git stash"), ("git log --stdin", "git stash"),
+    ("git show ':/WIP on'", "git stash"), ("git log HEAD..:/fix", "git stash"), ("git diff 'stash^{{tree}}'", "git stash"),
+    ("git restore --source=stash src/app.py", "git stash"), ("git checkout stash -- src/app.py", "git stash"),
+    ("git commit -C stash", "git stash"),
+    ("git ls-files --with-tree=':/untracked files on' --format=x", "revision"), ("git ls-files --with-tree ':/x'", "revision"),
+    ("git ls-files --with-tree=HEAD", "revision"), ("git ls-files --with HEAD", "revision"),
+    ("git log --ancestry-path=:/x", "revision"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
+    ("git show 0123456789abcdef0123456789abcdef01234567", "revision"), ("git diff abc1234 HEAD", "revision"),
+    ("git log --oneline --branches", "git stash"), ("git log --remotes", "git stash"), ("git log --tags", "git stash"),
+    ("git rev-parse --branches", "git stash"), ("git diff --tags", "git stash"), ("git show --remotes", "git stash"),
+    ("git rev-parse -n -- main", "revision"), ("git rev-parse --prefix -- main", "revision"),
+    ("git rev-parse --default -- main", "revision"), ("git rev-parse --default main", "revision"),
+    ("git rev-parse --default=abc1234", "revision"), ("git rev-parse HEAD -- main", "revision"),
+    ("git rev-parse --author abc1234", "revision"), ("git rev-parse --author 'HEAD@{{1}}'", "revision"),
+    ("git rev-parse -S abc1234", "revision"), ("git rev-parse --since main", "revision"),
+    ("git rev-parse --disambiguate=abcd", "git stash"), ("git log -pg", "git stash"), ("git log -gp", "git stash"),
+    ("git log --ancestry-path=stash HEAD", "git stash"), ("git rev-parse abc1234", "revision"), ("git log FETCH_HEAD", "revision"),
+    ("git show v1.0", "revision"), ("git diff 'HEAD@{{1}}'", "revision"), ("git log origin/other..HEAD", "revision"),
+    ("git show ORIG_HEAD:src/app.py", "revision"), ("git branch --contains abc1234", "revision"),
+    ("git commit --fixup=abc1234", "revision"), ("git commit -C abc1234", "revision"), ("git commit -qCabc1234", "revision"),
+    ("git commit -C origin/main", "revision"), ("git log --oneline -n 5 abc1234", "revision"), ("git ls-files ':/y'", "revision"), ("git status ':/y'", "revision"),
+    ("git -C {work} stash pop", "git stash"), ("git stash pop", "git stash"), ("git stash pop -q", "git stash"),      # the owner's stash
+    ("git stash", "git stash"), ("git stash push -q -m 'wip'", "git stash"), ("git stash push", "git stash"),        # on top of the owner's
     ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
     ("git show refs/stash", "git stash"), ("git log -p stash", "git stash"), ("git show 'stash@{{0}}^3:notes.txt'", "git stash"),
     ("git show HEAD:../x", "secret"), ("git show HEAD:/etc/passwd", "secret"), ("git show HEAD:config/credentials.yml", "secret"),
@@ -192,7 +236,7 @@ DENIED = [
     ("saani test -- python -m pytest -q {home}", "test option"),
     ("rm -rf {home}/projects", "rm outside the worktrees"), ("rm -rf {main}/src", "rm outside the worktrees"),
     ("rm -rf {work}", "rm a worktree"), ("rm -rf {wt}", "rm a worktree"), ("rm -rf {run}", "rm a worktree"),
-    ("rm -rf {work}/saani", "guard file"), ("rm -rf {work}/.git", "guard file"), ("rm -rf /", "rm outside the worktrees"),
+    ("rm -rf {work}/saani", "guard file"), ("rm -rf {work}/.git", "guard file"), ("rm -rf /", ROOT_CODE("rm outside the worktrees")),
     ("rm -rf {temp}", "guard file"), ("rm -f src/*.tmp", "unsure"), ("rm -rf *", "unsure"),
     ("sudo ls", "sudo"), ("chmod +x x", "not on the list"), ("bash -c ls", "not on the list"), ("node x.js", "not on the list"),
     ("python -c 'print(1)'", "python"), ("python x.py", "python"), ("python saani.py status", "python"),
@@ -217,7 +261,7 @@ DENIED = [
     ("cd {run}\nls", "cd outside the worktrees"), ("cd {work}/nope && ls", "cd outside the worktrees"),
     ("ls || cd {run} && ls", "cd outside the worktrees"), ("ls | cd {run} && ls", "cd outside the worktrees"),
     ("grep --rec x .", "recursive read"), ("grep --directories=recurse x .", "recursive read"), ("grep -d recurse x .", "recursive read"),
-    ("grep -nr x .", "recursive read"), ("grep --include=*.py x a", "grep option"), ("grep -P x a", "grep option"),
+    ("grep -nr x .", "recursive read"), ("grep --include=*.py x a", "unsure"), ("grep '--include=*.py' x a", "grep option"), ("[ -d src ]", "unsure"), ("grep -P x a", "grep option"),
     ("grep -A x y z", "grep option"), ("grep -f .env a.txt", "grep option"), ("grep --file=x a.txt", "grep option"),
     ("grep --color=always x a", "grep option"), ("diff --recursive a b", "recursive read"), ("diff --rec a b", "recursive read"),
     ("diff -N a b", "diff option"), ("diff --to-file=x a", "diff option"),
@@ -226,6 +270,10 @@ DENIED = [
     ("git restore '*.py'", "unsure"), ("git restore src/*.py", "unsure"), ("git restore ':/x'", "unsure"),
     ("git restore --source HEAD~1 {main}/a.txt", "write outside the worktrees"), ("git restore -s HEAD '*.py'", "unsure"),
     ("git restore -p x", "not on the list"), ("git restore --source=HEAD", "not on the list"),
+    ("git restore --source=abc123 src/app.py", "not on the list"), ("git restore -s abc123 src/app.py", "not on the list"),
+    ("git restore --source FETCH_HEAD src/app.py", "not on the list"), ("git restore --source=origin/main src/app.py", "not on the list"),
+    ("git restore -s src/app.py", "not on the list"), ("git checkout abc123 -- src/app.py", "not on the list"),
+    ("git checkout FETCH_HEAD -- src/app.py", "not on the list"), ("git checkout origin/main -- src/app.py", "not on the list"),
     ("git checkout feat/12-cart-total src/app.py", "not a worker branch"), ("git switch feat/12-cart-total origin/dev", "not a worker branch"),
     ("git checkout -- '*.py'", "unsure"), ("git checkout origin/dev -- 'src/[a]pp.py'", "unsure"),
     ("gh issue view https://github.com/other/repo/issues/1", "another repository"),
@@ -235,7 +283,7 @@ DENIED = [
     ("gh issue edit https://github.com/other/repo/issues/1 --add-label x", "another repository"),
     ("gh pr checks https://github.com/acme/webshop@evil.example/pull/1", "another repository"),
     ("python -m pytest -q @args.txt", "test option"), ("saani test -- python -m pytest -q @args.txt", "test option"),
-    ("/usr/bin/python -m pytest -q", "not on the list"), ("./python -m pytest -q", "not on the list"),
+    ("/usr/bin/python -m pytest -q", ROOT_CODE("not on the list")), ("./python -m pytest -q", "not on the list"),
     ("{work}/python.exe -m pytest -q", "not on the list"),
     ("saani test -- cat x", "not a test command"), ("saani test --kind landing -- bash -c ls", "not a test command"),
     ("python -m pytest -q --rootdir=/", "test option"), ("python -m pytest -q -c x.ini", "test option"),
@@ -243,18 +291,32 @@ DENIED = [
     ("saani test -- python -m pytest -q -p evil", "test option"),
     ("cd {main}", "cd outside the worktrees"), ("cd {home}", "cd outside the worktrees"), ("cd", "cd outside the worktrees"),
     ("cd {wt}", "cd outside the worktrees"), ("cd -", "cd outside the worktrees"), ("cd -P {work}", "cd outside the worktrees"),
-    ("cd src*", "cd outside the worktrees"),
+    ("cd src*", "unsure"),
     ("cd .. && ls", "cd outside the worktrees"), ("git -C {main} status", "cd outside the worktrees"),
     ("git -C {wt} status", "cd outside the worktrees"),
+    ("cd {work}/src && git -C {work} -C ../../webshop stash", "cd outside the worktrees"),        # -C after -C: from the first
+    ("cd {work}/src && git -C {work} -C ../../webshop checkout -- app.py", "cd outside the worktrees"),
     ("git -c core.sshCommand=x fetch", "git option"), ("git fetch --upload-pack=x origin", "git option"),
     ("git diff --output=/x", "git option"), ("git log --out=x", "git option"), ("git log --o=x", "git option"),
     ("git commit --no-verify -m x", "no-verify"), ("git commit --no-v -m x", "no-verify"), ("git commit -nm x", "no-verify"),
     ("git merge --no-verify origin/dev", "no-verify"),
+    ("git commit -a -m x", "git commit paths"), ("git commit -am 'Cart: -f is only text here'", "git commit paths"),
+    ("git commit -amx", "git commit paths"), ("git commit -qa -m x", "git commit paths"), ("git commit --all -m x", "git commit paths"),
+    ("git commit --al -m x", "git commit paths"), ("git commit -i -m x src/app.py", "git commit paths"),
+    ("git commit --include -m x", "git commit paths"), ("git commit -o -m x src/app.py", "git commit paths"),
+    ("git commit --only -m x", "git commit paths"), ("git commit --pathspec-from-file=list.txt -m x", "git commit paths"),
+    ("git commit --pathspec-from-file list.txt -m x", "git commit paths"), ("git commit -m x .", "git commit paths"),
+    ("git commit -m x -- .github/workflows/ci.yml", "git commit paths"), ("git commit -m x src/app.py", "git commit paths"),
+    ("git commit -F msg.txt src/app.py", "git commit paths"), ("git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\" .", "git commit paths"),
     ("git rebase -x ls origin/dev", "not on the list"), ("git rebase origin/main", "not on the list"),
     ("git rebase -i origin/dev", "not on the list"), ("git merge origin/main", "not on the list"), ("git merge feat/12-x", "not on the list"),
     ("git merge -s ours origin/dev", "not on the list"),
-    ("git fetch origin dev:dev", "not on the list"), ("git fetch origin +refs/heads/*", "not on the list"),
+    ("git fetch origin dev:dev", "not on the list"), ("git fetch origin '+refs/heads/*'", "not on the list"),
     ("git fetch https://evil.example/x", "not on the list"), ("git fetch --depth 1 origin", "not on the list"),
+    ("git fetch origin pull/7/head", "not on the list"), ("git fetch origin refs/pull/7/head", "not on the list"),   # a stranger's PR
+    ("git fetch origin FETCH_HEAD", "not on the list"), ("git fetch origin some-branch", "not on the list"),
+    ("git switch -c feat/12-x FETCH_HEAD", "not on the list"), ("git checkout -b feat/12-x FETCH_HEAD", "not on the list"),
+    ("git switch -c feat/12-x origin/main", "not on the list"), ("git checkout -b feat/12-x pull/7/head", "not on the list"),
     ("git switch dev", "not a worker branch"), ("git switch main", "not a worker branch"), ("git checkout auto/2026", "not a worker branch"),
     ("git switch --detach HEAD", "not on the list"), ("git branch new-one", "not on the list"), ("git branch -d x", "not on the list"),
     ("git branch -m a b", "not on the list"), ("git stash drop", "git stash"), ("git stash clear", "git stash"),
@@ -294,8 +356,8 @@ DENIED = [
     ("git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\"x", "unsure"), ("echo \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
     ("git log \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"), ("git stash push -m \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
     ("cat - <<'EOF'\nx\nEOF", "unsure"), ("git commit <<'EOF'\nx\nEOF", "unsure"), ("git status <<'EOF'\nx\nEOF", "unsure"),
-    ("git commit -F - <<'EOF'\nx\nEOF\nrm -rf /", "rm outside the worktrees"),
-    ("echo '$(cat <<'EOF'\n'; rm -rf / ; '\nEOF\n)'", "rm outside the worktrees"),    # read as bash reads it: the rm is a command
+    ("git commit -F - <<'EOF'\nx\nEOF\nrm -rf /", ROOT_CODE("rm outside the worktrees")),
+    ("echo '$(cat <<'EOF'\n'; rm -rf / ; '\nEOF\n)'", ROOT_CODE("rm outside the worktrees")),    # read as bash reads it: the rm is a command
 ]
 
 
@@ -304,6 +366,35 @@ def test_what_an_auto_run_must_never_do_is_refused_with_a_reason(ctx, command, c
     decision, reason, got, word = sh(ctx, command)
     assert (decision, got) == ("deny", code), (command, reason)
     assert reason.startswith("Saani guard (auto run): refused") and "To go on:" in reason
+
+
+def test_with_a_literal_dashdash_every_word_before_it_is_a_revision_never_a_path(ctx):
+    (pathlib.Path(ctx.places["work"]) / "main").write_text("x")                         # a planted file named like the owner's branch
+    for command in ("git log main -- src", "git log -p main -- .", "git diff HEAD main -- src", "git log 'ma?n' -- src",
+                    "git diff main -- ."):
+        decision, reason, code, _ = sh(ctx, command)
+        assert (decision, code) == ("deny", "revision"), (command, reason)
+    assert sh(ctx, "git log src")[0] == "allow"                                          # an existing path, no --: a path
+    assert sh(ctx, "git log main")[0] == "allow"                                         # (git reads it as the file: ambiguous refused)
+    assert sh(ctx, "git log HEAD -- main")[0] == "allow"
+
+
+def test_every_unquoted_glob_is_refused_in_any_position(ctx):
+    """Bash expands an unquoted *, ? or [ after the guard has looked, into any number of words (a pattern becomes several words, a
+    file named --all or -- an option): none passes, whatever it matches. Quoted, it is text."""
+    work = pathlib.Path(ctx.places["work"])
+    for name in ("--all", "main", "--", "-exec", "-delete", "notes.md", "-n.md"):
+        (work / name).write_text("x")
+    for command in ("grep -v -e {home}/.ssh/* /dev/null", "grep -v {work}/.e* x", "cat *.md", "cat {work}/*.md", "ls ?", "sort *",
+                    "git switch feat/12-x && cat *", "grep -v -e *zz -- -r .", "git log -p -?all", "git log -p *all",
+                    "git log -p main -?", "find . -maxdepth 0 -?xec sh x \\;", "find . -name zz -o -?elete", "git add src/*.py",
+                    "find src/*", "wc -l ?n.md", "cat nothing-matches-*", "c?t notes.md", "echo [ab]", "ls src/[a]pp.py"):
+        decision, reason, code, _ = sh(ctx, command)
+        assert (decision, code) == ("deny", "unsure"), (command, reason)
+        assert "an unquoted glob" in reason and "git diff -- 'src/*.py'" in reason, command
+    for command in ("git diff -- 'src/*.py'", "git log -- 'src/*.py'", "find . -name '*.md'", "grep -n 'a*b' notes.md",
+                    "git commit -m 'fix [WIP]?'"):
+        assert sh(ctx, command)[0] == "allow", command
 
 
 def test_a_compound_command_is_refused_when_any_part_is(ctx):
@@ -364,7 +455,66 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                    ("NotebookEdit", "notebook_path"), ("Glob", "path"), ("Glob", "pattern"), ("LS", "path"), ("Grep", "path"),
                    ("Grep", "glob")):
         decision, reason, code, _ = tool(ctx, t, **{key: name})
-        assert (decision, code) == ("deny", "secret"), (t, name, reason)
+        codes = {"secret", ROOT_CODE("secret")} if name.startswith("/proc") else {"secret"}     # a glob is text, a path is read first
+        assert decision == "deny" and code in codes, (t, name, reason)
+
+
+@pytest.mark.parametrize("name", ["{home}/.claude.json", "{home}/.claude/settings.json", "{home}/.claude/.credentials.json",
+                                  "{home}/.claude/projects/acme-webshop/session.jsonl", "{home}/.claude", "~/.claude/settings.json",
+                                  "{home}/AppData/Roaming/npm/etc/npmrc", "putty.ppk", "release.jks", "app.keystore", "vault.kdbx",
+                                  "{home}/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt",
+                                  "{home}/.local/share/powershell/PSReadLine/ConsoleHost_history.txt", "{main}/.git/config",
+                                  "{work}/.git./config", "{main}/.git/config:x", ".git/config",
+                                  "{home}/.bash_history", "{work}/.python_history", "{home}/.gitconfig", "{home}/.config/git/config",
+                                  "{home}/.m2/settings.xml", "{work}/.yarnrc.yml", "{home}/AppData/Roaming/pip/pip.ini",
+                                  "{home}/.config/pip/pip.conf", "{home}/.claude.json.backup", "{home}/.npmrc.bak", "{home}/.netrc~",
+                                  "{main}/.git/refs/stash", "{main}/.git/logs/refs/stash", "{main}/.git/packed-refs",
+                                  "{main}/.git/packed-refs::$DATA", "{main}/.git./refs/stash", "{home}/.m2./settings.xml. ",
+                                  "{home}/.config/git/config:x"])
+def test_more_secrets_are_refused_to_read(ctx, name):
+    decision, reason, code, _ = tool(ctx, "Read", file_path=name)
+    assert (decision, code) == ("deny", "secret"), (name, reason)
+
+
+def test_claude_s_memory_and_a_project_s_own_claude_folder_are_no_secret(ctx):
+    assert tool(ctx, "Read", file_path="{home}/.claude/projects/acme-webshop/memory/MEMORY.md")[0] == "allow"
+    assert tool(ctx, "Read", file_path="{work}/.claude/settings.json")[0] == "allow"
+    assert tool(ctx, "Read", file_path="{work}/.git/HEAD")[0] == "allow"
+    assert sh(ctx, "cat ~/.claude/settings.json")[2] == "secret"
+    assert sh(ctx, "cat {main}/.git/config")[2] == "secret"
+    assert sh(ctx, "git status")[0] == "allow"
+
+
+def test_only_this_session_s_saved_tool_outputs_are_read_never_a_way_out_of_them(ctx):
+    assert guard.context(ctx.cwd, {}, "sess-1").session == "sess-1"                     # main() passes the hook's session_id
+    ctx.session = "sess-1"
+    project = pathlib.Path(ctx.places["home"]) / ".claude" / "projects" / "acme-webshop"
+    for sid in ("sess-1", "sess-2"):
+        (project / sid / "tool-results").mkdir(parents=True)
+        (project / sid / "tool-results" / "out.txt").write_text("x")
+    (project.parents[1] / "settings.json").write_text("{}")
+    tr = "{home}/.claude/projects/acme-webshop/sess-1/tool-results"
+    assert tool(ctx, "Read", file_path=tr + "/out.txt")[0] == "allow"
+    assert tool(ctx, "Read", file_path="~/.claude/projects/acme-webshop/sess-1/tool-results/out.txt")[0] == "allow"
+    assert sh(ctx, "head -50 ~/.claude/projects/acme-webshop/sess-1/tool-results/out.txt")[0] == "allow"
+    assert sh(ctx, f"cat {tr}/out.txt")[0] == "allow"
+    for escape in ("{home}/.claude/projects/acme-webshop/sess-2/tool-results/out.txt",          # another session's outputs
+                   "{home}/.claude/projects/acme-webshop/sess-1.jsonl", "{home}/.claude/projects/acme-webshop/sess-1/x.jsonl",
+                   "{home}/.claude/projects/acme-webshop/tool-results/out.txt", tr + "/../../../../settings.json",
+                   tr + "/../../sess-2/tool-results/out.txt", tr + "/.../settings.json", tr + "/.. /.. /.. /.. /settings.json",
+                   "{home}/.claude/settings.json", "{home}/.claude/projects/acme-webshop/sess-1/tool-results.jsonl",
+                   "{home}/.claude/tool-results/out.txt"):
+        assert tool(ctx, "Read", file_path=escape)[2] == "secret", escape
+        assert sh(ctx, f"cat '{escape}'")[2] == "secret", escape
+    ctx.session = None                                                                   # no session id: no outputs at all
+    assert tool(ctx, "Read", file_path=tr + "/out.txt")[2] == "secret"
+    ctx.session = "sess-1"
+    try:
+        os.symlink(project.parents[1] / "settings.json", project / "sess-1" / "tool-results" / "link.json")
+    except (OSError, NotImplementedError):
+        return                                                                           # no symlinks here (Windows without the right)
+    assert tool(ctx, "Read", file_path=tr + "/link.json")[2] == "secret"                 # judged where it leads
+    assert sh(ctx, f"cat {tr}/link.json")[2] == "secret"
 
 
 @pytest.mark.parametrize("command", ["cat .env", "head {home}/.ssh/id_ed25519", "grep x .env.local", "cat server.pem",
@@ -375,16 +525,81 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                                      "cat {home}/.kube/config", "git commit -F .env", "rm .env"])
 def test_secrets_are_refused_inside_shell_commands(ctx, command):
     decision, reason, code, _ = sh(ctx, command)
-    assert (decision, code) == ("deny", "secret"), (command, reason)
+    assert (decision, code) == ("deny", ROOT_CODE("secret") if "/proc" in command else "secret"), (command, reason)
 
 
-def test_a_glob_that_would_reach_a_secret_is_refused(ctx):
+@pytest.mark.parametrize("command", [                                                   # the earlier glob bypasses: all refused first
+    "cat ~/.ss[^x]/id_rs[^x]", "cat ~/.ss?/id_rs?", "cat ~/.ss*/id_*", "cat {home}/.ss?/id_rs?", "head -1 ~/.ss?/id_rs?",
+    "gh issue comment 1 --body-file ~/.ss[^x]/id_rs[^x]", "gh issue comment 1 -F ~/.ss?/id_rs?", "git commit -F ~/.ss?/id_rs?",
+    "git diff ~/.ss?/id_rs? src", "git diff -- ~/.ss?/id_rs?", "cat {main}/*.py", "cat ../../webshop/*", "wc -l {temp}/*",
+    "cat src/[a]pp.py", "cat ~/.ss?/id_rs? && ls", "cat **/app.py", "cat src/**", "wc -l **/*.py", "cat a**b", "cat *.key",
+    "cat server*", "cat .en?", "cat src/../.e*", "cat ?otes.txt", "cat /c/x/.ss?/id_rs?"])
+def test_an_unquoted_glob_is_refused_before_any_other_rule(ctx, command):
     work = pathlib.Path(ctx.places["work"])
-    (work / "server.key").write_text("x")
-    (work / "notes.txt").write_text("x")
-    assert sh(ctx, "cat *.txt")[0] == "allow"
-    assert sh(ctx, "cat *.key")[2] == "secret"
-    assert sh(ctx, "cat server*")[2] == "secret"
+    for name in ("server.key", "notes.txt", ".env"):
+        (work / name).write_text("x")
+    decision, reason, code, _ = sh(ctx, command)
+    assert (decision, code) == ("deny", "unsure") and "an unquoted glob" in reason, (command, reason)
+
+
+def test_a_device_is_refused_but_dev_null(ctx):
+    depth = "../" * (len(pathlib.Path(ctx.places["work"]).parts) + 2)
+    for command in ("cat /dev/clipboard", "head -c 9 /dev/clipboard", "cat /dev/../dev/clipboard", "cat /tmp/../dev/clipboard",
+                    f"cat {depth}dev/clipboard", "cat ~/../../../../../../../../../../dev/clipboard", "ls /dev",
+                    "gh issue comment 1 --body-file /dev/clipboard", "git commit -F /dev/clipboard", "cat /DEV/Clipboard"):
+        assert sh(ctx, command)[2] == "posix path", command
+    assert tool(ctx, "Read", file_path="/dev/clipboard")[2] == "posix path"
+    assert sh(ctx, "ls > /dev/clipboard")[2] == "unsure"                                 # a redirect: only to /dev/null
+    assert sh(ctx, "cat < /dev/clipboard")[2] == "unsure"
+    assert sh(ctx, "diff a.txt /dev/null")[0] == "allow"
+    assert sh(ctx, "ls > /dev/null 2>&1")[0] == "allow"
+
+
+def test_git_bash_paths_go_through_one_allowlist(ctx):
+    """After `..` is folded as Git Bash folds it, only /<drive>/..., /tmp/... and /dev/null are read; the rest Git Bash maps outside the
+    drives (its own install, /proc, mounts) and is refused before any lookup."""
+    if os.name != "nt":
+        pytest.skip("Git Bash's paths are read on Windows")
+    depth = "../" * (len(pathlib.Path(ctx.places["work"]).parts) + 2)
+    for path in (f"{depth}proc/self/environ", "/c/../proc/self/environ", "/tmp/../proc/x", "~/" + depth + "proc/self/environ",
+                 f"{depth}cygdrive/c/x.txt", "/cygdrive/c/x.txt", "/etc/passwd", "/", "/usr/bin/env", "/mnt/c/x", "/opt/x",
+                 "C:/../proc/self/environ", "C:\\..\\etc\\passwd", "\\etc\\passwd"):
+        word = f"'{path}'" if "\\" in path else path                                     # unquoted: bash expands ~
+        assert sh(ctx, f"cat {word}")[2] == "posix path", path
+        assert tool(ctx, "Read", file_path=path)[2] == "posix path", path
+    drive = ctx.places["work"][0].lower()
+    work_gitbash = "/" + drive + ctx.places["work"][2:]
+    (pathlib.Path(ctx.places["work"]) / "notes.txt").write_text("x")
+    for ok in ("notes.txt", "src/../notes.txt", ctx.places["work"] + "/notes.txt", work_gitbash + "/notes.txt", "/tmp/x.txt", "/dev/null"):
+        assert sh(ctx, f"cat '{ok}'")[0] == "allow", ok
+        assert tool(ctx, "Read", file_path=ok)[0] == "allow", ok
+
+
+def test_a_bare_drive_letter_is_its_current_folder_so_refused(ctx):
+    for path in ("C:", "d:", "C:x.txt"):
+        assert tool(ctx, "Read", file_path=path)[2] == "unsure", path
+        assert sh(ctx, f"ls {path}")[2] == "unsure", path
+    assert tool(ctx, "Read", file_path="C:/")[0] == "allow"
+
+
+def test_a_mapped_network_drive_is_refused_before_any_lookup(ctx, monkeypatch):
+    if os.name != "nt":
+        pytest.skip("drive letters are Windows'")
+    letter = ctx.places["work"][0].upper()
+    monkeypatch.setattr(guard, "drive_type", lambda x: guard.DRIVE_REMOTE if x == letter else 3)
+    assert tool(ctx, "Read", file_path=ctx.places["work"] + "/notes.txt")[2] == "network path"
+    assert sh(ctx, "cat notes.txt")[2] == "network path"
+
+
+def test_a_git_bash_drive_path_with_backslashes_is_read_as_its_windows_path(ctx):
+    assert sh(ctx, "cat /cygdrive/c/x.txt")[2] == "posix path"
+    assert tool(ctx, "Read", file_path="/cygdrive/c/x.txt")[2] == "posix path"
+    if os.name != "nt":
+        return
+    home = ctx.places["home"].replace("/", "\\")
+    gitbash = "/" + home[0].lower() + home[2:]                                           # /c\Users\...\home
+    assert sh(ctx, f"cat '{gitbash}\\.claude\\settings.json'")[2] == "secret"
+    assert tool(ctx, "Read", file_path=gitbash + "\\.claude\\settings.json")[2] == "secret"
 
 
 def test_a_branch_or_text_that_mentions_token_is_no_secret_but_a_token_file_is(ctx):
@@ -478,6 +693,73 @@ def test_grep_and_rm_refuse_a_tree_too_big_to_look_through(ctx, monkeypatch):
     assert sh(ctx, "rm -rf {work}/big")[2] == "guard file"
 
 
+@pytest.mark.parametrize("name,inp", [
+    ("Read", {"file_path": "\\\\host\\s\\x.md"}), ("Read", {"file_path": "//host/s/x.md"}), ("Read", {"file_path": "\\\\?\\UNC\\host\\s\\x"}),
+    ("Read", {"file_path": "\\\\.\\pipe\\x"}), ("Read", {"file_path": "/\\host\\s\\x.md"}), ("Glob", {"pattern": "*.md", "path": "//host/s"}),
+    ("LS", {"path": "\\\\host\\s"}), ("Grep", {"pattern": "x", "path": "\\\\host\\s"}), ("Write", {"file_path": "//host/s/x.md"}),
+    ("Edit", {"file_path": "\\\\host\\s\\x.md"}), ("Bash", {"command": "cat //host/s/x.md"}), ("Bash", {"command": "cat '\\\\host\\s\\x.md'"}),
+    ("Bash", {"command": "gh issue comment 1 --body-file //host/s/x.md"}), ("Bash", {"command": "cd //host/s"}),
+    ("Bash", {"command": "git diff //host/s/x a.txt"}), ("Bash", {"command": "//host/s/python.exe -m pytest -q"}),
+    ("Bash", {"command": "python -m pytest -q //host/s/tests"}), ("Bash", {"command": "grep x a=//host/s/x"})])
+def test_a_network_path_is_refused_before_any_filesystem_call(ctx, monkeypatch, name, inp):
+    def local_only(real):
+        def call(p, *a, **k):
+            if isinstance(p, (str, os.PathLike)) and guard.network(os.fspath(p)):
+                raise AssertionError(f"the guard looked a network path up: {p}")
+            return real(p, *a, **k)
+        return call
+    for fn in ("realpath", "exists", "isdir", "isfile", "lexists"):
+        monkeypatch.setattr(os.path, fn, local_only(getattr(os.path, fn)))
+    for fn in ("stat", "scandir", "listdir"):
+        monkeypatch.setattr(os, fn, local_only(getattr(os, fn)))
+    decision, reason, code, _ = guard.decide({"tool_name": name, "tool_input": inp}, ctx)
+    assert (decision, code) == ("deny", "network path"), (name, inp, reason)
+
+
+def test_a_read_of_a_network_path_never_reaches_realpath(ctx, monkeypatch):
+    def no_lookup(*a, **k):
+        raise AssertionError("the guard looked a path up")
+    monkeypatch.setattr(os.path, "realpath", no_lookup)
+    assert tool(ctx, "Read", file_path="\\\\host\\s\\x.md")[2] == "network path"
+    assert tool(ctx, "Read", file_path="//host/s/x.md")[2] == "network path"
+
+
+def test_a_url_is_not_looked_up_as_a_network_path(ctx, monkeypatch):
+    real = os.path.realpath
+
+    def local_only(p, *a, **k):
+        assert not guard.network(str(p)), p
+        return real(p, *a, **k)
+    monkeypatch.setattr(os.path, "realpath", local_only)
+    assert sh(ctx, "gh issue view https://github.com/acme/webshop/issues/12")[0] == "allow"
+    assert sh(ctx, "gh pr view https://evil.example/acme/webshop/pull/1")[2] == "another repository"
+
+
+def test_a_walk_past_the_guard_s_time_budget_is_refused(ctx, monkeypatch):
+    (pathlib.Path(ctx.places["work"]) / "src" / "app.py").write_text("x")
+    assert tool(ctx, "Grep", pattern="x", path="{work}")[0] == "allow"
+    assert sh(ctx, "rm -rf {work}/src")[0] == "allow"
+    monkeypatch.setattr(guard, "BUDGET_SECONDS", 0)
+    assert tool(ctx, "Grep", pattern="x", path="{work}")[2] == "too big"                 # the walk ran out of time: refused
+    assert sh(ctx, "rm -rf {work}/src")[2] == "too big"
+
+
+def test_one_deadline_bounds_the_whole_decision_not_each_word(ctx, monkeypatch):
+    import time
+    work = pathlib.Path(ctx.places["work"])
+    for k in range(20):
+        (work / f"f{k}.txt").write_text("x")
+    words = " ".join(f"f{k}.txt" for k in range(20))
+    assert sh(ctx, f"cat {words}")[0] == "allow"
+    clock = [time.monotonic()]
+
+    def tick():                                                                          # every look at the clock: one second later
+        clock[0] += 1
+        return clock[0]
+    monkeypatch.setattr(time, "monotonic", tick)
+    assert sh(ctx, f"cat {words}")[2] == "too big"                                        # 20 words, each quick, too long together
+
+
 def test_rm_of_a_folder_looks_at_its_whole_tree(ctx):
     docs = pathlib.Path(ctx.places["work"]) / "docs" / "sub"
     docs.mkdir(parents=True)
@@ -503,12 +785,12 @@ def test_edits_are_allowed_only_in_the_worktrees_the_run_s_folder_and_temp(ctx):
 @pytest.mark.parametrize("path", ["{work}/saani/guard.py", "{work}/saani.toml", "{work}/hooks/hooks.json", "{work}/hooks/other.sh",
                                   "{work}/.claude/settings.json", "{work}/.claude/settings.local.json", "{work}/.claude/agents/x.md",
                                   "{work}/.git", "{work}/.githooks/commit-msg", "{work}/.mcp.json", "{work}/CLAUDE.md",
-                                  "{work}/src/CLAUDE.md", "{temp}/saani/guard.py", "{temp}/.git/config", "{home}/.saani/auto/x.json",
+                                  "{work}/src/CLAUDE.md", "{temp}/saani/guard.py", "{temp}/.git/HEAD", "{home}/.saani/auto/x.json",
                                   "{home}/.saani/projects.toml", "{main}/saani.toml", "{main}/.git/hooks/pre-commit",
                                   "{work}/.github/workflows/ci.yml", "{work}/.github/actions/setup/action.yml", "{work}/.github/CODEOWNERS",
                                   "{work}/CODEOWNERS", "{work}/docs/CODEOWNERS", "{work}/.github/dependabot.yml", "{work}/CLAUDE.local.md",
-                                  "{work}/.git./config", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml",
-                                  "{work}/.gitignore", "{work}/src/.gitignore", "{work}/CLAUDE.md:stream", "{work}/.git:x/config",
+                                  "{work}/.git./HEAD", "{work}/CLAUDE.md.", "{work}/.claude. /x", "{work}/.GitHub/Workflows/x.yml",
+                                  "{work}/.gitignore", "{work}/src/.gitignore", "{work}/CLAUDE.md:stream", "{work}/.git:x/HEAD",
                                   "{work}/saani.toml::$DATA", "{work}/.github/workflows:s/ci.yml"])
 def test_protected_files_are_never_edited_in_an_auto_run(ctx, path):
     decision, reason, code, _ = tool(ctx, "Write", file_path=path, content="x")
@@ -535,7 +817,7 @@ def test_paths_with_backslashes_dots_and_case(ctx):
 
 
 def test_other_tools_are_allowed_unknown_ones_refused_and_questions_never_asked(ctx):
-    for name in ("Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage", "WebSearch", "WebFetch", "BashOutput", "KillShell"):
+    for name in ("Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage", "WebSearch", "WebFetch", "BashOutput", "KillShell", "SubagentHandback"):
         assert guard.decide({"tool_name": name, "tool_input": {}}, ctx)[0] == "allow", name
     assert guard.decide({"tool_name": "mcp__x__delete", "tool_input": {}}, ctx)[2] == "unknown tool"
     assert guard.decide({"tool_name": None}, ctx)[2] == "unknown tool"
@@ -624,7 +906,24 @@ def test_a_broken_entry_fails_closed_and_an_old_one_is_over(tmp_path, home):
         guard.state("s-1")
     old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
     guard.turn_on("s-2", "r", "m", "w", started=old)
-    assert guard.state("s-2") is None
+    assert guard.state("s-2")["over"] is True                                            # over, never present mode again
+    assert guard.state("s-2")["over"] is True
+
+
+def test_an_entry_renamed_over_between_the_two_looks_is_still_over(tmp_path, home, monkeypatch):
+    old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
+    guard.turn_on("s-1", "r", "m", "w", started=old)
+    entry = home / ".saani" / "auto" / "s-1.json"
+    real, looks = open, []
+
+    def racing(path, *a, **k):                       # another call expires the entry right after this one looked for the mark
+        looks.append(os.path.basename(path))
+        if looks == ["s-1.over"]:
+            os.replace(entry, entry.with_suffix(".over"))
+            raise FileNotFoundError(path)
+        return real(path, *a, **k)
+    monkeypatch.setattr(guard, "open", racing, raising=False)
+    assert guard.state("s-1")["over"] is True and looks == ["s-1.over", "s-1.json", "s-1.over"]
 
 
 def test_present_mode_prints_nothing(tmp_path, home):
@@ -718,11 +1017,96 @@ def test_registration_needs_a_run_folder_inside_the_worktrees_of_a_saani_project
     assert guard.state("s-1")["deploy"] is True
 
 
-def test_an_expired_entry_is_deleted(tmp_path, home):
-    old = (datetime.datetime.now() - datetime.timedelta(hours=guard.MAX_HOURS + 1)).isoformat()
-    guard.turn_on("s-1", "r", "m", "w", started=old)
-    assert guard.state("s-1") is None
-    assert not (home / ".saani" / "auto" / "s-1.json").exists()
+def test_an_expired_entry_is_over_every_call_refused_until_the_owner_ends_the_run(tmp_path, home):
+    main, work = fake_repo(tmp_path)
+    old = (datetime.datetime.now() - datetime.timedelta(hours=13)).isoformat()
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt", started=old)
+    for call in ({"command": "git status"}, {"command": "ls"}):                          # denied, and denied again: never present mode
+        out = hook(home, work, "Bash", **call)
+        assert out["permissionDecision"] == "deny" and "over" in out["permissionDecisionReason"], call
+    assert hook(home, work, "Read", file_path=str(work / "README.md"))["permissionDecision"] == "deny"
+    assert not (home / ".saani" / "auto" / "s-1.json").exists() and (home / ".saani" / "auto" / "s-1.over").exists()
+    post(home, work, AUTO_ON, ran(marker("r", work)))                                    # never re-armed
+    assert guard.state("s-1")["over"] is True
+    assert guard.refusals("r")["by_reason"] == {"run over": 3}
+    assert guard.turn_off_run("r") == 1                                                  # the owner, from a terminal: the mark goes too
+    assert not (home / ".saani" / "auto" / "s-1.over").exists() and guard.state("s-1") is None
+    assert hook(home, work, "Bash", command="git status") is None
+    guard.turn_on("s-2", "r2", main, tmp_path / "webshop-wt", started=old)
+    assert guard.state("s-2")["over"] is True and guard.turn_off("s-2")["over"] is True
+    assert guard.state("s-2") is None
+
+
+def test_a_decision_that_blocks_is_cut_off_with_a_deny_within_the_budget(tmp_path, home, monkeypatch, capsys):
+    import time
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
+    monkeypatch.setattr(guard, "HARD_STOP_SECONDS", 0.3)
+    monkeypatch.setattr(guard.os.path, "realpath", lambda p, *a, **k: time.sleep(5) or p)   # a disconnected drive: every lookup blocks
+    monkeypatch.setattr(guard, "log_refusal", lambda *a: None)                            # (its own lookup would block too)
+    exits = []
+    monkeypatch.setattr(guard, "hard_exit", exits.append)
+    raw = json.dumps({"session_id": "s-1", "cwd": str(work), "hook_event_name": "PreToolUse", "tool_name": "Read",
+                      "tool_input": {"file_path": str(work / "x.txt")}}).encode()
+    began = time.monotonic()
+    assert guard.main(raw) == 0
+    assert time.monotonic() - began < 2 and exits == [0]
+    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "could not decide" in out["permissionDecisionReason"]
+
+
+def test_a_long_glued_message_ending_in_a_newline_is_decided_fast(ctx):
+    import time
+    word = "-" + "m" * 32_000 + "\n"
+    began = time.monotonic()
+    assert not guard.glued_message(word)
+    sh(ctx, "git commit '" + word + "'")
+    assert time.monotonic() - began < 3                                                  # linear (quadratic: minutes); room for a busy machine
+    for w, glued in (("-mx", True), ("-amx", True), ("-qam x", True), ("-m", False), ("-mx\ny", False), ("-1mx", False), ("x", False)):
+        assert guard.glued_message(w) is glued, w
+
+
+def test_a_huge_revision_word_is_decided_fast(ctx):
+    import time
+    began = time.monotonic()
+    for word in ("HEAD" + "~" * 200_000 + "x", "HEAD" + "~" * 200_000, "a.." * 70_000, "-" + "f" * 200_000 + "1"):
+        guard.allowed_rev(word, ctx)
+        guard.flag_cluster(word, "f")
+    assert sh(ctx, "git fetch -" + "f" * 50_000 + "1 origin")[0] == "deny"
+    assert time.monotonic() - began < 3                                                  # linear: no backtracking (quadratic: minutes)
+
+
+def test_an_oversize_input_is_refused_before_any_work(tmp_path, home, monkeypatch, capsys):
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
+    monkeypatch.setattr(guard, "decide", lambda *a: pytest.fail("an oversize input reached the decision"))
+    raw = json.dumps({"session_id": "s-1", "cwd": str(work), "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                      "tool_input": {"command": "git log HEAD" + "~" * 40_000}}).encode()
+    assert guard.main(raw) == 0
+    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "32 KB" in out["permissionDecisionReason"]
+    assert not guard.too_big({"tool_name": "Write", "tool_input": {"file_path": "a.py", "content": "x" * 100_000}})   # content: not judged
+
+
+def test_a_big_walk_says_too_big_before_the_hard_stop_says_too_slow(tmp_path, home, monkeypatch, capsys):
+    assert guard.BUDGET_SECONDS < guard.HARD_STOP_SECONDS < 15                          # the inner deadline answers first
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
+    monkeypatch.setattr(guard, "BUDGET_SECONDS", 0)
+    monkeypatch.setattr(guard, "context", lambda cwd, st, sid: guard.Context(work, wt_dir=tmp_path / "webshop-wt", session=sid))
+    raw = json.dumps({"session_id": "s-1", "cwd": str(work), "hook_event_name": "PreToolUse", "tool_name": "Grep",
+                      "tool_input": {"pattern": "x", "path": str(work)}}).encode()
+    (work / "a.txt").write_text("x")
+    guard.main(raw)
+    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert out["permissionDecision"] == "deny" and "more to look through" in out["permissionDecisionReason"]
+
+
+def test_post_tool_use_does_not_go_through_the_decision_thread(tmp_path, home, monkeypatch):
+    monkeypatch.setattr(guard, "hard_exit", lambda code: pytest.fail("PostToolUse was cut off"))
+    raw = json.dumps({"session_id": "s-1", "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"},
+                      "cwd": str(tmp_path)}).encode()
+    assert guard.main(raw) == 0 and guard.state("s-1") is None
 
 
 def test_the_guard_fails_closed(tmp_path, home):

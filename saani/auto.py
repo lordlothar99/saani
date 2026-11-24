@@ -375,11 +375,11 @@ def project_of(entry):
 
 
 def entries():
-    """[(session id, entry)] of the guard's registry, read only."""
+    """[(session id, entry)] of the guard's registry (over marks included: the guard still refuses their calls), read only."""
     from . import guard
     out = []
     try:
-        names = [x for x in os.listdir(guard.registry()) if x.endswith(".json")]
+        names = [x for x in os.listdir(guard.registry()) if x.endswith((".json", guard.OVER))]
     except OSError:
         return out
     for name in names:
@@ -495,7 +495,10 @@ def run_folder(given, action):
     from . import guard
     c = cfg()
     cwd = os.getcwd()
-    folder = guard.resolve(given, cwd) if given else guard.norm(cwd)
+    try:
+        folder = guard.resolve(given, cwd) if given else guard.norm(cwd)
+    except guard.Refuse as e:
+        raise SystemExit(f"saani auto {action}: --folder {given}: {e.why}")
     wt = guard.norm(c.wt_dir)
     if not (guard.inside(folder, wt) and folder != wt and os.path.isdir(folder)):
         raise SystemExit(f"saani auto {action}: the run's folder must be a folder inside {c.wt_dir} (made by `saani auto`; "
@@ -600,7 +603,7 @@ def cmd_status(args):
 
 
 def guard_live(session):
-    """True when the guard still holds this session (its entry is not over)."""
+    """True when the guard still holds this session: an entry, over or not (an over session is still refused until the owner's off)."""
     from . import guard
     try:
         return guard.state(session) is not None
@@ -622,6 +625,11 @@ def cmd_off(args):
     if mine:
         print(status_text(rec))
     gone = end_guard_entries(run_id)
+    from . import guard
+    unreadable = guard.remove_unreadable_over()
+    if unreadable:
+        print(f"removed {len(unreadable)} unreadable over mark{'' if len(unreadable) == 1 else 's'} of the guard (no run id to match): "
+              + ", ".join(unreadable))
     if mine:
         path = record_path()
         try:

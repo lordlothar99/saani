@@ -8,7 +8,8 @@ Two modes (docs/SAANI.md, The guard), told apart by the hook's `session_id` only
   `saani auto on` too: the owner is asked unless their own rules allow it. A present session never switches itself into auto mode.
 - **auto** (`~/.saani/auto/<session_id>.json`): written by the PostToolUse hook once the whole Bash command `saani auto on ...` ran,
   ended normally and printed its marker line (`saani auto: on <id> folder=<path>`); removed by the owner from a terminal (`saani auto off
-  --run <id>`, `turn_off_run`) or after 12 hours. Every tool call gets "allow" or "deny", never "ask", because an away run must not wait;
+  --run <id>`, `turn_off_run`). After 12 hours it is over (renamed `<session_id>.over`): every call of that session is refused, it never
+  falls back to present mode. Every tool call gets "allow" or "deny", never "ask", because an away run must not wait;
   `saani auto on` and `off` are refused (a run never re-arms or ends itself). The rules are an allowlist: what the guard cannot read for
   sure is refused, with the reason and how to go on. Each refusal adds a line to `~/.saani/auto/refusals.jsonl` (time, run, tool, short
   reason, the command's first word only).
@@ -27,7 +28,8 @@ import sys
 REFUSALS = "refusals.jsonl"
 SESSION = re.compile(r"[A-Za-z0-9_-]{1,128}")
 RUN_ID = re.compile(r"[0-9A-Za-z_-]{1,64}")
-MAX_HOURS = 12                      # an entry older than this is over (the run's own limit is 10 hours): present mode again
+MAX_HOURS = 12                      # an entry older than this is over (the run's own limit is 10 hours): every call refused
+OVER = ".over"                      # the mark of a session whose entry is over: it stays until the owner's `saani auto off --run <id>`
 WINDOWS = os.name == "nt"
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 HOW = ("skip it and note it for the report; the owner can do it when present, or a reviewed change can add a rule to the guard "
@@ -37,6 +39,24 @@ SECRETS_HOW = "the owner handles secrets, never an agent"
 
 class RegistryError(Exception):
     """The registry could not be read: the guard cannot tell present from auto, so it refuses."""
+
+
+class Refuse(Exception):
+    """A refusal found deep inside a check, before the guard touches the filesystem or past its budget (a network path, a path outside
+    the run's places, a walk too long): `decide` turns it into a deny."""
+
+    def __init__(self, code, why, how=HOW):
+        super().__init__(why)
+        self.code, self.why, self.how = code, why, how
+
+
+BUDGET_SECONDS = 7.0                # the guard's own time for one decision, every folder walk together: past it, refused (too big)
+HARD_STOP_SECONDS = 9.0             # past this the hook denies and ends (too slow), well before its 15 s timeout
+
+
+def network(p):
+    """True for a path the system would open over the network: `\\\\host\\share`, `//host/share`, `\\\\?\\UNC\\...`, `\\\\.\\...`."""
+    return len(p) >= 2 and p[0] in "\\/" and p[1] in "\\/"
 
 
 # ---------------------------------------------------------------- the registry of auto sessions (~/.saani/auto)
@@ -49,17 +69,39 @@ def _entry(session_id):
     return os.path.join(registry(), session_id + ".json") if isinstance(session_id, str) and SESSION.fullmatch(session_id) else None
 
 
+def _over(path):
+    return path[:-len(".json")] + OVER
+
+
+def _read_over(path):
+    """The over mark of the entry `path` as {..., "over": True} ({"over": True} when unreadable), or None when there is none."""
+    try:
+        with open(_over(path), encoding="utf-8") as f:
+            data = json.load(f)
+        return {**data, "over": True} if isinstance(data, dict) else {"over": True}
+    except FileNotFoundError:
+        return None
+    except ValueError:
+        return {"over": True}
+    except OSError as e:
+        raise RegistryError(type(e).__name__) from e
+
+
 def state(session_id, now=None):
-    """The auto run of this Claude Code session ({"id", "started", "main", "wt_dir", "folder", "deploy", settings}), or None. Raises
-    RegistryError when the entry exists but cannot be read, or the registry cannot be looked at."""
+    """The auto run of this Claude Code session ({"id", "started", "main", "wt_dir", "folder", "deploy", settings}), or None. A session
+    whose entry is over gets {..., "over": True}: it was on, so it never falls back to present mode. Raises RegistryError when the entry
+    exists but cannot be read, or the registry cannot be looked at."""
     path = _entry(session_id)
     if path is None:
         return None
+    over = _read_over(path)
+    if over:
+        return over
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return None
+        return _read_over(path)                              # renamed to .over between the two looks (another call expired it)
     except (OSError, ValueError) as e:
         raise RegistryError(type(e).__name__) from e
     if not isinstance(data, dict):
@@ -71,10 +113,10 @@ def state(session_id, now=None):
         raise RegistryError("no start time") from e
     if (now or datetime.datetime.now()) - started > datetime.timedelta(hours=MAX_HOURS):
         try:
-            os.remove(path)                                  # over: the entry goes, present mode again
+            os.replace(path, _over(path))                    # over: marked, every call refused until the owner's `saani auto off`
         except OSError:
             pass
-        return None
+        return {**data, "over": True}
     return data
 
 
@@ -99,26 +141,28 @@ def turn_on(session_id, run_id, main, wt_dir, folder=None, deploy=False, started
 
 
 def turn_off(session_id):
-    """Removes this session's entry: present mode again. Returns the entry that was there, or None."""
+    """Removes this session's entry and its over mark: present mode again. Returns the entry that was there, or None."""
     path = _entry(session_id)
     try:
         was = state(session_id)
     except RegistryError:
         was = {}
-    if path and os.path.exists(path):
-        os.remove(path)
+    for p in (path, path and _over(path)):
+        if p and os.path.exists(p):
+            os.remove(p)
     return was
 
 
 def turn_off_run(run_id):
-    """Removes every entry of the run `run_id` (the owner's `saani auto off --run <id>`, from a terminal). Returns how many."""
+    """Removes every entry of the run `run_id`, over marks included (the owner's `saani auto off --run <id>`, from a terminal). Returns
+    how many."""
     done = 0
     try:
         names = os.listdir(registry())
     except FileNotFoundError:
         return 0
     for name in names:
-        if not name.endswith(".json"):
+        if not name.endswith((".json", OVER)):
             continue
         path = os.path.join(registry(), name)
         try:
@@ -130,6 +174,32 @@ def turn_off_run(run_id):
             os.remove(path)
             done += 1
     return done
+
+
+def remove_unreadable_over():
+    """Removes the over marks that cannot be read or name no run (no id to match them by): the owner's `saani auto off`, from a terminal.
+    Until then their session stays refused. Returns their session ids."""
+    removed = []
+    try:
+        names = os.listdir(registry())
+    except FileNotFoundError:
+        return removed
+    for name in names:
+        if not name.endswith(OVER):
+            continue
+        path = os.path.join(registry(), name)
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("id"), str) and RUN_ID.fullmatch(data["id"]):
+                continue
+        except ValueError:
+            pass
+        except OSError:
+            continue                                         # cannot even be opened: left as it is (still refused)
+        os.remove(path)
+        removed.append(name[:-len(OVER)])
+    return removed
 
 
 def refusals(run=None, project=None):
@@ -209,19 +279,81 @@ def norm(p):
     return os.path.normcase(os.path.realpath(str(p)))
 
 
+NETWORK_HOW = "use a local path inside the worktree"
+DRIVE_REMOTE = 4                    # GetDriveTypeW: a mapped network drive
+
+
+def drive_type(letter):
+    """Windows' kind of the drive `letter` (GetDriveTypeW, from the local mapping, no network lookup); 0 elsewhere or when unknown."""
+    if not WINDOWS:
+        return 0
+    try:
+        import ctypes
+        return int(ctypes.windll.kernel32.GetDriveTypeW(f"{letter}:\\"))
+    except Exception:
+        return 0
+
+
+def posix_view(p, cwd):
+    """`p` the way Git Bash reads it, `..` folded lexically from the current folder (Git Bash's /c/... form of `cwd`): `\\` is `/`, C:/ is
+    /c/, /c/.. is /, and `..` may climb above a drive's root."""
+    import posixpath
+
+    def gitbash(x):
+        x = str(x).replace("\\", "/")
+        if re.match(r"^[A-Za-z]:(?!/)", x):
+            raise Refuse("unsure", "a drive-relative path (C:x, or C: alone: that drive's current folder)", how="use the full path, C:/...")
+        m = re.match(r"^([A-Za-z]):(.*)", x)
+        return "/" + m.group(1).lower() + m.group(2) if m else x
+    q = gitbash(p)
+    if not q.startswith("/"):
+        q = gitbash(cwd).rstrip("/") + "/" + q
+    return posixpath.normpath(q)
+
+
+def gitbash_path(p, cwd, temp=None):
+    """The Windows path Git Bash opens for `p`, read through one allowlist: after folding (posix_view), an absolute path is only
+    /<drive>/... (that drive), /tmp/... (the temp folder) or exactly /dev/null. Everything else Git Bash maps outside the drives (/proc,
+    /dev, /etc, /usr, /bin, /cygdrive, /mnt, /home, / itself...) and is refused, before any filesystem call; so is a mapped network drive.
+    Elsewhere than Windows: the path itself, devices (/dev/... but /dev/null) and /cygdrive refused."""
+    q = posix_view(p, cwd)
+    low = q.lower()
+    if low == "/dev/null":
+        return os.path.join(cwd, "/dev/null")
+    if not WINDOWS:
+        if re.match(r"^/(dev|cygdrive)(/|$)", low):
+            raise Refuse("posix path", "a device or /cygdrive path (/dev/clipboard reads the clipboard; only /dev/null is allowed)",
+                         how="use a file inside the worktree")
+        return os.path.join(cwd, str(p))
+    m = re.match(r"^/([a-z])(/.*)?$", low)
+    if m:
+        letter = q[1].upper()
+        if drive_type(letter) == DRIVE_REMOTE:
+            raise Refuse("network path", f"a path on the network drive {letter}: (the guard does not look it up, that would connect to "
+                         "the host)", how=NETWORK_HOW)
+        return letter + ":" + (q[2:] or "/")
+    if low == "/tmp" or low.startswith("/tmp/"):
+        import tempfile
+        return (temp or tempfile.gettempdir()) + q[4:]
+    raise Refuse("posix path", "a path Git Bash maps outside the drives (/proc, /dev, /etc, /usr, /cygdrive, /...; only /<drive>/..., "
+                 "/tmp/... and /dev/null are read)", how="use a path inside the worktree, C:/... or /c/...")
+
+
 def resolve(p, cwd, temp=None, tilde=False):
-    """`p` as a normalized absolute path: relative to `cwd`, `..` resolved, Git Bash's /c/... and /tmp read on Windows, case folded on
-    Windows."""
+    """`p` as a normalized absolute path: read the way Git Bash reads it (gitbash_path: `..` folded, /c/... and /tmp mapped, anything
+    else outside the drives refused), case folded on Windows. A network path is refused before any filesystem call (looking it up would
+    connect to that host)."""
     p = str(p)
-    if WINDOWS:
-        m = re.match(r"^/([a-zA-Z])(?=/|$)", p)
-        if m:
-            p = m.group(1) + ":" + (p[2:] or "/")
-        elif temp and (p == "/tmp" or p.startswith("/tmp/")):
-            p = temp + p[4:]
+    if network(p):
+        raise Refuse("network path", "a network path (\\\\host\\share, //host/share): the guard does not look it up, that would connect "
+                     "to the host", how=NETWORK_HOW)
     if tilde and (p == "~" or p.startswith(("~/", "~\\"))):
         p = os.path.expanduser("~") + p[1:]
-    return norm(os.path.join(cwd, p))
+    full = gitbash_path(p, cwd, temp)
+    if network(full):
+        raise Refuse("network path", "a network path (\\\\host\\share, //host/share): the guard does not look it up, that would connect "
+                     "to the host", how=NETWORK_HOW)
+    return norm(full)
 
 
 def inside(p, base):
@@ -234,8 +366,9 @@ class Context:
     """What the decision needs: the run's folders (normalized), the branches, the repository and the test commands."""
 
     def __init__(self, cwd, wt_dir=None, folder=None, temp=None, main=None, repo="", integration="dev", production="main",
-                 worker_branch=None, tests=(), home=None):
+                 worker_branch=None, tests=(), home=None, session=None):
         import tempfile
+        self.session = session                                # the hook's session_id: its own saved tool outputs are readable
         self.temp = norm(temp or tempfile.gettempdir())
         self.cwd = norm(cwd)
         self.wt_dir = norm(wt_dir) if wt_dir else None
@@ -249,6 +382,17 @@ class Context:
         self.worker_branch = re.compile(worker_branch) if isinstance(worker_branch, str) else (
             worker_branch or re.compile(r"^(bug|feat|task)/(\d+)-[a-z0-9-]+$"))
         self.tests = [list(t) for t in tests if t]
+        self.deadline = None                                  # set by decide(): one deadline for the whole decision
+
+    def in_time(self):
+        """Refuses once the decision's time (BUDGET_SECONDS for the whole call, every folder walk together) is spent."""
+        import time
+        now = time.monotonic()
+        if self.deadline is None:
+            self.deadline = now + BUDGET_SECONDS
+        if now >= self.deadline:
+            raise Refuse("too big", "more to look through than the guard's time for one decision (folder walks)",
+                         how="name the files, or a narrower path")
 
     def path(self, p, cwd=None, tilde=False):
         return resolve(p, cwd or self.cwd, self.temp, tilde)
@@ -272,25 +416,54 @@ class Context:
         return None
 
 
-def context(cwd, st):
+def context(cwd, st, session=None):
     return Context(cwd, wt_dir=st.get("wt_dir"), folder=st.get("folder"), main=st.get("main"), repo=st.get("repo", ""),
                    integration=st.get("integration", "dev"), production=st.get("production", "main"),
-                   worker_branch=st.get("worker_branch"), tests=st.get("tests") or ())
+                   worker_branch=st.get("worker_branch"), tests=st.get("tests") or (), session=session)
 
 
 # ---------------------------------------------------------------- secrets and protected files
 
-STRONG_NAMES = {".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass", ".envrc", ".git-credentials", "hosts.yml"}
-SECRET_DIRS = {".ssh", ".gnupg", ".kube"}
-KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+STRONG_NAMES = {".netrc", "_netrc", ".npmrc", "npmrc", ".pypirc", ".pgpass", ".envrc", ".git-credentials", "hosts.yml", ".claude.json",
+                "consolehost_history.txt", ".bash_history", ".python_history", ".gitconfig", ".yarnrc.yml", "pip.ini", "pip.conf"}
+STRONG_PREFIXES = (".claude.json", ".npmrc", ".netrc")          # their backups too (.claude.json.backup, .npmrc.bak, .netrc~)
+STRONG_TAILS = ([".config", "git", "config"], [".m2", "settings.xml"],
+                [".git", "refs", "stash"], [".git", "logs", "refs", "stash"], [".git", "packed-refs"])     # the owner's stash, by its id
+SECRET_DIRS = {".ssh", ".gnupg", ".kube", "psreadline"}
+KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk", ".jks", ".keystore", ".kdbx")
 KEY_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
 
 
-def secret_name(raw, resolved=None, strict=True):
-    """True when the path names a secret: .env, .env.*, .envrc, keys (*.pem, *.key, *.p12, *.pfx, id_rsa*, id_ed25519*...), anything with
-    "credentials" in its name, .netrc, .npmrc, .pypirc, .pgpass, .git-credentials, any hosts.yml, .docker/config.json, anything under
-    .ssh/, .gnupg/, .kube/ or /proc/, a name with "secret" or "token" in it. Not `strict` (a word of a shell command that may not be a file,
-    like a branch name): the "secret"/"token" rule needs a dot in the name or an existing file."""
+def home_claude(c, session=None):
+    """True for a path inside ~/.claude/ (Claude Code's own settings, sessions, credentials), but its projects' memory
+    (projects/<p>/memory/) and this session's own saved tool outputs (projects/<p>/<session>/tool-results/, never another session's: the
+    owner's may hold printed secrets). Judged on the path as given (`..` folded) and, by the caller, on the resolved path too (a link out
+    of tool-results/ is judged where it leads). A part's `:stream` and trailing dots and spaces are dropped as Windows drops them; a part
+    that is then empty (`...`) or `..` (`.. `) is not read for sure: a secret."""
+    if not os.path.isabs(c):
+        return False
+    home = os.path.join(os.path.expanduser("~"), ".claude")
+    own = os.path.normcase(session) if isinstance(session, str) and SESSION.fullmatch(session) else None
+    for base in {os.path.normcase(os.path.normpath(home)), norm(home)}:
+        p = os.path.normcase(os.path.normpath(c))
+        if inside(p, base):
+            rel = [x.split(":")[0].rstrip(". ") for x in re.split(r"[\\/]+", p[len(base):]) if x]
+            if "" in rel or ".." in rel or rel[:1] != ["projects"]:
+                return True
+            memory = len(rel) >= 3 and rel[2] == "memory"
+            results = own is not None and len(rel) >= 4 and rel[2] == own and rel[3] == "tool-results"
+            return not (memory or results)
+    return False
+
+
+def secret_name(raw, resolved=None, strict=True, session=None):
+    """True when the path names a secret: .env, .env.*, .envrc, keys (*.pem, *.key, *.p12, *.pfx, *.ppk, *.jks, *.keystore, *.kdbx,
+    id_rsa*, id_ed25519*...), anything with "credentials" in its name, .netrc, .npmrc and npmrc, .pypirc, .pgpass, .git-credentials, any
+    hosts.yml, .docker/config.json, .git/config (tokens in remote URLs), ~/.claude.json and ~/.claude/ (but its projects' memory),
+    PowerShell's history (PSReadLine/, ConsoleHost_history.txt), .bash_history, .python_history, .gitconfig and .config/git/config
+    (insteadOf tokens), .m2/settings.xml, .yarnrc.yml, pip.ini, pip.conf, backups of .claude.json, .npmrc and .netrc, anything under .ssh/, .gnupg/, .kube/ or /proc/, a name with "secret" or
+    "token" in it. Not `strict` (a word of a shell command that may not be a file, like a branch name): the "secret"/"token" rule needs a
+    dot in the name or an existing file."""
     for c in (raw, resolved):
         if not c:
             continue
@@ -300,10 +473,13 @@ def secret_name(raw, resolved=None, strict=True):
         parts = [x for x in low.split("/") if x]
         if not parts:
             continue
-        if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"]:
+        if SECRET_DIRS & set(parts) or parts[-2:] == [".docker", "config.json"] or home_claude(str(c), session):
+            return True
+        clean = [x.split(":")[0].rstrip(". ") for x in parts]          # Windows: `.git./config`, `packed-refs::$DATA` are the files
+        if clean[-2:] == [".git", "config"] or any(clean[-len(t):] == t for t in STRONG_TAILS):
             return True
         name = parts[-1].split(":")[0].rstrip(". ") or parts[-1]       # Windows: `.env::$DATA` and `.env.` are `.env`
-        if name == ".env" or name.startswith(".env.") or name in STRONG_NAMES or "credentials" in name:
+        if name == ".env" or name.startswith((".env.",) + STRONG_PREFIXES) or name in STRONG_NAMES or "credentials" in name:
             return True
         if name.endswith(KEY_SUFFIXES) or name.startswith(KEY_PREFIXES):
             return True
@@ -345,7 +521,7 @@ def holds_protected(p, ctx):
         return True
     if any(base and inside(base, p) for base in (ctx.wt_dir, ctx.folder, ctx.main, ctx.saani_home, ctx.temp, ctx.home)):
         return True
-    return os.path.isdir(p) and tree_has(p, lambda path, name: protected(path, ctx))
+    return os.path.isdir(p) and tree_has(p, lambda path, name: protected(path, ctx), ctx)
 
 
 # ---------------------------------------------------------------- the decision
@@ -365,11 +541,21 @@ def deny(code, why, word="", how=HOW):
 READ_TOOLS = {"Read": "file_path", "LS": "path", "Glob": "path"}
 EDIT_TOOLS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 OTHER_TOOLS = {"Agent", "Task", "TodoWrite", "ToolSearch", "Skill", "SendMessage", "WebSearch", "WebFetch",
-               "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop"}
+               "BashOutput", "KillShell", "KillBash", "TaskOutput", "TaskStop",
+               "SubagentHandback"}                           # a subagent hands its report back to the session that started it
 
 
 def decide(event, ctx):
     """("allow" | "deny", reason, short reason for the log, the refused command's first word) for one PreToolUse event in an auto run."""
+    import time
+    ctx.deadline = time.monotonic() + BUDGET_SECONDS
+    try:
+        return decide_tool(event, ctx)
+    except Refuse as e:
+        return deny(e.code, e.why, how=e.how)
+
+
+def decide_tool(event, ctx):
     tool = event.get("tool_name")
     inp = event.get("tool_input")
     if not isinstance(inp, dict):
@@ -384,7 +570,7 @@ def decide(event, ctx):
             value = inp.get(key)
             if value is not None and not isinstance(value, str):
                 return deny("unreadable path", f"{tool} with a {key} that is not text")
-            if value and secret_name(value, ctx.path(value, tilde=True)):
+            if value and secret_name(value, ctx.path(value, tilde=True), session=ctx.session):
                 return deny("secret", f"{tool} of a secret file (keys, .env, credentials, tokens are never read in an auto run)",
                             how=SECRETS_HOW)
         return allow(f"{tool} outside the secrets")
@@ -437,19 +623,21 @@ def grep_tool(inp, ctx):
             if os.path.isdir(path) or (plain and not fnmatch.fnmatchcase(name, glob_.lower())):
                 return False
             return secret_name(os.path.relpath(path, root))
-        if tree_has(root, hit, skip=(".git",)):
+        if tree_has(root, hit, ctx, skip=(".git",)):
             return deny("secret", "Grep in a folder tree that holds a secret file the search could read (or too big to look through)",
                         how="give Grep a glob of plain names that leaves the secret out (*.py), or a deeper path")
     return allow("Grep inside the run's folders")
 
 
-def tree_has(root, test, skip=()):
-    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries."""
+def tree_has(root, test, ctx, skip=()):
+    """True when `test(path, lowercase name)` holds for an entry of the tree, or the tree has more than WALK_CAP entries. Refused once the
+    decision's time is spent (ctx.in_time)."""
     seen = 0
     for top, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d.lower() not in skip]
         for name in dirs + files:
             seen += 1
+            ctx.in_time()
             if seen > WALK_CAP or test(os.path.join(top, name), name.lower()):
                 return True
     return False
@@ -602,7 +790,7 @@ def split_bash(text):
 
 # ---------------------------------------------------------------- the rules for one command
 
-READ_ONLY = {"ls", "cat", "head", "tail", "grep", "wc", "sort", "find", "echo", "test", "[", "pwd", "diff"}
+READ_ONLY = {"ls", "cat", "head", "tail", "grep", "wc", "sort", "find", "echo", "test", "pwd", "diff"}
 FIND_WRITES = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
 SORT_FLAGS = set("bdfghiMnRrsuVz")
 SORT_LONG = {"--numeric-sort", "--reverse", "--unique", "--ignore-case", "--human-numeric-sort", "--version-sort", "--stable",
@@ -622,7 +810,7 @@ def is_python(word):
     interpreter running saani."""
     if re.fullmatch(r"python(3(\.\d+)?)?|py", word):
         return True
-    return bool(sys.executable) and ("/" in word or "\\" in word) and norm(word) == norm(sys.executable)
+    return bool(sys.executable) and ("/" in word or "\\" in word) and not network(word) and norm(word) == norm(sys.executable)
 
 
 def saani_start(words, cwd, temp=None):
@@ -677,23 +865,37 @@ def test_command(words, ctx, cwd, who):
     return None
 
 
+def pieces(word):
+    """The pieces of a word around :, = and @ (HEAD:path, --opt=path, user@host:path), a drive's colon kept with its path (C:/x)."""
+    out, cur = [], ""
+    for i, ch in enumerate(word):
+        drive = ch == ":" and len(cur) == 1 and cur.isalpha() and word[i + 1:i + 2] in ("/", "\\")
+        if ch in "=@" or (ch == ":" and not drive):
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    return out + [cur]
+
+
 def secret_word(ctx, word, cwd):
-    """True when a word of a command names a secret: the word, its pieces around : and =, and what its glob matches."""
-    for piece in {word, *re.split(r"[:=@]", word)}:
-        if piece and secret_name(piece, ctx.path(piece, cwd), strict=False):
-            return True
-    if getattr(word, "glob", False):
-        import glob
-        base = word if os.path.isabs(word) else os.path.join(cwd, word)
-        for k, match in enumerate(glob.iglob(base)):
-            if k > 2000 or secret_name(match):
+    """True when a word of a command names a secret: the word and its pieces around :, = and @ (an unquoted glob never gets here:
+    command() refuses it). A network path is refused (by ctx.path) before any lookup; the //host/... piece of a URL (https://...) is
+    judged by its name only, never looked up."""
+    url = re.match(r"[A-Za-z][A-Za-z0-9+.-]+://", word)
+    for piece in {word, *pieces(word)}:
+        if url and network(piece) and not network(word):
+            if secret_name(piece, strict=False):
                 return True
+        elif piece and secret_name(piece, ctx.path(piece, cwd), strict=False, session=ctx.session):
+            return True
     return False
 
 
 def scan(ctx, words, cwd, skip=()):
     """The first word naming a secret, or None (`skip`: indexes of words that are text, not paths)."""
     for k, w in enumerate(words):
+        ctx.in_time()
         if k not in skip and secret_word(ctx, w, cwd):
             return w
     return None
@@ -703,6 +905,11 @@ def command(part, ctx, cwd):
     """(verdict or None for allowed, the folder after it) for one simple command."""
     words = part.words
     cmd, args = words[0], words[1:]
+    # Bash expands an unquoted *, ? or [ after the guard has looked, into any number of words (options and -- included, from files the
+    # run wrote): no such word passes, in any position. A quoted one stays text for bash and is judged as text.
+    if any(w.glob for w in words):
+        return deny("unsure", "an unquoted glob", cmd, how="list files with the Glob tool, read with Read or Grep, or quote a git pathspec "
+                    "after --: git diff -- 'src/*.py'"), cwd
     if part.stdin and not (cmd == "git" and args[:1] == ["commit"]):
         return deny("unsure", "a here-document other than git commit -F -", cmd), cwd
     if any(w.heredoc for w in words) and cmd not in ("git", "gh"):
@@ -712,7 +919,7 @@ def command(part, ctx, cwd):
     if cmd == "sudo":
         return deny("sudo", "sudo", cmd), cwd
     if cmd == "cd":
-        if len(args) != 1 or args[0].startswith("-") or args[0].glob:
+        if len(args) != 1 or args[0].startswith("-"):
             return deny("cd outside the worktrees", "cd needs one plain folder", cmd), cwd
         target = ctx.path(args[0], cwd)
         if not ctx.cd_ok(target):
@@ -774,7 +981,7 @@ def saani_command(args, ctx, cwd):
     sub = "ui" if sub in ("map", "board") else sub
     if sub == "test":
         # saani test [--kind K] [--worktree P] [--] <command>: it runs in the top folder of a checkout, so the test command's paths are
-        # checked from there: the named worktree (exactly a worktree's top folder or the run's folder, no glob), else the top of the
+        # checked from there: the named worktree (exactly a worktree's top folder or the run's folder), else the top of the
         # worktree the current folder is in (a `cd` into a subfolder must not shift the check).
         rest, opts = list(args[1:]), []
         if "--" in rest:
@@ -789,12 +996,11 @@ def saani_command(args, ctx, cwd):
             name, eq, value = w.partition("=")
             if name not in ("--kind", "--worktree"):
                 return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
-            glob = bool(getattr(w, "glob", False))           # `--worktree=<glob>`: the word as a whole carries it
             if not eq:
                 if k + 1 >= len(opts):
                     return deny("saani command", f"saani test {name} without a value", "saani")
                 k += 1
-                value, glob = opts[k], bool(getattr(opts[k], "glob", False))
+                value = opts[k]
             if name == "--kind" and value not in ("landing", "full", "tier1"):
                 return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
             if name == "--worktree":
@@ -802,7 +1008,7 @@ def saani_command(args, ctx, cwd):
                 # are checked from the folder they run in (a folder deeper down would let `../..` reach out of the run).
                 where = ctx.path(value, cwd)
                 top = where == ctx.folder or (ctx.wt_dir is not None and os.path.dirname(where) == ctx.wt_dir)
-                if glob or not top or not ctx.cd_ok(where):
+                if not top or not ctx.cd_ok(where):
                     return deny("cd outside the worktrees", "saani test --worktree that is not a worktree's top folder or the run's folder",
                                 "saani")
             k += 1
@@ -952,8 +1158,8 @@ def git_command(part, ctx, cwd):
     args, gcwd = list(part.words[1:]), cwd
     while args and args[0].startswith("-"):
         if args[0] == "-C" and len(args) > 1:
-            gcwd = ctx.path(args[1], cwd)
-            if args[1].glob or not ctx.cd_ok(gcwd):
+            gcwd = ctx.path(args[1], gcwd)               # git reads a relative -C from the previous -C
+            if not ctx.cd_ok(gcwd):
                 return deny("cd outside the worktrees", "git -C outside a worktree and the run's folder", "git")
             args = args[2:]
         elif args[0] == "--no-pager":
@@ -968,7 +1174,7 @@ def git_command(part, ctx, cwd):
         for k, w in enumerate(rest):
             if w == "--message" or re.fullmatch(r"-[a-zA-Z]*m", w):
                 text.add(k + 1)
-            elif w.startswith("--message=") or re.fullmatch(r"-[a-zA-Z]*m.+", w):
+            elif w.startswith("--message=") or glued_message(w):
                 text.add(k)
     if any(w.heredoc for k, w in enumerate(rest) if k not in text) or (sub != "commit" and any(w.heredoc for w in rest)):
         return deny("unsure", "a $(cat <<'EOF' ...) other than the value of git commit -m", "git")
@@ -976,7 +1182,7 @@ def git_command(part, ctx, cwd):
     if sub == "push":
         return deny("git push", "git push (only saani land pushes, as its own process)", "git", how="land with saani land")
     if sub == "reset" and "--hard" in words:
-        return deny("git reset --hard", "git reset --hard", "git", how="git restore <path>, or git stash")
+        return deny("git reset --hard", "git reset --hard", "git", how="git restore <path>")
     if sub == "clean":
         return deny("git clean", "git clean", "git", how="remove the files one by one with rm inside the worktree")
     if sub == "branch" and ("-D" in words or (("--delete" in words or "-d" in words) and ("--force" in words or "-f" in words))):
@@ -991,16 +1197,202 @@ def git_command(part, ctx, cwd):
             if name.startswith("no-v"):
                 return deny("no-verify", f"git {sub} --no-verify skips the commit-msg hook", "git")
             return deny("git option", f"the git option --{name[:30]} (it runs a program, writes a file or moves the repository)", "git")
-        if w == "-f" or (sub in GIT_SHORT_FORCE and re.fullmatch(r"-[a-zA-Z]*f[a-zA-Z]*", w)):
+        if w == "-f" or (sub in GIT_SHORT_FORCE and flag_cluster(w, "f")):
             return deny("force flag", "a force flag", "git")
+    verdict = owner_stash(sub, words)
+    if verdict:
+        return verdict
     if sub not in GIT_READ_ANYWHERE and not ctx.cd_ok(gcwd):
         return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
                     "git", how="cd <worktree> && git ...")
-    verdict = git_sub(sub, words, ctx, gcwd, part)
+    verdict = commit_takes_paths(rest) if sub == "commit" else None
+    verdict = verdict or git_sub(sub, words, ctx, gcwd, part) or revisions(sub, words, ctx, gcwd)
     if verdict:
         return verdict
+    # A :/<text> search runs over every ref (the owner's stash included): refused anywhere in a word, but a drive's C:/ (from ~ too).
+    if any(re.search(r"(?<![A-Za-z]):/|(?<=[A-Za-z]{2}):/", w) for w in words):
+        return deny("revision", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
+                    how="name HEAD, origin/<branch> or a worker branch")
     if scan(ctx, rest, gcwd, text):
         return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
+    return None
+
+
+# The owner's stash: refs/stash is shared by every worktree (its ^3 holds untracked files). Named as a revision (stash, refs/stash,
+# stash@{n}, stash^3, a..stash, ^stash, any case: refs are files on Windows), found by a :/message search over every ref, or listed by
+# an option that walks every ref or the reflogs.
+STASH_REV = re.compile(r"(?:^|\.\.|\^)(?:refs[\\/]+)?stash(?:$|[@^~:{]|\.\.)", re.I)
+TEXT_OPTIONS = ("grep", "author", "committer", "format", "pretty", "message", "since", "until", "after", "before", "date", "trailer")
+VALUE_LETTERS = set("SGLOnMCBUlI")      # a short option of log/diff that takes the rest of the word as its value (-Sdebug, -Gx, -n5)
+EVERY_REF = ("all", "glob", "reflog", "walk-reflogs", "stdin", "bisect", "alternate-refs", "indexed-objects", "disambiguate")
+REF_PATTERNS = ("branches", "remotes", "tags")
+
+
+def owner_stash(sub, words):
+    """A refusal when a git command would read the owner's stash: a stash revision anywhere, a :/ search, and in the commands that walk
+    revisions (log, show, rev-parse, diff) --all, -g, --walk-reflogs, --reflog, --glob, --stdin..., --branches, --remotes, --tags (with or without a pattern)
+    (and their abbreviations)."""
+    no = deny("git stash", f"git {sub} reading the owner's stash (refs/stash is shared by every worktree) or walking every ref", "git",
+              how="name the revisions (HEAD, origin/<branch>, a commit)")
+    for w in words:
+        name, eq, value = w[2:].partition("=") if w.startswith("--") else ("", "", "")
+        text = bool(eq and name) and any(x.startswith(name) for x in TEXT_OPTIONS)     # --grep=stash: a pattern, not a revision
+        if STASH_REV.search(value if eq else w) and not text:
+            return no
+        if sub not in ("log", "show", "rev-parse", "diff", "commit"):     # (restore/checkout: sources are HEAD or origin/<integration>)
+            continue
+        if re.search(r"(?:^|\.\.|\^):/", w):
+            return no
+        if sub == "commit":
+            continue
+        if name and (any(x.startswith(name) for x in EVERY_REF) or any(x.startswith(name) for x in REF_PATTERNS)):
+            return no
+        if re.match(r"-[a-zA-Z]", w):                   # -g alone or in a cluster of flags; never inside a value (-Sdebug, -Gregister)
+            for ch in w[1:]:
+                if ch == "g":
+                    return no
+                if ch in VALUE_LETTERS or not ch.isalpha():
+                    break
+    return None
+
+
+# Revisions, an allowlist: every git command the guard allows that takes a revision (as a word or as an option's value) takes only these.
+REV_SUBS = ("diff", "log", "show", "rev-parse", "ls-files", "branch", "commit")
+REV_TEXT_VALUED = {"-n", "--max-count", "--skip", "--since", "--after", "--until", "--before", "--author", "--committer", "--grep", "-S",
+                   "-G", "-O", "-L"}                    # options git reads with their value as the next word, a value that is no revision
+BRANCH_REV = {"--merged", "--no-merged", "--contains", "--no-contains", "--points-at"}
+COMMIT_REV = ("reuse-message", "reedit-message", "fixup", "squash")
+
+
+def allowed_rev(w, ctx, write=False):
+    """True for a revision a run may name: HEAD (HEAD~, HEAD~n, HEAD^n), origin/<integration>, origin/<production> (reading only), a
+    worker branch and origin/<worker branch>, and a range (a..b, a...b, a side empty) of those. Never a commit id, a tag, FETCH_HEAD, a
+    reflog (@{n}) or anything else."""
+    for sep in ("...", ".."):
+        if sep in w:
+            a, _, b = w.partition(sep)
+            return bool(a or b) and all(not x or (".." not in x and allowed_rev(x, ctx, write)) for x in (a, b))
+    m = re.fullmatch(r"([^~^]*)((?:[~^]\d*)*)", w)       # linear: the name, then its ~n/^n suffix (a backtracking re.sub was quadratic)
+    if not m:
+        return False
+    base = m.group(1)
+    if base == "HEAD" or base == f"origin/{ctx.integration}" or (not write and base == f"origin/{ctx.production}"):
+        return True
+    return bool(ctx.worker_branch.match(base.removeprefix("origin/")))
+
+
+def glued_message(w):
+    """True for -<flags>m<message> (the message glued to -m, no newline in it), read linearly: what re.fullmatch(r"-[a-zA-Z]*m.+") meant,
+    without its quadratic backtracking on a long word ending in a newline."""
+    m = w.find("m")
+    return (w[:1] == "-" and m > 0 and w[1:m].isascii() and (w[1:m].isalpha() or m == 1) and len(w) > m + 1
+            and "\n" not in w[m + 1:])
+
+
+def takes_text(sub, w):
+    """True when git `sub` reads the next word as the value of option `w`, a value that is no revision: the log/diff options of
+    REV_TEXT_VALUED in diff, log and show; only -n in rev-parse (which takes no --author and resolves the next word itself)."""
+    return w in REV_TEXT_VALUED if sub in ("diff", "log", "show") else (sub == "rev-parse" and w == "-n")
+
+
+def flag_cluster(w, letter):
+    """True for a cluster of short flags (-xyz, ASCII letters only) that holds `letter` (linear, unlike -[a-zA-Z]*x[a-zA-Z]*)."""
+    return len(w) > 1 and w[0] == "-" and w[1:].isascii() and w[1:].isalpha() and letter in w[1:]
+
+
+def revisions(sub, words, ctx, gcwd):
+    """A refusal when a git command names a revision off the allowlist (allowed_rev), as a word or as the value of a revision option
+    (--ancestry-path=, branch --merged/--contains/--points-at, commit -C/-c/--fixup/--squash...); ls-files --with-tree outright. A word
+    of diff or log that is not an allowed revision must be an existing path (git refuses a word that is both)."""
+    if sub not in REV_SUBS:
+        return None
+
+    def no(what):
+        return deny("revision", f"git {sub} with {what[:40]} (only HEAD, HEAD~n, origin/{ctx.integration}, origin/{ctx.production}, worker "
+                    "branches and ranges of these; no commit id)", "git", how="name HEAD, origin/<branch> or a worker branch")
+    # git takes the FIRST literal -- (even one that looks like an option's value) as the end of the revisions: with one, every word
+    # before it is read as a revision, never as a path, so no path exemption applies there.
+    # (rev-parse reads its arguments in order: -n, --default, --prefix take a following -- as their value, so it gets no -- rule.)
+    dashdash = words.index("--") if "--" in words and sub != "rev-parse" else None
+    k = 0
+    while k < len(words):
+        w = words[k]
+        nxt = words[k + 1] if k + 1 < len(words) else ""
+        if dashdash is not None and k >= dashdash:
+            pass                                         # paths, judged by the other rules
+        elif w.startswith("--"):
+            name, eq, value = w[2:].partition("=")
+            if sub == "ls-files" and name and "with-tree".startswith(name):
+                return no("--with-tree")
+            if eq and name and "ancestry-path".startswith(name) and not allowed_rev(value, ctx):
+                return no(w)
+            if sub == "commit" and name and any(x.startswith(name) for x in COMMIT_REV):
+                if not allowed_rev(value if eq else nxt, ctx, write=True):
+                    return no(w)
+                k += 0 if eq else 1
+            elif sub == "branch" and w in BRANCH_REV:
+                if not allowed_rev(nxt, ctx):
+                    return no(w)
+                k += 1
+            elif sub == "rev-parse" and name in ("default", "prefix"):     # their value is read as a revision: judged as one
+                if not allowed_rev(value if eq else nxt, ctx):
+                    return no(w)
+                k += 0 if eq else 1
+            elif not eq and takes_text(sub, w):
+                k += 1
+        elif w.startswith("-") and len(w) > 1:
+            if sub == "commit":
+                for j, ch in enumerate(w[1:], 1):        # a cluster: flags until one that takes a value (the rest, or the next word)
+                    if ch in "Cc":
+                        value = w[j + 1:] or nxt
+                        if not allowed_rev(value, ctx, write=True):
+                            return no(w)
+                        k += 0 if w[j + 1:] else 1
+                        break
+                    if ch in "mFtSu":
+                        break
+            elif takes_text(sub, w):
+                k += 1
+        elif sub in ("ls-files", "commit", "branch"):
+            pass                                         # paths (ls-files), refused paths (commit), patterns (branch)
+        elif sub == "show" and ":" in w:
+            if not allowed_rev(w.split(":", 1)[0], ctx):
+                return no(w)
+        elif not allowed_rev(w, ctx) and not (sub in ("diff", "log") and dashdash is None and os.path.lexists(ctx.path(w, gcwd))):
+            return no(w)
+        k += 1
+    return None
+
+
+COMMIT_VALUED = {"-m", "--message", "-F", "--file", "-C", "--reuse-message", "-c", "--reedit-message", "--fixup", "--squash", "--author",
+                 "--date", "-t", "--template", "--cleanup", "--trailer"}
+COMMIT_PATHS = ("all", "include", "only", "pathspec-from-file")
+
+
+def commit_takes_paths(rest):
+    """A refusal when git commit would take files itself rather than what `git add` staged: -a/--all, -i/--include, -o/--only,
+    --pathspec-from-file (and their abbreviations), any path argument (a word that is not an option or its value, anything after --).
+    Read on every word, message values included, so a glued `-amx` is seen as -a."""
+    refused = deny("git commit paths", "git commit -a, -i, -o, --pathspec-from-file or a path (it would commit files git add refuses)",
+                   "git", how="git add <file> <file>, then git commit -m <message>")
+    k = 0
+    while k < len(rest):
+        w = rest[k]
+        if not w.startswith("-") or w in ("-", "--"):
+            return refused
+        if w.startswith("--"):
+            name, eq, _ = w[2:].partition("=")
+            if any(x.startswith(name) for x in COMMIT_PATHS):
+                return refused
+            k += 2 if ("--" + name in COMMIT_VALUED and not eq) else 1
+            continue
+        for j, ch in enumerate(w[1:], 1):              # a cluster: flags, until an option that takes the rest (or the next word)
+            if ch in "aio":
+                return refused
+            if ch in "mFCctSu":
+                k += 1 if (j == len(w) - 1 and ch in "mFCct") else 0
+                break
+        k += 1
     return None
 
 
@@ -1020,6 +1412,12 @@ def git_paths_writable(paths, ctx, gcwd, sub):
         if not ctx.writable(target) or protected(target, ctx):
             return deny("write outside the worktrees", f"git {sub} of a path outside the worktree or protected", "git")
     return None
+
+
+def own_source(rev, ctx):
+    """True for a source files may be restored from: HEAD (HEAD~n, HEAD^, HEAD^2...) or origin/<integration>, never any other revision
+    (a fetched pull request, a stash, a commit nobody reviewed)."""
+    return bool(re.fullmatch(r"HEAD(~\d*|\^\d?)*", rev)) or rev == f"origin/{ctx.integration}"
 
 
 def git_sub(sub, words, ctx, gcwd, part):
@@ -1062,7 +1460,7 @@ def git_sub(sub, words, ctx, gcwd, part):
                 return deny("not on the list", f"the git add option {w[:30]} (name each file)", "git", how="git add <file> <file>")
         return git_paths_writable(paths, ctx, gcwd, sub)
     if sub == "commit":
-        if any(re.fullmatch(r"-[a-zA-Z]*n[a-zA-Z]*", w) for w in words):
+        if any(flag_cluster(w, "n") for w in words):
             return deny("no-verify", "git commit -n skips the commit-msg hook", "git")
         if part.stdin and not any(words[k:k + 2] == ["-F", "-"] or w in ("--file=-",) or words[k:k + 2] == ["--file", "-"]
                                   for k, w in enumerate(words)):
@@ -1076,9 +1474,12 @@ def git_sub(sub, words, ctx, gcwd, part):
                 paths.append(w)
             elif w == "--":
                 ended = True
-            elif w in ("-s", "--source"):
-                k += 1
-            elif not (w.startswith("--source=") or w in ("-S", "--staged", "-W", "--worktree", "-q", "--quiet", "--ours", "--theirs")):
+            elif w in ("-s", "--source") or w.startswith("--source="):
+                source = w.partition("=")[2] if "=" in w else (words[k + 1] if k + 1 < len(words) else "")
+                k += 0 if "=" in w else 1
+                if not own_source(source, ctx):
+                    return deny("not on the list", f"git restore from a source other than HEAD or origin/{ctx.integration}", "git")
+            elif not (w in ("-S", "--staged", "-W", "--worktree", "-q", "--quiet", "--ours", "--theirs")):
                 return deny("not on the list", f"the git restore option {w[:30]}", "git")
             k += 1
         return git_paths_writable(paths, ctx, gcwd, sub)
@@ -1097,13 +1498,19 @@ def git_sub(sub, words, ctx, gcwd, part):
             positional.append(w)
         if positional and positional[0] != "origin":
             return deny("not on the list", "git fetch from a remote other than origin", "git")
-        if any(":" in w or w.startswith("+") for w in positional[1:]):
-            return deny("not on the list", "git fetch with a refspec that writes a branch (: or +)", "git")
+        # Only the project's branches by name: never a pull request's ref (pull/7/head, refs/...), FETCH_HEAD, or a : or + refspec, so
+        # nothing a stranger pushed can be fetched and then checked out.
+        for w in positional[1:]:
+            if w not in (ctx.integration, ctx.production) and not ctx.worker_branch.match(w):
+                return deny("not on the list", f"git fetch of something other than origin's {ctx.integration}, {ctx.production} or a "
+                            "worker branch (no pull/, refs/, FETCH_HEAD, : or + refspec)", "git")
         return None
     if sub in ("switch", "checkout"):
         if "--" in words:
             before, after = words[:words.index("--")], words[words.index("--") + 1:]
             if len(before) <= 1 and not any(w.startswith("-") for w in before):
+                if before and not own_source(before[0], ctx):
+                    return deny("not on the list", f"git {sub} <ref> -- of a ref other than HEAD or origin/{ctx.integration}", "git")
                 return git_paths_writable(after, ctx, gcwd, sub)
             return no
         options = {"-b", "-c", "--create", "-q", "--quiet", "--track", "--no-track", "-t"}
@@ -1115,6 +1522,9 @@ def git_sub(sub, words, ctx, gcwd, part):
         if not positional or not ctx.worker_branch.match(positional[0]) or len(positional) > most:
             return deny("not a worker branch", f"git {sub} to a branch that is not a worker's (<type>/<n>-<words>)", "git",
                         how="saani start <n> makes the issue's worktree and branch")
+        if positional[1:] and positional[1] not in (f"origin/{ctx.integration}", "HEAD"):
+            return deny("not on the list", f"git {sub} with a start point other than origin/{ctx.integration} or HEAD (never FETCH_HEAD "
+                        "or a fetched pull request)", "git", how=f"git {sub} -c <branch> origin/{ctx.integration}")
         return None
     if sub == "rebase":
         positional = [w for w in words if w not in ("-q", "--quiet")]
@@ -1139,11 +1549,12 @@ def git_sub(sub, words, ctx, gcwd, part):
             return deny("not on the list", "git branch other than listing", "git", how="saani start makes branches, saani prune deletes them")
         return None
     if sub == "stash":
-        if words in ([], ["list"], ["pop"], ["pop"] + ["-q"], ["pop", "--quiet"]):
+        # refs/stash is shared by every worktree of the repository: pop, apply and drop would take the owner's stash, and a push puts the
+        # run's on top of it (the owner's next pop applies it). Only the list is read.
+        if words == ["list"]:
             return None
-        if words[:1] == ["push"] and all(w in ("-q", "--quiet", "-m", "--message") for w in words[1:]):
-            return None
-        return deny("git stash", "git stash other than push [-q] [-m MSG], pop [-q] and list (no -u, -a, -p, show)", "git")
+        return deny("git stash", "git stash other than list (refs/stash is shared with the owner's checkout)", "git",
+                    how="commit the work on the worker's branch, or git restore <file>")
     return no
 
 
@@ -1302,8 +1713,6 @@ def rm_command(args, ctx, cwd):
     if not paths:
         return deny("unsure", "rm without a path", "rm")
     for w in paths:
-        if w.glob:
-            return deny("unsure", "rm with a glob", "rm", how="name each file")
         p = ctx.path(w, cwd)
         if secret_name(w, p, strict=False):
             return deny("secret", "rm of a secret file", "rm", how=SECRETS_HOW)
@@ -1438,6 +1847,25 @@ def post_tool_use(event):
 
 # ---------------------------------------------------------------- the hook
 
+MAX_INPUT = 32 * 1024               # the most of a tool call the guard reads (a Bash command, the paths); text it never judges is not counted
+CONTENT_KEYS = {"content", "old_string", "new_string", "edits", "new_source", "prompt", "description"}
+
+
+def too_big(event):
+    """True when what the guard would read of the tool call (its input but the text it never judges: a file's new content, an edit, an
+    agent's prompt) is over MAX_INPUT, checked before any work starts."""
+    inp = event.get("tool_input")
+    if not isinstance(inp, dict):
+        return len(json.dumps(inp, default=str)) > MAX_INPUT
+    judged = {k: v for k, v in inp.items() if k not in CONTENT_KEYS}
+    return len(json.dumps(judged, default=str)) > MAX_INPUT
+
+
+def hard_exit(code):
+    """Ends the hook now, the blocked decision thread with it (os._exit: no cleanup waits on that thread)."""
+    os._exit(code)
+
+
 def emit(decision, reason):
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
                                              "permissionDecisionReason": reason}}))
@@ -1458,7 +1886,7 @@ def main(raw=None):
     error = "Saani guard (auto run): guard error: {}. To go on: the owner looks at the guard."
     if event is None:
         try:
-            some = any(n.endswith(".json") for n in os.listdir(registry()))
+            some = any(n.endswith((".json", OVER)) for n in os.listdir(registry()))
         except FileNotFoundError:
             some = False
         except OSError:
@@ -1481,12 +1909,39 @@ def main(raw=None):
         return 0
     if st is None:
         return 0
-    cwd = event.get("cwd")
-    try:
-        cwd = cwd if isinstance(cwd, str) and os.path.isdir(cwd) else os.getcwd()
-        decision, reason, code, word = decide(event, context(cwd, st))
-    except (Exception, SystemExit) as e:
-        decision, reason, code, word = "deny", error.format(type(e).__name__), "guard error", ""
+    if st.get("over"):
+        log_refusal(st, event.get("tool_name", "?"), "run over", "")
+        emit("deny", f"Saani guard (auto run): refused, this auto run is over (its {MAX_HOURS} hours are past). To go on: report and "
+                     "stop; the owner ends the run from a terminal: saani auto off --run <id>.")
+        return 0
+    if too_big(event):
+        log_refusal(st, event.get("tool_name", "?"), "too big", "")
+        emit("deny", f"Saani guard (auto run): refused, a tool call whose command or paths are over {MAX_INPUT // 1024} KB (the guard "
+                     "reads only what it can judge in its time). To go on: split the command, or name shorter paths.")
+        return 0
+    # The decision runs in a thread with a hard stop: a lookup that blocks (a slow or disconnected drive) must not reach the hook's 15 s
+    # timeout, after which Claude Code's normal permissions would decide.
+    result = []
+
+    def run():
+        try:
+            cwd = event.get("cwd")
+            cwd = cwd if isinstance(cwd, str) and not network(cwd) and os.path.isdir(cwd) else os.getcwd()
+            result.append(decide(event, context(cwd, st, session_id)))
+        except BaseException as e:
+            result.append(("deny", error.format(type(e).__name__), "guard error", ""))
+    import threading
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(HARD_STOP_SECONDS)
+    if not result:
+        log_refusal(st, event.get("tool_name", "?"), "too slow", "")
+        emit("deny", f"Saani guard (auto run): refused, the guard could not decide within {HARD_STOP_SECONDS:g} seconds (a path on a slow or "
+                     "disconnected drive?). To go on: use a local path inside the worktree.")
+        sys.stdout.flush()
+        hard_exit(0)
+        return 0
+    decision, reason, code, word = result[0]
     if decision == "deny":
         log_refusal(st, event.get("tool_name", "?"), code, word)
     emit(decision, reason)

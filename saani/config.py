@@ -45,6 +45,7 @@ class Config:
     deploy_log_ok: str = ""                      # a regex the deploy's output must match to count as a success
     deploy_key: str = ""                         # the PATH of the deploy key, never its content: only passed through
     deploy_timeout_minutes: float = 30
+    version_file: str = ""                       # the file whose version a merged pull request may change: then `saani merge` creates the GitHub release; empty: never
     board_port: int = 8771
     parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory; at most 2 per project
     ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
@@ -115,7 +116,7 @@ def from_toml(data, root):
             ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
-            ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("ci", "relabel"): "relabel", ("hints",): "hints"}
+            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("ci", "relabel"): "relabel", ("hints",): "hints"}
     for table, values in data.items():
         if table == "hints":
             flat["hints"] = dict(values)

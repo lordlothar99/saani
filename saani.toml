@@ -22,6 +22,9 @@ trailers = ["Why", "Undo"]
 landing = ["{python}", "-m", "pytest", "-q"]
 full = ["{python}", "-m", "pytest", "-q"]
 
+[release]
+version_file = "saani/__init__.py"
+
 [board]
 session_match = "saani"
 

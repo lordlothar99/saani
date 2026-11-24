@@ -74,7 +74,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
    - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`, at most 2 per project, less those in worktrees) and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
-     files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto 12 15`), run `saani auto pick --json --only 12 15`.
+     files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
      background** so several issues progress at once. Model: sonnet; opus for an issue labelled or titled as hard or security. Brief it with
      the issue number, the worktree path and what the issue asks, not with file dumps.

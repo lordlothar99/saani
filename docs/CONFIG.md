@@ -34,6 +34,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`). Only these three keys: any other is refused, and the old `longrun` is refused with its new name, `auto` |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |
+| `[release]` | `version_file` | `""` | the file whose version a merged integration -> production pull request may change (a line like `__version__ = "1.2.0"`, `version = "1.2.0"` or `"version": "1.2.0"`). When the pull request changes it, `saani merge` creates the GitHub release `v<version>` on the merge commit (docs/SAANI.md, Releases). Empty: no release |
 | `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(2, cores // 4), at least 1, and 1 when free RAM cannot hold one issue (4 GB; macOS: cores only); `n >= 1` = fixed; at most 2 per project (another project's run has its own 2) |
 | | `ci_attempts` | `3` | an auto run: the most `saani ci pr` rounds (read why it is red, fix, land, run it again) before the pull request is left open |
 | `[ci]` | `workflow` | `ci.yml` | the GitHub Actions workflow `saani ci pr` starts (it must accept `workflow_dispatch`) |
@@ -41,9 +42,9 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `reserve_minutes` | `50` | kept for the end of the month |
 | | `pace_slack` | `0.15` | a heavy job goes to the PC when the share of minutes used is ahead of the share of the month passed by more than this |
 | | `status_context` | `saani/ci` | the commit status set on the pull request's head |
-| | `jobs` | `{pr-ci = {minutes = 20, heavy = true}}` | each job's measured cost; `heavy`; `workflow` for a small automatic workflow `ci sync` switches on and off |
+| | `jobs` | `{pr-ci = {minutes = 20, heavy = true}}` | each job's measured cost (`minutes`); `heavy`; `what`, a note for the reader; `workflow` for a small automatic workflow `ci sync` switches on and off. A job named `relabel` with a `workflow` is the relabel workflow `saani ci merged` checks for |
 | | `relabel` | `[]` | a command that swaps `in_dev` for `in_main` on the issues a merged pull request carries, given its number; empty: `saani ci merged` does the swap itself with `gh` |
-| `[hints]` | `hotfix_after_merge` | a generic sentence | the text of a hotfix pull request's "after the merge" step |
+| `[hints]` | `hotfix_after_merge` | a generic sentence | the text of a hotfix pull request's "after the merge" step (`[hints]` takes free texts: any other key is accepted and not read) |
 
 ## Labels
 | Key | Default | Meaning |
@@ -60,3 +61,10 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `saani-landings.jsonl` | `saani land` |
 | `saani-tests.jsonl` | the test queue |
 | `saani-ci.json` | `saani ci` |
+| `saani-auto-<id>.jsonl` | an auto run's journal (status comments and landings while the run is on) |
+| `saani-auto-<id>.md` | `saani auto report` |
+| `saani-auto-<id>.log`, `saani-auto-<id>.pid` | `saani auto away`: the headless session's output and its process id |
+| `saani-deploy-<UTC>.log` | `saani deploy` |
+
+The guard's own files (an auto run's registry entries and `refusals.jsonl`) are in `~/.saani/auto/`; the map's project list is
+`~/.saani/projects.toml`.
