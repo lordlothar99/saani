@@ -2,7 +2,7 @@
 
   saani comment <n> <kind> [--text TEXT] [--field KEY=VALUE ...] [--dry-run]
 
-A comment is its heading, then the fields as a one-row Markdown table (the keys are the header), then the text. `start`, `land`,
+A comment of a kind in STATUS_STEP also moves the issue's GitHub status forward (saani/status.py). A comment is its heading, then the fields as a one-row Markdown table (the keys are the header), then the text. `start`, `land`,
 `ci pr` and `ci merged` post theirs with `post()`. Standard library only; `gh` is the only thing it talks to, through `Direct` (or
 the `io` a caller hands in: ci.py's `Run`, which has the same `json` and `write`).
 """
@@ -10,7 +10,7 @@ import json
 import re
 import subprocess
 
-from . import config
+from . import config, status
 
 # kind: (heading, label key to add, label key to remove)
 KINDS = {
@@ -25,6 +25,11 @@ KINDS = {
     "deployed": ("### ✔ Deployed", None, None),
     "linked": ("### 🔗 Linked", None, None),
 }
+
+# kind: the GitHub issue status step it moves the issue to (saani/status.py), only forward; the others leave the status alone.
+# Deploy needs none: closing an issue as completed sets Done.
+STATUS_STEP = {"started": "started", "review": "review", "on-dev": "review", "on-main": "review"}
+GH_TIMEOUT = 120                     # seconds: a stalled gh never hangs a command
 
 
 def cfg():
@@ -70,9 +75,12 @@ class Direct:
 
     def read(self, *cmd):
         try:
-            r = subprocess.run(list(cmd), cwd=cfg().root, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+            r = subprocess.run(list(cmd), cwd=cfg().root, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL,
+                               timeout=GH_TIMEOUT)
         except OSError as e:
             raise SystemExit(f"cannot run {cmd[0]}: {e}")
+        except subprocess.TimeoutExpired:
+            raise SystemExit(f"{' '.join(cmd[:3])} took more than {GH_TIMEOUT} s")
         if r.returncode:
             raise SystemExit("failed: " + " ".join(cmd[:4]) + "\n" + (getattr(r, "stderr", "") or "").strip())
         return (getattr(r, "stdout", "") or "").strip()
@@ -126,6 +134,8 @@ def post(number, kind, fields=None, text="", io=None, labels=True, once=None, ne
     io.write("gh", "issue", "comment", str(number), "--repo", cfg().repo, "--body", render(kind, fields, text))
     if labels:
         apply_labels(number, kind, io)
+    if kind in STATUS_STEP:
+        status.advance(number, STATUS_STEP[kind], io)
     if kind != "on-dev" and not getattr(io, "dry", False):      # a landing is journaled by `saani land` itself
         from . import auto
         auto.journal(number, kind)

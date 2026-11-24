@@ -51,6 +51,8 @@ The full design (principles, landing rules, test tiers, CI placement, the guard,
 - A GitHub repo with an integration branch (e.g. `dev`) and a production branch (e.g. `main`), and issues that have a
   [Type](https://docs.github.com/en/issues/tracking-your-work-with-issues/configuring-issues/managing-issue-types-in-an-organization)
   (Task, Feature, Bug), or labels mapped to branch prefixes
+- Optional: GitHub's issue statuses. Saani moves them (In progress, In review; GitHub sets Done when the deploy closes the issue) and
+  `auto` takes only Todo issues: drag a card to Todo on a repository board to let a run take it. Without them, Saani works from its labels
 
 Developed and used on Windows (PowerShell 5.1). The code has guards for macOS and Linux, but they are not tested there yet.
 
@@ -110,7 +112,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | Terminal | Claude Code | What it does |
 |---|---|---|
 | `saani auto ...` | `/saani:auto [here\|away] [--keep-on] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
-| `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button; "Stale" when Saani does not answer |
+| `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button (ending with the Saani release or commit that serves the map); "Stale" when Saani does not answer |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers: one map shows them all |
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | a worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
@@ -137,7 +139,7 @@ A slash command for every `saani` command, the auto skill, the worker subagents 
 [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Status
-On `dev` after v1.0.0 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
+On `dev` after v1.1.0 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
 change goes through `saani start` and `saani land`, and its releases are made by `saani merge`. The roadmap is in the issues.
 
 ## Contributing

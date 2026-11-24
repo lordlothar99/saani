@@ -28,6 +28,7 @@ invented project, also served locally at `/mock-state.json`).
 | Field | Type | Meaning |
 |---|---|---|
 | `number`, `title`, `state`, `labels`, `milestone` | as GitHub | the issue |
+| `status` | `{name, category}` or `null` | the issue's GitHub status (`In review`, `started`...), read from the REST API with the Type; `null`: none, or the repo has no statuses |
 | `type` | `Bug`, `Task`, `Feature`... or `null` | the issue Type GitHub holds (read from the REST API: `gh issue list --json` has none); `null`: none set, the page falls back on the branch prefix and the labels |
 | `step` | string | `inbox`, `backlog`, `you`, `started`, `building`, `testing`, `landing`, `dev`, `pr`, `deploy`, `close`, `checks`, `done` |
 | `need` | `answer` \| `act` \| null | waits for the owner: the glowing ring |

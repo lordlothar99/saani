@@ -36,6 +36,9 @@ class Config:
     push_attempts: int = 3
     labels: dict = dataclasses.field(default_factory=lambda: {"in_dev": "in-dev", "in_main": "in-main", "answer": "help wanted",
                                                               "act": "owner-action", "idea": "idea"})
+    status_enabled: str = "auto"                 # GitHub's issue statuses: "auto" = used when the repo has them, "off" = labels only (saani/status.py)
+    status_names: dict = dataclasses.field(default_factory=lambda: {"backlog": "Backlog", "todo": "Todo", "started": "In progress",
+                                                                    "review": "In review", "done": "Done"})
     folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / auto: the folders named in the map's prompts
     session_match: str = ""                      # the map lists Claude Code sessions whose project folder name contains this
     deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
@@ -106,6 +109,7 @@ def from_toml(data, root):
             ("branches", "integration"): "integration", ("branches", "production"): "production", ("branches", "prod_tag"): "prod_tag",
             ("worktrees", "folder"): "worktree_folder",
             ("issues", "types"): "types", ("issues", "hotfix_default_type"): "hotfix_default_type", ("issues", "labels"): "labels",
+            ("status", "enabled"): "status_enabled", ("status", "names"): "status_names",
             ("commits", "trailers"): "trailers",
             ("tests", "landing"): "landing", ("tests", "full"): "full", ("tests", "check"): "check",
             ("tests", "timing_reports"): "timing_reports",
@@ -149,6 +153,15 @@ def from_toml(data, root):
             flat[key] = tuple(flat[key])
     if "labels" in flat:
         flat["labels"] = {**Config().labels, **flat["labels"]}
+    if flat.get("status_enabled", "auto") not in ("auto", "off"):
+        raise SystemExit(f'{FILE}: [status] enabled must be "auto" or "off"')
+    if "status_names" in flat:
+        names = flat["status_names"]
+        unknown = set(names) - set(Config().status_names) if isinstance(names, dict) else None
+        if unknown is None or unknown or not all(isinstance(v, str) for v in names.values()):
+            raise SystemExit(f"{FILE}: [status] names maps steps to status names; steps: {', '.join(Config().status_names)}"
+                             + (f" (unknown: {', '.join(sorted(unknown))})" if unknown else ""))
+        flat["status_names"] = {**Config().status_names, **names}
     par = flat.get("parallel", 0)
     if not isinstance(par, int) or isinstance(par, bool) or par < 0:
         raise SystemExit(f"{FILE}: [auto] parallel must be a whole number, 0 or more")
