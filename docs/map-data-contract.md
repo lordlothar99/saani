@@ -18,6 +18,12 @@ invented project, also served locally at `/mock-state.json`).
 | `folders` | `work`, `deploy`, `auto`: the folder each prompt says to paste it in |
 | `labels` | the label names (`answer`, `act`, `in_dev`, `in_main`, `idea`) |
 
+## `saani`
+
+`{label, kind}`: which Saani serves the map, shown on the last line of the signs. `kind` is `tag` (its code sits on a release tag,
+`label` = the tag), `commit` (between releases, `label` = the short commit) or `version` (an installed copy that is not a git checkout,
+`label` = `v` + the package version). Absent in the sample: the page says so.
+
 ## `cards[]`
 | Field | Type | Meaning |
 |---|---|---|

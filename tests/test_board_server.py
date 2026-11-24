@@ -673,3 +673,17 @@ def test_a_card_carries_the_issue_type_github_holds(monkeypatch):
     assert "--paginate" not in api and "state=closed" in url and "since=2026-11-15T00:00:00Z" in url
     monkeypatch.setattr(fp, "run", lambda *a, **k: json.dumps([{"number": 1, "title": "a", "labels": [], "state": "OPEN"}]) if a[1] == "issue" else "")
     assert fp.gh_issues("--state", "open")[0]["type"] is None            # gh refused: no Type, the page falls back on the branch and the labels
+
+
+def test_the_map_names_the_saani_it_runs_a_release_tag_a_commit_or_the_package_version(tmp_path):
+    from saani import __version__
+    code = tmp_path / "saani"
+    code.mkdir()
+    assert fp.saani_version(code, lambda *a: "") == {"label": "v" + __version__, "kind": "version"}      # not a git checkout
+    (code / ".git").mkdir()
+    answers = {"describe": "v1.0.0", "rev-parse": "abc1234"}
+    assert fp.saani_version(code, lambda *a: answers.get(a[1], "")) == {"label": "v1.0.0", "kind": "tag"}
+    answers["describe"] = ""                                                                             # between two releases
+    assert fp.saani_version(code, lambda *a: answers.get(a[1], "")) == {"label": "abc1234", "kind": "commit"}
+    page = (pathlib.Path(fp.__file__).parent / "map.html").read_text(encoding="utf-8")
+    assert 'id="legend-ver"' in page and "DATA.saani" in page
