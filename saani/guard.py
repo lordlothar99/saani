@@ -428,7 +428,8 @@ STRONG_NAMES = {".netrc", "_netrc", ".npmrc", "npmrc", ".pypirc", ".pgpass", ".e
                 "consolehost_history.txt", ".bash_history", ".python_history", ".gitconfig", ".yarnrc.yml", "pip.ini", "pip.conf"}
 STRONG_PREFIXES = (".claude.json", ".npmrc", ".netrc")          # their backups too (.claude.json.backup, .npmrc.bak, .netrc~)
 STRONG_TAILS = ([".config", "git", "config"], [".m2", "settings.xml"],
-                [".git", "refs", "stash"], [".git", "logs", "refs", "stash"], [".git", "packed-refs"])     # the owner's stash, by its id
+                [".git", "refs", "stash"], [".git", "logs", "refs", "stash"], [".git", "packed-refs"],     # the owner's stash, by its id
+                [".git", "saani-auto-run.json"])      # the run's record: it holds the watcher's token (#67)
 SECRET_DIRS = {".ssh", ".gnupg", ".kube", "psreadline"}
 KEY_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk", ".jks", ".keystore", ".kdbx")
 KEY_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
@@ -461,7 +462,7 @@ def secret_name(raw, resolved=None, strict=True, session=None):
     id_rsa*, id_ed25519*...), anything with "credentials" in its name, .netrc, .npmrc and npmrc, .pypirc, .pgpass, .git-credentials, any
     hosts.yml, .docker/config.json, .git/config (tokens in remote URLs), ~/.claude.json and ~/.claude/ (but its projects' memory),
     PowerShell's history (PSReadLine/, ConsoleHost_history.txt), .bash_history, .python_history, .gitconfig and .config/git/config
-    (insteadOf tokens), .m2/settings.xml, .yarnrc.yml, pip.ini, pip.conf, backups of .claude.json, .npmrc and .netrc, anything under .ssh/, .gnupg/, .kube/ or /proc/, a name with "secret" or
+    (insteadOf tokens), .m2/settings.xml, .git/saani-auto-run.json (the run's record), .yarnrc.yml, pip.ini, pip.conf, backups of .claude.json, .npmrc and .netrc, anything under .ssh/, .gnupg/, .kube/ or /proc/, a name with "secret" or
     "token" in it. Not `strict` (a word of a shell command that may not be a file, like a branch name): the "secret"/"token" rule needs a
     dot in the name or an existing file."""
     for c in (raw, resolved):

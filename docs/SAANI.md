@@ -276,7 +276,8 @@ after `--` (`git diff -- 'src/*.py'`); a quoted glob is plain text.
 **Secrets**, refused to every tool and inside commands: `.env`, `.env.*`, `.envrc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.ppk`, `*.jks`,
 `*.keystore`, `*.kdbx`, `id_rsa*`, `id_ed25519*` (and the other ssh key names), anything with "credentials" in its name (any case),
 `.netrc*` and `_netrc`, `.npmrc*` and `npmrc`, `.pypirc`, `.pgpass`, `.git-credentials`, any `hosts.yml`, `.docker/config.json`,
-`.git/refs/stash`, `.git/logs/refs/stash` and `.git/packed-refs` (the owner's stash, by its id), `.git/config`, `.gitconfig` and
+`.git/refs/stash`, `.git/logs/refs/stash` and `.git/packed-refs` (the owner's stash, by its id), `.git/saani-auto-run.json` (the run's
+record, which holds the watcher's token), `.git/config`, `.gitconfig` and
 `.config/git/config` (tokens in remote URLs and `insteadOf`; git itself still reads them), `.m2/settings.xml`, `.yarnrc.yml`, `pip.ini`,
 `pip.conf`, `.bash_history`, `.python_history`, `~/.claude.json*` and `~/.claude/` (but its `projects/*/memory/` and the session's own saved
 tool outputs `projects/*/<session>/tool-results/`, never another session's, judged after `..` and links are resolved, so neither is a way to
@@ -339,13 +340,14 @@ unless `--keep-on`. A run started by hand has no watcher: the owner ends it with
 is on (younger than 12 hours). The watcher gives its session a random token in the environment (`SAANI_AUTO_WATCH`); the session's
 `saani auto on` copies it into the run's record, and the watcher ends only a record of its run id that carries its own token. So two starts
 that overlap before either `on` never end each other's run: the refused one finds a record with the other's token and leaves it on. The
-token is written by `saani auto on` only (refused inside a run once it is on), is in the guard-protected record in the git folder, and is
-never printed or logged (the log says "token matched" or "not this session's record"). A record left by a session that never ran `on`, or
-by another start, stays for the owner's `/saani:auto off` (the safe direction). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
-every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking
-after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none`
-every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
-classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
+token is written by `saani auto on` only (refused inside a run once it is on), is in the run's record in the git folder, which the guard
+protects from reading and from writing (`.git/saani-auto-run.json` is one of its secrets), and is never printed or logged (the log says
+"token matched" or "not this session's record"). A record left by a session that never ran `on`, or by another start, stays for the
+owner's `/saani:auto off` (the safe direction). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
+every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to
+asking after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With
+`--permission-prompts none` every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's;
+`--permission-mode auto` lets Claude Code's classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
 
 **The run's record and its stop rules.** `saani auto on` is the last step before the work (after the owner's questions); `saani auto off

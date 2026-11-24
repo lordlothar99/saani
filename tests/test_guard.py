@@ -471,7 +471,8 @@ def test_secrets_are_refused_to_every_tool(ctx, name):
                                   "{home}/.config/pip/pip.conf", "{home}/.claude.json.backup", "{home}/.npmrc.bak", "{home}/.netrc~",
                                   "{main}/.git/refs/stash", "{main}/.git/logs/refs/stash", "{main}/.git/packed-refs",
                                   "{main}/.git/packed-refs::$DATA", "{main}/.git./refs/stash", "{home}/.m2./settings.xml. ",
-                                  "{home}/.config/git/config:x"])
+                                  "{home}/.config/git/config:x", "{main}/.git/saani-auto-run.json",
+                                  "{main}/.git./saani-auto-run.json"])
 def test_more_secrets_are_refused_to_read(ctx, name):
     decision, reason, code, _ = tool(ctx, "Read", file_path=name)
     assert (decision, code) == ("deny", "secret"), (name, reason)
@@ -483,6 +484,7 @@ def test_claude_s_memory_and_a_project_s_own_claude_folder_are_no_secret(ctx):
     assert tool(ctx, "Read", file_path="{work}/.git/HEAD")[0] == "allow"
     assert sh(ctx, "cat ~/.claude/settings.json")[2] == "secret"
     assert sh(ctx, "cat {main}/.git/config")[2] == "secret"
+    assert sh(ctx, "cat {main}/.git/saani-auto-run.json")[2] == "secret"          # the run's record holds the watcher's token (#67)
     assert sh(ctx, "git status")[0] == "allow"
 
 
