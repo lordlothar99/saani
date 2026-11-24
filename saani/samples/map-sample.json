@@ -75,6 +75,10 @@
    "prompt": null,
    "runs": [],
    "step": "inbox",
+   "status": {
+    "name": "Backlog",
+    "category": "backlog"
+   },
    "detail": {
     "summary": "Sample issue. Export orders as CSV: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -115,6 +119,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Cache product images on the CDN: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -157,6 +165,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Retry failed payment webhooks: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -199,6 +211,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Search: typo tolerance: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -241,6 +257,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Accessibility audit of checkout: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -284,6 +304,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "auto": {
     "fit": "partly",
     "why": "the code yes; the carrier's sandbox account is the owner's",
@@ -331,6 +355,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Weekly sales digest by email: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -371,6 +399,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Archive old carts after 90 days: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -411,6 +443,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Upgrade the web framework: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -453,6 +489,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Translate the help pages: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -493,6 +533,10 @@
    "prompt": null,
    "runs": [],
    "step": "backlog",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Shipping estimate on the product page: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -535,6 +579,10 @@
    "prompt": null,
    "runs": [],
    "step": "you",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Choose the payment provider for Norway: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -577,6 +625,10 @@
    "prompt": null,
    "runs": [],
    "step": "you",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Approve the new pricing table: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -619,6 +671,10 @@
    "prompt": null,
    "runs": [],
    "step": "you",
+   "status": {
+    "name": "Todo",
+    "category": "planned"
+   },
    "detail": {
     "summary": "Sample issue. Create the production API key for the carrier: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -659,6 +715,10 @@
    "prompt": null,
    "runs": [],
    "step": "started",
+   "status": {
+    "name": "In progress",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Coupon codes with an end date: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -708,6 +768,10 @@
    "prompt": null,
    "runs": [],
    "step": "building",
+   "status": {
+    "name": "In progress",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Wishlist shared by link: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -765,6 +829,10 @@
     }
    ],
    "step": "testing",
+   "status": {
+    "name": "In progress",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Faster cart totals: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -807,6 +875,10 @@
    "prompt": null,
    "runs": [],
    "step": "dev",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Fix: totals rounding in SEK: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -849,6 +921,10 @@
    "prompt": null,
    "runs": [],
    "step": "dev",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Order page shows the carrier: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -891,6 +967,10 @@
    "prompt": null,
    "runs": [],
    "step": "pr",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Login loop on expired sessions: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -933,6 +1013,10 @@
    "prompt": null,
    "runs": [],
    "step": "pr",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Stock count per warehouse: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -975,6 +1059,10 @@
    "prompt": null,
    "runs": [],
    "step": "deploy",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. New checkout address form: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1017,6 +1105,10 @@
    "prompt": null,
    "runs": [],
    "step": "close",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Test tiers for the API: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1059,6 +1151,10 @@
    "prompt": null,
    "runs": [],
    "step": "close",
+   "status": {
+    "name": "In review",
+    "category": "started"
+   },
    "detail": {
     "summary": "Sample issue. Release notes template: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1140,6 +1236,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Password reset email: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1180,6 +1280,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Product reviews moderation: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1220,6 +1324,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Sitemap for search engines: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1260,6 +1368,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Invoice PDF layout: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1300,6 +1412,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Cookie banner text: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1340,6 +1456,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Order status webhooks: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1380,6 +1500,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Fix: duplicate emails: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1420,6 +1544,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Admin: bulk price edit: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1460,6 +1588,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Health check endpoint: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -1500,6 +1632,10 @@
    "prompt": null,
    "runs": [],
    "step": "done",
+   "status": {
+    "name": "Done",
+    "category": "completed"
+   },
    "detail": {
     "summary": "Sample issue. Slow category page: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [

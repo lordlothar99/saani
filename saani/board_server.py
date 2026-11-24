@@ -573,6 +573,22 @@ def run(*args, cwd=None, timeout=60):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def saani_version(code=None, runner=None):
+    """Which Saani serves the map (the help's last line): its release tag when its code sits on one, else its short commit; the package
+    version when its folder is not a git checkout (an installed copy). {"label": ..., "kind": "tag" | "commit" | "version"}."""
+    code = code or HERE.parent
+    runner = runner or (lambda *a: run(*a, cwd=code, timeout=10))
+    if (code / ".git").exists():
+        tag = runner("git", "describe", "--tags", "--exact-match", "HEAD")
+        if tag:
+            return {"label": tag, "kind": "tag"}
+        sha = runner("git", "rev-parse", "--short", "HEAD")
+        if sha:
+            return {"label": sha, "kind": "commit"}
+    from . import __version__
+    return {"label": "v" + __version__, "kind": "version"}
+
+
 def tasks():
     rows = []
     for path, branch in core.worktrees():
@@ -675,21 +691,31 @@ def tests():
 
 
 def issue_types(state, since=None):
-    """{issue number: its GitHub issue Type (Bug, Task, Feature...)} of the open or the closed issues. `gh issue list --json` has no Type field
-    (#38), so it is read from the REST API; an issue without a Type, or a refused call, is simply not in the dict."""
+    """({issue number: its GitHub issue Type (Bug, Task, Feature...)}, {issue number: its GitHub status {name, category}}) of the open or
+    the closed issues. `gh issue list --json` has neither field (#38, saani/status.py), so both are read from one REST listing; an issue
+    without them, or a refused call, is simply not in the dicts."""
     url = f"repos/{cfg().repo}/issues?state={state}&per_page=100" + (f"&since={since}T00:00:00Z" if since else "")
     rows = run("gh", "api", *(["--paginate"] if state == "open" else []), url, "--jq",
-               r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")"', timeout=60)
-    pairs = (line.split("\t") for line in rows.splitlines() if "\t" in line)
-    return {int(n): t for n, t in pairs if t}
+               r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")\t\(.status.name // "")\t\(.status.category // "")"', timeout=60)
+    types, statuses = {}, {}
+    for line in rows.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0].isdigit():
+            continue
+        if parts[1]:
+            types[int(parts[0])] = parts[1]
+        if len(parts) > 3 and parts[2]:
+            statuses[int(parts[0])] = {"name": parts[2], "category": parts[3] or None}
+    return types, statuses
 
 
 def gh_issues(*filters):
     rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt,body", timeout=60)
     state = filters[filters.index("--state") + 1] if "--state" in filters else "open"
     since = next(iter(re.findall(r"closed:>=(\d{4}-\d{2}-\d{2})", " ".join(filters))), None)
-    types = issue_types(state, since)
+    types, statuses = issue_types(state, since)
     return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"), "type": types.get(r["number"]),
+             "status": statuses.get(r["number"]),
              "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title"),
              "glance": glance.parse(r.get("body"))}                  # the body itself stays here: the panel asks for it on demand
             for r in json.loads(rows or "[]")]
@@ -852,7 +878,8 @@ def state():
             "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
             "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
-            "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
+            "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci)),
+            "saani": safe(lambda: cached("saani", 300, saani_version), default={})}
 
 
 # ---------------------------------------------------------------- the pages

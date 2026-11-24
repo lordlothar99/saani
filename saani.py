@@ -1,6 +1,7 @@
 """The saani command: `python -I saani.py <command> ...` from inside a project's git checkout (README.md, docs/SAANI.md).
 
   start, auto, land, status, prune, test, check-msg     worktrees, landings, the test queue, the commit-msg hook (saani/core.py)
+  status sync [--apply]                         the issues' GitHub statuses from what Saani knows (saani/status.py)
   comment                                       a status comment on an issue and its label (saani/comments.py)
   ci                                            hybrid CI: GitHub Actions within the free minutes, the PC for the rest (saani/ci.py)
   merge [PR] [--deploy]                         merge the green integration -> production pull request, then relabel and clean up (saani/merge.py)

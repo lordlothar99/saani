@@ -8,10 +8,11 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import subprocess
 import sys
 
-from . import config, core, glance, queue
+from . import config, core, glance, queue, status
 
 MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
 GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
@@ -121,8 +122,10 @@ def order_key(issue):
     return (milestone_order(issue.get("milestone")), 0 if issue.get("type") in bug_types() else 1, issue["number"])
 
 
-def choose(issues, started, running, today, labels=None, types=None, only=None, branched=()):
+def choose(issues, started, running, today, labels=None, types=None, only=None, branched=(), statuses=None):
     """Splits the open `issues` ([{number, title, labels, milestone, body, type}]) into those a run may take now and those it leaves.
+    `statuses`: the repo's GitHub issue statuses (saani/status.py): only Todo issues are taken; None (the repo has none, or they are
+    off): no status filter.
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
     Returns (eligible, skipped): eligible [{number, title, milestone, type, flags}] in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
@@ -143,6 +146,8 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
             reason = "has a worker branch"
         elif have & owner_labels:
             reason = "needs the owner or is an idea (label " + ", ".join(sorted(have & owner_labels)) + ")"
+        elif statuses is not None and status.step_of(i.get("status"), statuses) != "todo":
+            reason = "not Todo (status: " + ((i.get("status") or {}).get("name") or "none") + ")"
         elif fit == "no":
             reason = "Auto: no"
         elif glance.is_blocked(g, open_numbers, today):
@@ -193,10 +198,25 @@ def gh(*args):
 
 def read_types():
     """{issue number: its GitHub issue Type} of the open issues, from the REST API (`gh issue list` has no such field, #38)."""
+    return read_types_and_statuses()[0]
+
+
+def read_types_and_statuses():
+    """({number: Type}, {number: {name, category}}) of the open issues, from one REST listing: `gh issue list` has neither field (#38,
+    saani/status.py)."""
     out = gh("api", "--paginate", f"repos/{cfg().repo}/issues?state=open&per_page=100", "--jq",
-             r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")"')
-    pairs = (line.split("\t") for line in out.splitlines() if "\t" in line)
-    return {int(n): t for n, t in pairs if t}
+             r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")\t\(.status.name // "")\t\(.status.category // "")"')
+    types, statuses = {}, {}
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0].isdigit():
+            continue
+        n = int(parts[0])
+        if parts[1]:
+            types[n] = parts[1]
+        if len(parts) > 3 and parts[2]:
+            statuses[n] = {"name": parts[2], "category": parts[3] or None}
+    return types, statuses
 
 
 def read_issues():
@@ -206,9 +226,10 @@ def read_issues():
                              "number,title,labels,milestone,body") or "[]")
     except json.JSONDecodeError:
         raise SystemExit("saani auto pick: gh issue list gave an answer that is not JSON")
-    types = read_types()
+    types, statuses = read_types_and_statuses()
     return [{"number": r["number"], "title": r["title"], "labels": [x["name"] for x in r.get("labels", [])],
-             "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"])}
+             "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"]),
+             "status": statuses.get(r["number"])}
             for r in rows]
 
 
@@ -245,6 +266,14 @@ def running_issues():
     return out
 
 
+def pick_statuses():
+    """The repo's statuses for the pick; a gh failure stops the pick (never a guess that would let Backlog issues through)."""
+    try:
+        return status.available(strict=True)
+    except SystemExit as e:
+        raise SystemExit(f"saani auto pick: {e}")
+
+
 def pick(today=None, only=None):
     """The whole answer of `saani auto pick` as a dict: slots, parallel, running, eligible, skipped."""
     c = cfg()
@@ -258,7 +287,7 @@ def pick(today=None, only=None):
             running[i["number"]] = running[i["number"]] + issue_paths(i["body"])
     started, branched = started_issues(folders, branches)
     eligible, skipped = choose(issues, started, running, today or datetime.date.today().isoformat(), only=set(only) if only else None,
-                               branched=branched)
+                               branched=branched, statuses=pick_statuses())
     parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(running))
     return {"slots": free_slots(parallel, len(running)), "parallel": parallel, "running": sorted(running),
             "eligible": eligible, "skipped": skipped}
@@ -530,6 +559,9 @@ def cmd_on(args):
     here_mode = bool(getattr(args, "here", False))
     rec = {"id": run_id, "started": stamp(now), "folder": str(folder), "deploy": bool(args.deploy), "limits": dict(LIMITS),
            "mode": "here" if here_mode else "away"}
+    token = os.environ.get(WATCH_VAR)
+    if token and not here_mode:
+        rec["watch"] = token          # the watcher that started this session (#67): only it ends this record; written here and nowhere else
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
     if here_mode:
         # The interactive sub-mode (#50): the record (stop rules, journal, report) without the guard's switch. This line is not the
@@ -597,8 +629,8 @@ def cmd_status(args):
         print(f"STOP: {LIMIT_WORDS[k]} reached ({shown} of {limit})")
         journal(None, "stop", note=f"{LIMIT_WORDS[k]} reached ({shown} of {limit})")
     if hit:
-        print("stop starting issues, finish the end of the run (full run, the pull request, `saani auto report`), then tell the owner to end "
-              "the run from a terminal: `saani auto off --run <id>`.")
+        print("stop starting issues, finish the end of the run (full run, the pull request, `saani auto report`), then stop: the run is "
+              "switched off when its session ends (unless it was started with `--keep-on`: then the owner ends it, `saani auto off --run <id>`).")
     return EXIT_LIMIT if hit else 0
 
 
@@ -789,9 +821,16 @@ def away_command(run_id, folder, only=(), deploy=False, claude="claude"):
 WAIT_VAR = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"   # `claude -p` stops its background tasks this long after the last turn; 0 = wait for them
 
 
-def away_env(environ=None):
-    """The headless session's environment: ours, and `claude -p` waits for its background coders (#52)."""
-    return {**(os.environ if environ is None else environ), WAIT_VAR: "0"}
+WATCH_VAR = "SAANI_AUTO_WATCH"   # the watcher's token for its session: `saani auto on` copies it into the run's record (#67)
+
+
+def away_env(environ=None, token=None):
+    """The headless session's environment: ours, and `claude -p` waits for its background coders (#52); with `token`, the watcher's."""
+    env = {**(os.environ if environ is None else environ), WAIT_VAR: "0"}
+    env.pop(WATCH_VAR, None)            # never one inherited from elsewhere
+    if token:
+        env[WATCH_VAR] = token
+    return env
 
 
 def by_hand(argv, windows=None):
@@ -868,35 +907,113 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     import shutil
     folder = run_folder(args.folder, "away")
     run_id = run_id_of(args.id, folder, "away")
-    main = pathlib.Path(cfg().root)                       # the main folder: the project's committed relative settings resolve from it
+    from . import guard
+    old = read_record()
+    if old and (utc_now() - parse_stamp(old["started"])).total_seconds() < guard.MAX_HOURS * 3600:
+        raise SystemExit(f"saani auto away: run {old['id']} is on (since {old['started']}): `saani auto off` first (nothing was started)")
+    main = pathlib.Path(cfg().root)                     # the main folder: the project's committed relative settings resolve from it
     log = main / "build" / f"saani-auto-{run_id}.log"
     argv = away_command(run_id, folder, args.only or (), bool(args.deploy))
+    keep_on = bool(getattr(args, "keep_on", False))
     exe = (which or shutil.which)("claude")
     if exe is None:
         print("saani auto away: `claude` is not on the PATH, so the run cannot start by itself. Start it by hand, in a terminal, from "
-              f"{main}:\n  {by_hand(argv)}")
+              f"{main}:\n  {by_hand(argv)}\n{BY_HAND_END.format(id=run_id)}")
         return 2
     if not folder_trusted(main):
         print(f"saani auto away: WARNING: {main} is not marked as trusted in Claude Code's config, so the project's allow rules may be "
               "ignored by the headless session. Open Claude Code interactively in that folder once and accept the trust dialog "
               "(the run starts anyway).")
     try:
-        pid = start_detached([exe] + argv[1:], main, log, popen)
-    except OSError as e:
-        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}")
-        return 2
-    try:
-        pid_path(run_id).write_text(str(pid), encoding="utf-8")
+        pid_path(run_id).unlink(missing_ok=True)           # the watcher writes the session's id here; none of an older start stays
     except OSError:
         pass
-    print(f"saani auto: away {run_id} started (process {pid}), in a minimized window" if os.name == "nt" else
-          f"saani auto: away {run_id} started (process {pid})")
+    try:
+        pid = start_detached(watch_command(run_id, folder, args.only or (), bool(args.deploy), keep_on), main, log, popen)
+    except OSError as e:
+        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}\n"
+              + BY_HAND_END.format(id=run_id))
+        return 2
+    print(f"saani auto: away {run_id} started (watcher process {pid}), in a minimized window" if os.name == "nt" else
+          f"saani auto: away {run_id} started (watcher process {pid})")
     print(f"  log:    {log}")
     print("  follow: saani auto status (once the run is on), the log, or /saani:ui")
-    print(f"  end:    saani auto off --run {run_id} (from a terminal)")
+    if keep_on:
+        print(f"  end:    --keep-on: the run stays on when the session ends; end it with saani auto off --run {run_id} (from a terminal)")
+    else:
+        print(f"  end:    the run is switched off by itself when the session ends (saani auto off --run {run_id} ends it earlier, from a terminal)")
+    return 0
+
+
+BY_HAND_END = ("  Started by hand there is no watcher: when the session ends, end the run yourself with `/saani:auto off` "
+               "(or `saani auto off --run {id}` from a terminal).")
+
+
+def watch_command(run_id, folder, only=(), deploy=False, keep_on=False, python=None):
+    """What `saani auto away` starts detached: this saani's `auto watch`, which runs the session and then switches the run off."""
+    saani_py = pathlib.Path(__file__).resolve().parent.parent / "saani.py"
+    return ([python or sys.executable, "-I", str(saani_py), "auto", "watch", "--id", run_id, "--folder", str(folder)]
+            + (["--deploy"] if deploy else []) + (["--keep-on"] if keep_on else []) + (["--only"] + [str(n) for n in only] if only else []))
+
+
+def watch_note(text):
+    print(f"saani auto watch {stamp(utc_now())}: {text}", flush=True)
+
+
+def cmd_watch(args, which=None, popen=subprocess.Popen):
+    """The away run's watcher (started by `saani auto away`, never typed): runs the headless session with the log as its output, writes the
+    session's process id for `away_gone`, waits for it, and then, unless --keep-on, switches the run off in-process (what the owner would
+    do from a terminal). A session that cannot start is logged and the run is switched off the same way. Exits 0 whatever the session did."""
+    import shutil
+    run_id = args.id
+    if not run_id or not valid_id(run_id) or not args.folder:
+        raise SystemExit("saani auto watch: --id (letters, digits, - and _ only) and --folder are needed; `saani auto away` starts it")
+    keep_on = bool(getattr(args, "keep_on", False))
+    argv = away_command(run_id, args.folder, args.only or (), bool(args.deploy))
+    exe = (which or shutil.which)("claude")
+    code = None
+    token = secrets.token_hex(16)           # the session's `saani auto on` writes it in the record: only a record with it is this one's to end
+    try:
+        if exe is None:
+            raise OSError("`claude` is not on the PATH")
+        log = build_dir() / f"saani-auto-{run_id}.log"
+        with open(log, "ab") as out:          # the session's output, appended to the log the watcher's own lines go to
+            proc = popen([exe] + argv[1:], cwd=str(cfg().root), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         env=away_env(token=token))
+            try:
+                pid_path(run_id).write_text(str(proc.pid), encoding="utf-8")
+            except OSError:
+                pass
+            watch_note(f"session started (process {proc.pid})")
+            code = proc.wait()
+        what = f"session ended with code {code}"
+    except (OSError, SystemExit) as e:
+        what = f"session could not start ({e})"
+    if keep_on:
+        watch_note(f"{what}; kept on (--keep-on)")
+        return 0
+    try:
+        rec = read_record()
+    except SystemExit:
+        rec = None
+    if not rec or rec.get("id") != run_id:
+        watch_note(f"{what}; no run record for {run_id}, nothing to switch off")
+        return 0
+    if rec.get("watch") != token:
+        watch_note(f"{what}; not this session's record (the run is another start's, or the session never ran `on`): left on, "
+                   f"`/saani:auto off` ends it")
+        return 0
+    watch_note("token matched")
+    try:
+        cmd_off(type("Args", (), {"run_id": run_id})())
+    except SystemExit as e:
+        watch_note(f"{what}; the run could not be switched off ({e}): saani auto off --run {run_id}")
+        return 0
+    watch_note(f"{what}; run switched off")
     return 0
 
 
 def cmd_run(args):
     """`saani auto on|off|status|report|away`."""
-    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "away": cmd_away}[args.action](args)
+    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "away": cmd_away,
+            "watch": cmd_watch}[args.action](args)

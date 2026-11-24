@@ -77,14 +77,16 @@ flowchart TB
 | `saani start <n> --hotfix` | An urgent fix for production: `<type>/<n>-hotfix-<slug>` from the prod tag (what is live), any Type (none: `[issues] hotfix_default_type`); it lists the production commits that are not live, as a warning. `land` on such a branch never touches the integration branch: the landing tests against production, the branch pushed, the pull request into production opened. |
 | `saani land` | From inside the worktree: the checks, the lock, the merge, the generated files rebuilt, the landing tests, `git push origin HEAD:<integration>` (never forced), the lock released, the landing recorded, the landing journaled, commented on the issue (the `On dev` kind) and the issue labelled `in-dev` (`--no-comment` only prints that step; when `gh` refuses it prints it too), then the worktree and its local branch removed (all of it runs before the removal, which deletes the worktree's own files; a step that fails prints a `next:` line and the others still run). When `git worktree remove` fails, the message says what is left: still registered (the worktree and branch stay), or unregistered with a folder left behind (the local branch is deleted and Saani deletes the folder itself, read-only files included, retrying for a few seconds; only a folder that stays locked is named for you to remove). `--keep` leaves them, `--dry-run` only checks, `--worktree <path>` lands that worktree from any folder (an auto run cannot change folder). |
 | `saani comment <n> <kind> [--text T] [--field K=V ...] [--dry-run]` | Posts a status comment on issue `n` and applies the kind's label change (Status comments, below). |
+| `saani status sync [--apply]` | Gives each open issue the GitHub status its state implies (Issue statuses, below): a worktree -> In progress, `in_dev` / `in_main` -> In review, a milestone and no status -> Todo, no status -> Backlog; only forward, and a status you set on an issue nobody works on is left. Without `--apply` it prints what would move. Nothing to do on a repo without statuses. |
 | `saani status` | The lock's holder, the worktrees, the conflicts per landing, the merged branches and finished auto runs waiting for `prune`, the test queue. First, a warning when the worktrees folder is outside every working directory of a Claude Code session of the project (not inside the main checkout, and under no `permissions.additionalDirectories` entry of `.claude/settings.json`, `.claude/settings.local.json` or the user's `settings.json`, in `CLAUDE_CONFIG_DIR` when set), with the line to add: without it every `cd` into a worktree, the agents' included, asks the owner. It only reads those files; a relative entry is taken from the main checkout (Claude Code does not document its base, so the warning gives an absolute path). |
-| `saani auto pick [--json] [--limit N] [--only N ...]` | The issues an auto run may take now, in the run's order (milestone: versions ascending, then other named milestones alphabetically, then none; then the Type whose `[issues] types` prefix is `bug`; then the number; up to 500 open issues are read; `--only` takes just those numbers, before the overlap check), read from one `gh issue list` and each issue's At a glance table: `Auto` yes or partly (no table: eligible, flagged), not blocked, no needs-the-owner row, none of the `answer`, `act`, `idea`, `in_dev` or `in_main` labels, not already in a worktree ("already in a worktree") or on a worker branch ("has a worker branch"), and a Type from `[issues] types`. The others are listed with their reason (`no Type`, `blocked by #n` (the still-open blockers), `overlaps #m (path)`...). A `gh` failure stops it with gh's message, never an empty list; options `--json`, `--limit` and `--only` need `pick`, `--id` does not go with it. It also says the free slots (`[auto] parallel` less the issues in worktrees). `--json`: `{slots, parallel, running, eligible, skipped}`. A script, no model, changes nothing. |
+| `saani auto pick [--json] [--limit N] [--only N ...]` | The issues an auto run may take now, in the run's order (milestone: versions ascending, then other named milestones alphabetically, then none; then the Type whose `[issues] types` prefix is `bug`; then the number; up to 500 open issues are read; `--only` takes just those numbers, before the overlap check), read from one `gh issue list` and each issue's At a glance table: `Auto` yes or partly (no table: eligible, flagged), not blocked, no needs-the-owner row, none of the `answer`, `act`, `idea`, `in_dev` or `in_main` labels, not already in a worktree ("already in a worktree") or on a worker branch ("has a worker branch"), and a Type from `[issues] types`; when the repo has GitHub issue statuses, only the issues at Todo, the ones named with `--only` too (Issue statuses, below; else `not Todo (status: Backlog)`; a failure to read the statuses stops the pick). The others are listed with their reason (`no Type`, `blocked by #n` (the still-open blockers), `overlaps #m (path)`...). A `gh` failure stops it with gh's message, never an empty list; options `--json`, `--limit` and `--only` need `pick`, `--id` does not go with it. It also says the free slots (`[auto] parallel` less the issues in worktrees). `--json`: `{slots, parallel, running, eligible, skipped}`. A script, no model, changes nothing. |
 | `saani auto [--id ID]` | A throwaway worktree for an auto run: folder `auto-<YYYY-MM-DD_HHMM>` beside the workers' worktrees, branch `auto/<same id>` from the integration branch (never landed; `saani prune` and `saani ci merged` remove it once it is finished, below). |
 | `saani auto on [--id ID] [--folder PATH] [--deploy] [--here]` | Starts the run's record (`--here`: the interactive sub-mode, the record with `"mode": "here"` and the line `saani auto: here <id> folder=<path>`, which is not the guard's marker, so the session stays in present mode): validates the id and the folder (an existing worktree of this project inside the workers' worktrees folder, not that folder itself, whose main checkout has `saani.toml`; default the current one; the id is `--id`'s, else the folder's name without `auto-`), writes `saani-auto-run.json` in the repository's shared git folder (id, start in UTC, folder, deploy flag, the stop limits) and prints, on success only and as the last line of its output, exactly one line `saani auto: on <id> folder=<absolute run folder>` (nothing like it on failure). The guard registers the Claude Code session after the command exited 0, cued by that line (the process has not the hook's session id), so it must be the whole Bash command. A run that is already on (and not older than the guard's 12 hours) is refused. Inside an auto run the guard refuses `on`, `off` and plain `saani auto` (the worktree maker): make the run's worktree first, in present mode. |
-| `saani auto away [--id ID] [--folder PATH] [--only N ...] [--deploy]` | The away sub-mode's start, from the owner's session: validates the folder as `on` does, then starts `claude -p "/saani:auto run <id> --folder <path> [--deploy] [N ...]" --permission-mode auto --permission-prompts none` detached, from the main checkout, output appended to `build/saani-auto-<id>.log`, with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` so it waits for its background coders; records the process id in `build/saani-auto-<id>.pid`; prints the id, the log, how to follow and how to end the run. A warning (not a refusal) when Claude Code does not trust the main folder yet. Exit 2, with the command to start by hand, when `claude` is not on the PATH or the session cannot start. The guard refuses it inside a run (below, An auto run). |
+| `saani auto away [--id ID] [--folder PATH] [--only N ...] [--deploy] [--keep-on]` | The away sub-mode's start, from the owner's session: validates the folder as `on` does, then starts a watcher (`saani auto watch`, below) detached, from the main checkout, its output appended to `build/saani-auto-<id>.log`. The watcher runs `claude -p "/saani:auto run <id> --folder <path> [--deploy] [N ...]" --permission-mode auto --permission-prompts none` with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` so it waits for its background coders, records the session's process id in `build/saani-auto-<id>.pid`, waits for it, and then switches the run off by itself (`saani auto off --run <id>`, in-process; the log gets a line) unless `--keep-on`. Prints the id, the log, how to follow and how the run ends. A warning (not a refusal) when Claude Code does not trust the main folder yet. Exit 2, with the command to start by hand (which has no watcher: end the run with `/saani:auto off`), when `claude` is not on the PATH or the watcher cannot start. The guard refuses it inside a run (below, An auto run). |
+| `saani auto watch --id ID --folder PATH [--only N ...] [--deploy] [--keep-on]` | What `saani auto away` starts; never typed by the owner or a run (the guard's allowlist does not know it, so a run is refused it). It runs the session as above and then, unless `--keep-on`, ends the run if the record is that of `ID` (a failing session, or one that could not start, ends it too); it always exits 0 and logs `session ended with code N; run switched off`, `...; kept on (--keep-on)` or `session could not start (...)`. |
 | `saani auto status [--check]` | The run's id, start, elapsed time, folder, deploy flag, the refusals so far from the guard's log (in all and by reason) and each stop rule with how close it is; for an away run, a warning when its process is gone while the run is still on. `--check` exits 3 when a rule is reached, saying which, else 0 (no run: 0). |
 | `saani auto report [--pr N] [--post]` | The run's report (below), printed and written to `build/saani-auto-<id>.md` in the main checkout. `--post` comments it on pull request `--pr N` (`gh pr comment --body-file`). |
-| `saani auto off [--run ID]` | The owner's end of the run, from a terminal: the guard refuses it inside the run, so a run never switches itself off. Prints the run's summary, removes the guard's registry entries of the run (every session that registered it: `guard.turn_off_run`) and the record. `--run ID` ends that run even when this repository holds no record of it; it removes only the entries made for this repository's main checkout, never another project's run of the same id. The journal and the report stay in `build/`. An unended run is over after 12 hours anyway. |
+| `saani auto off [--run ID]` | The owner's end of the run (`/saani:auto off` in the owner's session runs it): the guard refuses it inside the run, so a run never switches itself off. Prints the run's summary, removes the guard's registry entries of the run (every session that registered it: `guard.turn_off_run`) and the record. `--run ID` ends that run even when this repository holds no record of it; it removes only the entries made for this repository's main checkout, never another project's run of the same id. The journal and the report stay in `build/`. An unended run is over after 12 hours anyway. |
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
 | `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does, then, when `[release] version_file` is set and the pull request changed the version in it, creates the GitHub release (below, Releases). `--deploy` then runs `saani deploy` (below). `--dry-run` checks and prints, merges nothing. |
 | `saani deploy [--dry-run]` | The deployer (below): CI green on the production head (a merge of a green commit counts), no issue in production since the prod tag whose Deploy row says not to deploy ("⛔", "Do not deploy"), the `[deploy]` checks and dry run, the deploy with a timeout, its log, the prod tag moved, `✔ Deployed` and the close on each `in-main` issue of the range. `--dry-run` stops after the dry run and prints the command (the key as `<key>`). |
@@ -171,7 +173,9 @@ every 5 s, read-only.
   figure: one per running subagent (two coders at once are two figures, each on its own issue; an idle role is one figure in the camp, and a
   worker's panel lists all the runs of its role). The release pull request is the harvester: hover for its CI, click to open its link, the
   issues it carries and a prompt for the whole PR. Hover for a summary, click for the full panel (context, acceptance criteria, history,
-  auto fit, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+  auto fit, the issue's GitHub status, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch; the signs (what each shape and colour
+  means) open from the "?" button in the zoom panel. A Status panel shows how many agents are working and the release pull request's CI
+  light (green passed, yellow running, red failed; click it for the PR panel).
 - While Saani does not answer, the map keeps the last data on screen, shows "Stale" (since when) and asks less often (every 10, 20, 40,
   then 60 s, back to 5 s once it answers). A hidden browser tab stops asking and pauses the animations. Switching project crosses a
   sandstorm while the other project loads; the refresh button blows a gust of sand over the board.
@@ -217,18 +221,29 @@ the workers are covered too); nothing the model can write or the folder it is in
   main checkout, the worktrees folder and the settings from the main checkout's `saani.toml` (copied in, so nothing the run edits changes
   the rules), the run's folder, `deploy`, the start time. A session already on is never re-armed.
 - **The switch off: the owner's.** Inside an auto run `saani auto on` and `saani auto off` are refused: a run never re-arms, resets or
-  ends itself. The owner ends it from a terminal (`saani auto off --run <id>`, which removes that run's entries: `turn_off_run`). An entry
-  older than 12 hours is over: renamed `<session>.over`, and every call of that session is refused (`run over`), never back to present
-  mode, until the owner's `saani auto off --run <id>` removes the mark too. A mark that cannot be read (no run id to match it by) keeps
-  its session refused; `saani auto off` removes such marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and
-  `refusals` in `saani/guard.py` are the same switch for code.
+  ends itself. What ends it is outside the run: the watcher of an away run once its session is gone, the skill after the report of a `here`
+  run (that session is not guarded), the owner's `/saani:auto off` or `saani auto off --run <id>` from a terminal, and always when the run
+  was started with `--keep-on` or by hand (`turn_off_run` removes the run's entries). An entry older than 12 hours is over: renamed
+  `<session>.over`, and every call of that session is refused (`run over`), never back to present mode, until `saani auto off --run <id>`
+  removes the mark too. A mark that cannot be read (no run id to match it by) keeps its session refused; `saani auto off` removes such
+  marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and `refusals` in `saani/guard.py` are the same switch for
+  code.
 - **Fail closed.** An entry that cannot be read, a registry that cannot be listed, or hook input that cannot be read while an entry
   exists: refused (`guard error: <what>`). An internal error is a refusal, never a crash. If the hook cannot run at all (timeout, no
   Python), Claude Code's normal permissions apply: it asks.
 
 Each refusal adds a line to `~/.saani/auto/refusals.jsonl`: time, run id, tool, short reason, and the refused command's first word only
 (never the command's text, never a file's contents), and the project (the run's main checkout, normalized), so two projects' runs
-never mix. `refusals(run, project)` counts them, in total and by reason, for the run's stop rules.
+never mix. `refusals(run, project)` counts them, in total and by reason, for the run's stop rules. The short reason names what the
+message to the session names, so `saani auto status` and the report's refusals by reason say what was refused: among others `glob` (an
+unquoted `*`, `?` or `[`), `redirect` (a redirection but `2>&1` and `>/dev/null`, `|&`, `&>`, process substitution, a here-document
+with an unquoted delimiter `<<EOF` and a here-string `<<<`), `here-document` (a quoted `<<'EOF'` one where it is not allowed),
+`environment assignment`, `revision` (off the allowlist), `every ref` (`--all`, `-g`, `--reflog`, `--branches`..., a `:/` search),
+`git stash` (the owner's stash), `pathspec` (a folder or a pattern in `add`, `restore`, `checkout`), `network path`, `posix path`,
+`drive-relative path`, `secret`, `cd outside the worktrees`, `not on the list`; `unsure` only for what the guard cannot read (`$`,
+backticks, subshells, an unclosed quote, a control character). When several rules apply, the first that refuses gives both the message
+and the logged reason (`git -C <main checkout> log --all` is `cd outside the worktrees`). The stop rule "the same refusal reason in a
+row" (below) reads these codes: a run of one precise reason reaches it; a mix of them does not, and still counts toward the total.
 
 "The run's places" are the worktrees folder (`[worktrees] folder`), the run's folder and the system temp folder. **Protected**, never
 written in an auto run, wherever they are: any path through `.git`, `.githooks` or `.claude`, `.mcp.json`, `CLAUDE.md`,
@@ -273,7 +288,8 @@ after `--` (`git diff -- 'src/*.py'`); a quoted glob is plain text.
 **Secrets**, refused to every tool and inside commands: `.env`, `.env.*`, `.envrc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.ppk`, `*.jks`,
 `*.keystore`, `*.kdbx`, `id_rsa*`, `id_ed25519*` (and the other ssh key names), anything with "credentials" in its name (any case),
 `.netrc*` and `_netrc`, `.npmrc*` and `npmrc`, `.pypirc`, `.pgpass`, `.git-credentials`, any `hosts.yml`, `.docker/config.json`,
-`.git/refs/stash`, `.git/logs/refs/stash` and `.git/packed-refs` (the owner's stash, by its id), `.git/config`, `.gitconfig` and
+`.git/refs/stash`, `.git/logs/refs/stash` and `.git/packed-refs` (the owner's stash, by its id), `.git/saani-auto-run.json` (the run's
+record, which holds the watcher's token), `.git/config`, `.gitconfig` and
 `.config/git/config` (tokens in remote URLs and `insteadOf`; git itself still reads them), `.m2/settings.xml`, `.yarnrc.yml`, `pip.ini`,
 `pip.conf`, `.bash_history`, `.python_history`, `~/.claude.json*` and `~/.claude/` (but its `projects/*/memory/` and the session's own saved
 tool outputs `projects/*/<session>/tool-results/`, never another session's, judged after `..` and links are resolved, so neither is a way to
@@ -328,30 +344,41 @@ by hand. The session is started with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (t
 minutes after its last turn and exits (#52). Before it starts, `saani auto away` warns (it does not refuse) when Claude Code's config
 (`$CLAUDE_CONFIG_DIR/.claude.json` if set, else `~/.claude.json`) does not show the main folder, or a parent, as trusted
 (`hasTrustDialogAccepted`; it reads that flag only, never writes the file): open Claude Code in the folder once and accept the trust dialog.
-It records the process id in `build/saani-auto-<id>.pid`, and `saani auto status` says when that process is gone while the run is still on
-(then read the log and `saani auto off --run <id>`). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
-every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking
-after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none`
-every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
-classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
+The session is run by a small detached watcher (`saani auto watch`, #67): it records the session's process id in `build/saani-auto-<id>.pid`,
+and `saani auto status` says when that process is gone while the run is still on (then read the log and `saani auto off --run <id>`). When
+the session ends, whatever the exit code, the watcher switches the run off by itself, so a finished run does not stay on and refuse the
+owner's next commands; `--keep-on` (`/saani:auto away --keep-on`) leaves it on. A `here` run is ended by the skill itself after the report,
+unless `--keep-on`. A run started by hand has no watcher: the owner ends it with `/saani:auto off`. `saani auto away` refuses while a run
+is on (younger than 12 hours). The watcher gives its session a random token in the environment (`SAANI_AUTO_WATCH`); the session's
+`saani auto on` copies it into the run's record, and the watcher ends only a record of its run id that carries its own token. So two starts
+that overlap before either `on` never end each other's run: the refused one finds a record with the other's token and leaves it on. The
+token is written by `saani auto on` only (refused inside a run once it is on), is in the run's record in the git folder, which the guard
+protects from reading and from writing (`.git/saani-auto-run.json` is one of its secrets), and is never printed or logged (the log says
+"token matched" or "not this session's record"). A record left by a session that never ran `on`, or by another start, stays for the
+owner's `/saani:auto off` (the safe direction). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
+every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to
+asking after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With
+`--permission-prompts none` every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's;
+`--permission-mode auto` lets Claude Code's classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
 
 **The run's record and its stop rules.** `saani auto on` is the last step before the work (after the owner's questions); `saani auto off
---run <id>` the owner's, from a terminal, after the report. The stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied
-into the run's record at `on`:
+--run <id>` the end: by itself when an away session ends (the watcher) or after a `here` report, else the owner's, from a terminal. The
+stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied into the run's record at `on`:
 
 | Rule | Limit | Measured by |
 |---|---|---|
 | refusals in total | 40 | the guard's counter (`guard.refusals(run id)`) |
-| the same refusal reason in a row | 10 | the longest run of one reason in the guard's log for this run (3 is too tight with the strict grammar) |
+| the same refusal reason in a row | 10 | the longest run of one reason in the guard's log for this run (3 is too tight with the strict grammar); the reason is the precise short code (`glob`, `redirect`, `here-document`...), so a session alternating between them never reaches this rule: those refusals still count toward the 40 in total |
 | hours | 10 | now less the record's start |
 
 The skill runs `saani auto status --check` before each pick and whenever a slot frees (so after each landing); exit 3 (also written to the
 journal as a `stop` line) means start no new issue, finish or park the running ones, do the end of the run (full run, the pull request if
-anything landed, `saani ci pr` rounds), write the report, and leave the ending to the owner (`saani auto off --run <id>`). Exit 3 also when
-the record is missing while the guard still holds a run for this repository ("the run record is missing"). Refusals are counted for this
-repository only: a refusal line that names its project counts for that project, and a run id the registry holds only for other projects
-counts nothing here. The guard's own entry also lapses after 12 hours, so a run that never stops is never in auto mode for ever.
+anything landed, `saani ci pr` rounds), write the report, and stop (the watcher ends an away run, the skill a `here` run; with `--keep-on`
+the owner does: `saani auto off --run <id>`). Exit 3 also when the record is missing while the guard still holds a run for this repository
+("the run record is missing"). Refusals are counted for this repository only: a refusal line that names its project counts for that
+project, and a run id the registry holds only for other projects counts nothing here. The guard's own entry also lapses after 12 hours,
+so a run that never stops is never in auto mode for ever.
 
 **The journal.** While a run is on, every status comment (`saani comment`, and those `start`, `ci pr` and `ci merged` post) and every
 landing adds one JSON line `{time, issue, kind}` to `build/saani-auto-<id>.jsonl`; it never fails the command it notes.
@@ -373,6 +400,30 @@ labels`). Kinds: `started`, `review`, `blocked`, `question` (adds the `answer` l
 themselves: `start` (`Started`, unless `--no-comment`), `land` (`On dev`, unless `--no-comment`), `ci pr` (`In PR`, after the CI status is
 set, on the named issues that carry `in_dev`) and `ci merged` (`On main`, on the named issues that carry `in_main` or `in_dev`, whoever did
 the relabel), the last two once per pull request and issue. A comment that gh refuses is a warning, never an undone step.
+
+### Issue statuses
+GitHub gives every issue a status (public preview since 2026-11-23; no GitHub Project and no extra token scope): Backlog, Todo, In
+progress, In review, Done, Not planned, Duplicate. Each has a category (`backlog`, `planned`, `started`, `completed`, `not_planned`,
+`duplicate`) that decides whether the issue is open or closed, and a repository board (a saved issue view as a board) lets you drag cards
+between them. Saani moves an issue's status forward at its steps, next to the labels, which still say where finished work waits
+(`saani/status.py`; the decision is in issue #72 of Saani's own repo):
+
+| Step | Status | Labels |
+|---|---|---|
+| filed | Backlog (GitHub's default); you move it to Todo when it may be taken | |
+| `saani start` (the `Started` comment; `--no-comment` sets it anyway) | In progress | |
+| the review starts (`saani comment <n> review`), through the fixes | In review | |
+| `saani land` (`On dev`) | In review | `in-dev` |
+| `saani ci merged` / `saani merge` (`On main`) | In review | `in-main` |
+| `saani deploy` closes the issue as completed | Done (GitHub sets it on close) | `in-main` removed |
+| you close it as not planned or duplicate | Not planned / Duplicate | |
+| it needs you | unchanged | `help wanted` / `owner-action` (there is no Blocked status) |
+
+The status never moves back: an issue In review stays there through the landing, the release pull request and main, until the deploy
+closes it; a closed issue is never reopened by Saani. `saani auto pick` takes only Todo issues, so Backlog is the place for what may not
+be taken yet. Statuses are matched by the names in `[status] names`, then by category (a renamed status still works). On a repo without
+statuses (`planningStatuses` is null), or with `[status] enabled = "off"`, none of this happens and Saani works from its labels alone.
+`gh` has no status flag yet: Saani reads and sets statuses with `gh api` (GraphQL `setIssueStatus`, the REST `status` field).
 
 ## Deploy
 `saani deploy` (`saani merge --deploy` runs it after the merge; the `saani:deployer` agent runs only its `--dry-run`, reads the logs and
