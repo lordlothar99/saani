@@ -263,7 +263,10 @@ def run(kind, command, git_common, worktree, head, log_path, poll=POLL_SECONDS, 
     function that reads it: the checkout can change while the job waits, so it is read again at each use) a stored green result of the same
     tree and command is taken instead of a run, and a finished run is stored only when the tree was the same, clean, before and after it."""
     def read_tree():
-        return tree() if callable(tree) else tree
+        try:
+            return tree() if callable(tree) else tree
+        except Exception:                                    # git gone, the folder removed: no reuse, no store, never a lost run
+            return None
 
     kind = kind_of(kind)
     if kind not in PRIORITY:

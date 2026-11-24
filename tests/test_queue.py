@@ -285,6 +285,21 @@ def test_a_tree_that_changed_while_waiting_gets_no_stale_reuse(tmp_path):
     assert q.find_green(tmp_path / q.QUEUE_DIR, "tree2", ["t"], "landing") is not None
 
 
+def test_a_tree_read_that_fails_runs_the_tests_and_stores_nothing(tmp_path):
+    def broken():
+        raise FileNotFoundError("git")
+    assert run_job(tmp_path, tree=broken) == (0, [["t"]])                     # the run happens and its code comes back
+    assert stored(tmp_path) == []
+
+
+def test_a_tree_read_that_fails_around_the_run_keeps_the_runs_code(tmp_path):
+    def after_fails(n):
+        if n >= 3:
+            raise FileNotFoundError("git")
+    assert run_job(tmp_path, code=1, tree=scripted_tree(["tree1"], on_call=after_fails)) == (1, [["t"]])
+    assert stored(tmp_path) == []
+
+
 def test_a_tree_that_changes_or_gets_dirty_during_the_run_stores_nothing(tmp_path):
     assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", "tree1", "tree2"]))[1] == [["t"]]
     assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", "tree1", None]))[1] == [["t"]]
