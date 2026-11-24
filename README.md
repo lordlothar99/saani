@@ -8,7 +8,7 @@ takes a GitHub issue from idea to production. Each issue gets its own git worktr
 a time, every test run on your machine goes through one queue, CI fits inside GitHub's free minutes, and a local map shows where every
 issue stands.
 
-![The Saani map (synthetic sample data): a desert seen from above, with a camp for each step of an issue's life along a road from start to end; each issue is a small vehicle parked at its step, the release pull request a harvester in the middle, and each running subagent a figure on its issue](docs/images/map.png)
+![The Saani map (synthetic sample data): a desert seen from above, with a settlement for each step of an issue's life along a road from start to end; each issue is a small vehicle parked at its step, the release pull request a harvester in the middle, each running subagent a figure on its issue, and in the corners the Status panel (agents working, the release pull request's CI) and the zoom controls with the "?" that opens the signs](docs/images/map.png)
 
 ## The auto run
 You talk to one **Claude Code** session. In an auto run it works through the open issues by itself, hands each one to worker subagents
