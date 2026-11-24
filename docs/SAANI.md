@@ -172,7 +172,9 @@ every 5 s, read-only.
   figure: one per running subagent (two coders at once are two figures, each on its own issue; an idle role is one figure in the camp, and a
   worker's panel lists all the runs of its role). The release pull request is the harvester: hover for its CI, click to open its link, the
   issues it carries and a prompt for the whole PR. Hover for a summary, click for the full panel (context, acceptance criteria, history,
-  auto fit, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch.
+  auto fit, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch; the signs (what each shape and colour
+  means) open from the "?" button in the zoom panel. A Status panel shows how many agents are working and the release pull request's CI
+  light (green passed, yellow running, red failed; click it for the PR panel).
 - While Saani does not answer, the map keeps the last data on screen, shows "Stale" (since when) and asks less often (every 10, 20, 40,
   then 60 s, back to 5 s once it answers). A hidden browser tab stops asking and pauses the animations. Switching project crosses a
   sandstorm while the other project loads; the refresh button blows a gust of sand over the board.

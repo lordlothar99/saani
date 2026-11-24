@@ -573,6 +573,22 @@ def run(*args, cwd=None, timeout=60):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def saani_version(code=None, runner=None):
+    """Which Saani serves the map (the help's last line): its release tag when its code sits on one, else its short commit; the package
+    version when its folder is not a git checkout (an installed copy). {"label": ..., "kind": "tag" | "commit" | "version"}."""
+    code = code or HERE.parent
+    runner = runner or (lambda *a: run(*a, cwd=code, timeout=10))
+    if (code / ".git").exists():
+        tag = runner("git", "describe", "--tags", "--exact-match", "HEAD")
+        if tag:
+            return {"label": tag, "kind": "tag"}
+        sha = runner("git", "rev-parse", "--short", "HEAD")
+        if sha:
+            return {"label": sha, "kind": "commit"}
+    from . import __version__
+    return {"label": "v" + __version__, "kind": "version"}
+
+
 def tasks():
     rows = []
     for path, branch in core.worktrees():
@@ -852,7 +868,8 @@ def state():
             "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
             "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
-            "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci))}
+            "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci)),
+            "saani": safe(lambda: cached("saani", 300, saani_version), default={})}
 
 
 # ---------------------------------------------------------------- the pages
