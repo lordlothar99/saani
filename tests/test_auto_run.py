@@ -911,16 +911,16 @@ def fake_popen(tmp_path, code=0, during=None):
 
     def popen(argv, **kw):
         if during:
-            during()
+            during(kw["env"])
         return subprocess.Popen([sys.executable, str(script), str(code)], **kw)
     return popen
 
 
-def session_on(world, run="r1"):
-    """What the headless session does first: `saani auto on` (a record newer than the watcher's start, and the guard's entry)."""
-    def on():
-        record(world, started=auto.utc_now() + datetime.timedelta(seconds=1), id=run)
-        guard.turn_on("sess", run, world.root, world.wt, folder=world.run)
+def session_on(world, run="r1", session="sess"):
+    """What the headless session does first: `saani auto on` (the record with the token its environment holds, and the guard's entry)."""
+    def on(env):
+        record(world, id=run, watch=env[auto.WATCH_VAR])
+        guard.turn_on(session, run, world.root, world.wt, folder=world.run)
     return on
 
 
@@ -981,8 +981,7 @@ def test_a_session_that_cannot_start_is_logged_and_the_run_of_this_start_switche
     assert auto.cmd_watch(watch_args(), which=lambda n: None, popen=popen) == 0                  # no claude on the PATH
     assert "`claude` is not on the PATH" in capsys.readouterr().out
     def start_then_fail(argv, **kw):                                                              # `on` ran, then the start failed
-
-        session_on(world)()
+        session_on(world)(kw["env"])
         raise OSError("late")
     auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=start_then_fail)
     assert auto.read_record() is None and "session could not start (late); run switched off" in capsys.readouterr().out
@@ -996,12 +995,40 @@ def test_the_watcher_leaves_another_run_alone_and_survives_no_record(world, tmp_
     assert auto.read_record()["id"] == "other" and "nothing to switch off" in capsys.readouterr().out
 
 
-def test_a_run_that_was_on_before_the_watcher_started_is_never_ended_by_it(world, tmp_path, capsys):
-    record(world, started=auto.utc_now())                                       # run r1 of an earlier start, still going
+def test_a_record_with_another_token_is_never_ended_by_a_watcher(world, tmp_path, capsys):
+    record(world, started=auto.utc_now(), watch="someone-else")                 # run r1 of another start, still going
     guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
     assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, code=1)) == 0
     assert auto.read_record()["id"] == "r1" and guard.state("sess") is not None
-    assert "nothing to switch off" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "not this session's record" in out and "someone-else" not in out
+    record(world)                                                               # a record with no token (a session that never ran `on`)
+    auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path))
+    assert auto.read_record()["id"] == "r1" and "not this session's record" in capsys.readouterr().out
+
+
+def test_two_overlapping_starts_the_refused_one_never_ends_the_first_run(world, tmp_path, capsys):
+    """Both starts passed cmd_away's check before any `on`: A's session runs `on`, B's is refused and exits. B's watcher leaves A alone."""
+    ended = []
+    def b_session(env):                                                         # B's `saani auto on`: refused, since A's run is on
+        ended.append(auto.read_record()["watch"] != env[auto.WATCH_VAR])
+    def a_session(env):
+        session_on(world)(env)
+        # A is still running while B's whole watcher runs
+        assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, code=1, during=b_session)) == 0
+        assert auto.read_record()["id"] == "r1" and guard.state("sess") is not None
+    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=a_session)) == 0
+    assert ended == [True]
+    out = capsys.readouterr().out
+    assert "not this session's record" in out and "token matched" in out and auto.read_record() is None   # A's own watcher ends A at last
+
+
+def test_the_run_record_takes_the_watcher_s_token_from_the_environment_on_away_start_only(world, monkeypatch):
+    monkeypatch.setenv(auto.WATCH_VAR, "tok")
+    assert auto.cmd_on(args()) == 0
+    assert auto.read_record()["watch"] == "tok"
+    assert auto.away_env({"A": "1", auto.WATCH_VAR: "old"}) == {"A": "1", auto.WAIT_VAR: "0"}     # never one inherited
+    assert auto.away_env({}, token="t")[auto.WATCH_VAR] == "t"
 
 
 def test_away_refuses_while_a_run_is_on_and_leaves_the_pid_file_alone(world):

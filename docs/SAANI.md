@@ -222,8 +222,9 @@ the workers are covered too); nothing the model can write or the folder it is in
   run (that session is not guarded), the owner's `/saani:auto off` or `saani auto off --run <id>` from a terminal, and always when the run
   was started with `--keep-on` or by hand (`turn_off_run` removes the run's entries). An entry older than 12 hours is over: renamed
   `<session>.over`, and every call of that session is refused (`run over`), never back to present mode, until `saani auto off --run <id>`
-  removes the mark too. A mark that cannot be read (no run id to match it by) keeps its session refused; `saani auto off` removes such marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and
-  `refusals` in `saani/guard.py` are the same switch for code.
+  removes the mark too. A mark that cannot be read (no run id to match it by) keeps its session refused; `saani auto off` removes such
+  marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and `refusals` in `saani/guard.py` are the same switch for
+  code.
 - **Fail closed.** An entry that cannot be read, a registry that cannot be listed, or hook input that cannot be read while an entry
   exists: refused (`guard error: <what>`). An internal error is a refusal, never a crash. If the hook cannot run at all (timeout, no
   Python), Claude Code's normal permissions apply: it asks.
@@ -335,8 +336,12 @@ and `saani auto status` says when that process is gone while the run is still on
 the session ends, whatever the exit code, the watcher switches the run off by itself, so a finished run does not stay on and refuse the
 owner's next commands; `--keep-on` (`/saani:auto away --keep-on`) leaves it on. A `here` run is ended by the skill itself after the report,
 unless `--keep-on`. A run started by hand has no watcher: the owner ends it with `/saani:auto off`. `saani auto away` refuses while a run
-is on (younger than 12 hours), and the watcher ends a run only if its record is newer than the watcher's own start, so a second start never
-ends the first run. With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
+is on (younger than 12 hours). The watcher gives its session a random token in the environment (`SAANI_AUTO_WATCH`); the session's
+`saani auto on` copies it into the run's record, and the watcher ends only a record of its run id that carries its own token. So two starts
+that overlap before either `on` never end each other's run: the refused one finds a record with the other's token and leaves it on. The
+token is written by `saani auto on` only (refused inside a run once it is on), is in the guard-protected record in the git folder, and is
+never printed or logged (the log says "token matched" or "not this session's record"). A record left by a session that never ran `on`, or
+by another start, stays for the owner's `/saani:auto off` (the safe direction). With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
 every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking
 after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none`
 every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
@@ -358,7 +363,8 @@ journal as a `stop` line) means start no new issue, finish or park the running o
 anything landed, `saani ci pr` rounds), write the report, and stop (the watcher ends an away run, the skill a `here` run; with `--keep-on`
 the owner does: `saani auto off --run <id>`). Exit 3 also when the record is missing while the guard still holds a run for this repository
 ("the run record is missing"). Refusals are counted for this repository only: a refusal line that names its project counts for that
-project, and a run id the registry holds only for other projects counts nothing here. The guard's own entry also lapses after 12 hours, so a run that never stops is never in auto mode for ever.
+project, and a run id the registry holds only for other projects counts nothing here. The guard's own entry also lapses after 12 hours,
+so a run that never stops is never in auto mode for ever.
 
 **The journal.** While a run is on, every status comment (`saani comment`, and those `start`, `ci pr` and `ci merged` post) and every
 landing adds one JSON line `{time, issue, kind}` to `build/saani-auto-<id>.jsonl`; it never fails the command it notes.

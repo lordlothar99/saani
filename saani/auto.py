@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import subprocess
 import sys
 
@@ -530,6 +531,9 @@ def cmd_on(args):
     here_mode = bool(getattr(args, "here", False))
     rec = {"id": run_id, "started": stamp(now), "folder": str(folder), "deploy": bool(args.deploy), "limits": dict(LIMITS),
            "mode": "here" if here_mode else "away"}
+    token = os.environ.get(WATCH_VAR)
+    if token and not here_mode:
+        rec["watch"] = token          # the watcher that started this session (#67): only it ends this record; written here and nowhere else
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
     if here_mode:
         # The interactive sub-mode (#50): the record (stop rules, journal, report) without the guard's switch. This line is not the
@@ -789,9 +793,16 @@ def away_command(run_id, folder, only=(), deploy=False, claude="claude"):
 WAIT_VAR = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"   # `claude -p` stops its background tasks this long after the last turn; 0 = wait for them
 
 
-def away_env(environ=None):
-    """The headless session's environment: ours, and `claude -p` waits for its background coders (#52)."""
-    return {**(os.environ if environ is None else environ), WAIT_VAR: "0"}
+WATCH_VAR = "SAANI_AUTO_WATCH"   # the watcher's token for its session: `saani auto on` copies it into the run's record (#67)
+
+
+def away_env(environ=None, token=None):
+    """The headless session's environment: ours, and `claude -p` waits for its background coders (#52); with `token`, the watcher's."""
+    env = {**(os.environ if environ is None else environ), WAIT_VAR: "0"}
+    env.pop(WATCH_VAR, None)            # never one inherited from elsewhere
+    if token:
+        env[WATCH_VAR] = token
+    return env
 
 
 def by_hand(argv, windows=None):
@@ -933,15 +944,14 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
     argv = away_command(run_id, args.folder, args.only or (), bool(args.deploy))
     exe = (which or shutil.which)("claude")
     code = None
-    before = read_record()                  # a record of this id that is already on is not this session's: it is never switched off here
-    started_before = before.get("started") if before and before.get("id") == run_id else None
+    token = secrets.token_hex(16)           # the session's `saani auto on` writes it in the record: only a record with it is this one's to end
     try:
         if exe is None:
             raise OSError("`claude` is not on the PATH")
         log = build_dir() / f"saani-auto-{run_id}.log"
         with open(log, "ab") as out:          # the session's output, appended to the log the watcher's own lines go to
             proc = popen([exe] + argv[1:], cwd=str(cfg().root), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                         env=away_env())
+                         env=away_env(token=token))
             try:
                 pid_path(run_id).write_text(str(proc.pid), encoding="utf-8")
             except OSError:
@@ -958,9 +968,14 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
         rec = read_record()
     except SystemExit:
         rec = None
-    if not rec or rec.get("id") != run_id or rec.get("started") == started_before:
-        watch_note(f"{what}; no run record of this session for {run_id} (none, or one that was on before it started), nothing to switch off")
+    if not rec or rec.get("id") != run_id:
+        watch_note(f"{what}; no run record for {run_id}, nothing to switch off")
         return 0
+    if rec.get("watch") != token:
+        watch_note(f"{what}; not this session's record (the run is another start's, or the session never ran `on`): left on, "
+                   f"`/saani:auto off` ends it")
+        return 0
+    watch_note("token matched")
     try:
         cmd_off(type("Args", (), {"run_id": run_id})())
     except SystemExit as e:
