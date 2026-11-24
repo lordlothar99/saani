@@ -1,7 +1,8 @@
 # Comment kinds
 
 Every comment Claude Code (or a worker) writes on an issue starts with one of these headings, so the owner and the map can scan the
-history. Tables and checkboxes over prose.
+history. Tables and checkboxes over prose. `Started` moves the issue's GitHub status to In progress; `In review`, `On dev` and `On main`
+to In review (only forward; docs/SAANI.md, Issue statuses).
 
 | Heading | When | Content |
 |---|---|---|

@@ -12,7 +12,7 @@ import secrets
 import subprocess
 import sys
 
-from . import config, core, glance, queue
+from . import config, core, glance, queue, status
 
 MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
 GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
@@ -122,8 +122,9 @@ def order_key(issue):
     return (milestone_order(issue.get("milestone")), 0 if issue.get("type") in bug_types() else 1, issue["number"])
 
 
-def choose(issues, started, running, today, labels=None, types=None, only=None, branched=()):
+def choose(issues, started, running, today, labels=None, types=None, only=None, branched=(), statuses=None):
     """Splits the open `issues` ([{number, title, labels, milestone, body, type}]) into those a run may take now and those it leaves.
+    `statuses`: the repo's GitHub issue statuses (saani/status.py), or None when it has none: then only Todo issues are taken.
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
     Returns (eligible, skipped): eligible [{number, title, milestone, type, flags}] in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
@@ -144,6 +145,8 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
             reason = "has a worker branch"
         elif have & owner_labels:
             reason = "needs the owner or is an idea (label " + ", ".join(sorted(have & owner_labels)) + ")"
+        elif statuses is not None and status.step_of(i.get("status"), statuses) != "todo":
+            reason = "not Todo (status: " + ((i.get("status") or {}).get("name") or "none") + ")"
         elif fit == "no":
             reason = "Auto: no"
         elif glance.is_blocked(g, open_numbers, today):
@@ -194,10 +197,25 @@ def gh(*args):
 
 def read_types():
     """{issue number: its GitHub issue Type} of the open issues, from the REST API (`gh issue list` has no such field, #38)."""
+    return read_types_and_statuses()[0]
+
+
+def read_types_and_statuses():
+    """({number: Type}, {number: {name, category}}) of the open issues, from one REST listing: `gh issue list` has neither field (#38,
+    saani/status.py)."""
     out = gh("api", "--paginate", f"repos/{cfg().repo}/issues?state=open&per_page=100", "--jq",
-             r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")"')
-    pairs = (line.split("\t") for line in out.splitlines() if "\t" in line)
-    return {int(n): t for n, t in pairs if t}
+             r'.[] | select(.pull_request | not) | "\(.number)\t\(.type.name // "")\t\(.status.name // "")\t\(.status.category // "")"')
+    types, statuses = {}, {}
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0].isdigit():
+            continue
+        n = int(parts[0])
+        if parts[1]:
+            types[n] = parts[1]
+        if len(parts) > 3 and parts[2]:
+            statuses[n] = {"name": parts[2], "category": parts[3] or None}
+    return types, statuses
 
 
 def read_issues():
@@ -207,9 +225,10 @@ def read_issues():
                              "number,title,labels,milestone,body") or "[]")
     except json.JSONDecodeError:
         raise SystemExit("saani auto pick: gh issue list gave an answer that is not JSON")
-    types = read_types()
+    types, statuses = read_types_and_statuses()
     return [{"number": r["number"], "title": r["title"], "labels": [x["name"] for x in r.get("labels", [])],
-             "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"])}
+             "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"]),
+             "status": statuses.get(r["number"])}
             for r in rows]
 
 
@@ -259,7 +278,7 @@ def pick(today=None, only=None):
             running[i["number"]] = running[i["number"]] + issue_paths(i["body"])
     started, branched = started_issues(folders, branches)
     eligible, skipped = choose(issues, started, running, today or datetime.date.today().isoformat(), only=set(only) if only else None,
-                               branched=branched)
+                               branched=branched, statuses=status.available())
     parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(running))
     return {"slots": free_slots(parallel, len(running)), "parallel": parallel, "running": sorted(running),
             "eligible": eligible, "skipped": skipped}

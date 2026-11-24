@@ -1293,7 +1293,9 @@ async function fetchDetail(c) {
 function issuePanel(c) {
   const d = c.detail || DETAILS[c.number] || {}, fit = autoRun(c), f = folderFor(c), prompt = promptFor(c), url = d.url || `https://github.com/${REPO}/issues/${c.number}`;
   const tags = el("div", {class: "chips"},
-    el("span", {class: "tag"}, typeInfo(c).word), el("span", {class: "tag"}, STEP_LABEL[c.step] || c.step), el("span", {class: "tag"}, c.milestone || "No milestone"),
+    el("span", {class: "tag"}, typeInfo(c).word), el("span", {class: "tag"}, STEP_LABEL[c.step] || c.step),
+    c.status ? el("span", {class: "tag", title: "The issue's status on GitHub (Saani moves it forward: start, review, land, deploy)"}, c.status.name) : null,
+    el("span", {class: "tag"}, c.milestone || "No milestone"),
     c.need ? el("span", {class: "tag hot"}, c.need === "answer" ? "Needs your answer" : "Needs you to act") : null,
     c.blocked ? el("span", {class: "tag hot", title: "The Blocked by row of its At a glance table"}, "Blocked" + ((c.blocked_by || []).length ? " by " + c.blocked_by.map(n => "#" + n).join(", ") : "")) : null,
     (c.labels || []).filter(l => ![LAB("answer"), LAB("act")].includes(l)).map(l => el("span", {class: "tag"}, l)),
@@ -1309,6 +1311,7 @@ function issuePanel(c) {
       el("div", {}, el("strong", {}, FIT[fit.fit].word), el("span", {}, fit.why + (c.auto ? "" : " Estimated from the labels until the issue carries the At a glance table (the issue templates)."))))) : null,
     el("div", {class: "sec"}, el("h3", {}, "Now"), el("dl", {class: "grid"},
       el("dt", {}, "Step"), el("dd", {}, STEP_LABEL[c.step] || c.step),
+      c.status ? [el("dt", {}, "Status"), el("dd", {}, c.status.name + " on GitHub")] : null,
       el("dt", {}, "Worktree"), el("dd", {}, c.worktree ? `${c.worktree.folder} · ${c.worktree.ahead} commit(s) ahead${c.worktree.dirty ? ", " + c.worktree.dirty + " changed file(s)" : ""}` : "none"),
       el("dt", {}, "Agents"), el("dd", {}, agents.length ? agents.join(", ") : "nobody on it"),
       el("dt", {}, "Tests"), el("dd", {}, (c.runs || []).length ? c.runs.map(r => r.line || r.file).join(" · ") : "no run in the last hour"),

@@ -19,6 +19,11 @@ hotfix_default_type = "bug"      # a hotfix is never refused for a missing Type
 # The labels Saani reads and writes (these are the defaults):
 labels = { in_dev = "in-dev", in_main = "in-main", answer = "help wanted", act = "owner-action", idea = "idea" }
 
+[status]
+enabled = "auto"                 # GitHub's issue statuses: used when the repo has them; "off" = labels only
+# The status of each step (these are the defaults; a renamed status is found by its category):
+names = { backlog = "Backlog", todo = "Todo", started = "In progress", review = "In review", done = "Done" }
+
 [commits]
 trailers = ["Why", "Undo"]       # each commit on a worker's branch or the integration branch carries these lines
 

@@ -49,7 +49,7 @@ import subprocess
 import sys
 import time
 
-from . import comments, config, queue
+from . import comments, config, queue, status
 
 LOCK_NAME = "saani-landing.lock"
 LANDINGS = "saani-landings.jsonl"
@@ -395,6 +395,8 @@ def cmd_start(args):
         subprocess.run(["gh", "issue", "edit", str(args.issue), "--repo", c.repo, "--add-assignee", c.owner], capture_output=True)
     if not args.no_comment:
         comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name})
+    else:
+        status.advance(args.issue, "started")              # the comment would have set it
     print(f"worktree: {folder}")
     print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
     print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
@@ -852,6 +854,8 @@ def worktrees_warning(c, files=None):
 
 
 def cmd_status(args):
+    if getattr(args, "action", None) == "sync":
+        return status.cmd_sync(args)
     warning = worktrees_warning(cfg())
     if warning:
         print(warning)
@@ -962,7 +966,10 @@ def add_parsers(sub):
     p.add_argument("--worktree", help="land this worktree instead of the current folder's (an auto run cannot change folder)")
     p.add_argument("--no-comment", action="store_true", help="do not comment the landing on the issue or label it in-dev (print the step instead)")
     p.set_defaults(run=cmd_land)
-    p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue")
+    p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue; `status sync`: the issues' GitHub statuses")
+    p.add_argument("action", nargs="?", choices=["sync"],
+                   help="sync: give each open issue the GitHub status its state implies (saani/status.py), a dry run without --apply")
+    p.add_argument("--apply", action="store_true", help="sync: set the statuses (default: print what would move)")
     p.set_defaults(run=cmd_status)
     p = sub.add_parser("prune", help="delete the merged branches, locally and on GitHub (never the integration or production branch)")
     p.add_argument("--dry-run", action="store_true", help="print what would be deleted")

@@ -14,6 +14,8 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `[issues]` | `types` | `{Task = "task", Feature = "feat", Bug = "bug"}` | GitHub issue Type -> branch prefix; an issue with another Type, or none, is refused |
 | | `hotfix_default_type` | `bug` | the prefix of a hotfix whose issue has no Type |
 | | `labels` | see below | the labels Saani reads and writes |
+| `[status]` | `enabled` | `auto` | GitHub's issue statuses (docs/SAANI.md, Issue statuses): `auto` = used when the repo has them, `off` = labels only |
+| | `names` | `{backlog = "Backlog", todo = "Todo", started = "In progress", review = "In review", done = "Done"}` | the status of each step, by name; a step whose name is not found takes the status of its category (review: the last `started` one). Other keys are refused |
 | `[commits]` | `trailers` | `["Why", "Undo"]` | the lines each commit on a worker's branch or the integration branch must carry |
 | `[tests]` | `landing` | `[]` | before every landing: the tests a change can affect (empty: no tests at landing). The old name `tier1` is still read, with a message to rename it; both at once are refused |
 | | `full` | `[]` | everything: before a release, and the PC's CI |
