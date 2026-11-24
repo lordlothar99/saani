@@ -57,6 +57,9 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `act` | `owner-action` | waits for the owner to do something themselves |
 | `idea` | `idea` | a raw idea: off the map, no milestone needed |
 
+On a repo with GitHub issue statuses (`[status]`), the labels stay: `in_dev` and `in_main` say where the work is (the integration branch,
+production) next to the status (In review), and the others still mark what the owner must do; docs/SAANI.md, Issue statuses.
+
 ## Logs (in `build/` of the main checkout, never committed)
 | File | Written by |
 |---|---|
