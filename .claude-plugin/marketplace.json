@@ -8,7 +8,7 @@
     {
       "name": "saani",
       "source": "./",
-      "description": "Saani: an AI workshop for GitHub projects (slash commands for every saani command, auto runs, worker agents, the guard hook)."
+      "description": "Saani: an AI workshop for GitHub projects (auto runs that end in one pull request, slash commands for every saani command, worker agents, the guard hook)."
     }
   ]
 }
