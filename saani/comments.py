@@ -29,6 +29,7 @@ KINDS = {
 # kind: the GitHub issue status step it moves the issue to (saani/status.py), only forward; the others leave the status alone.
 # Deploy needs none: closing an issue as completed sets Done.
 STATUS_STEP = {"started": "started", "review": "review", "on-dev": "review", "on-main": "review"}
+GH_TIMEOUT = 120                     # seconds: a stalled gh never hangs a command
 
 
 def cfg():
@@ -74,9 +75,12 @@ class Direct:
 
     def read(self, *cmd):
         try:
-            r = subprocess.run(list(cmd), cwd=cfg().root, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+            r = subprocess.run(list(cmd), cwd=cfg().root, capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL,
+                               timeout=GH_TIMEOUT)
         except OSError as e:
             raise SystemExit(f"cannot run {cmd[0]}: {e}")
+        except subprocess.TimeoutExpired:
+            raise SystemExit(f"{' '.join(cmd[:3])} took more than {GH_TIMEOUT} s")
         if r.returncode:
             raise SystemExit("failed: " + " ".join(cmd[:4]) + "\n" + (getattr(r, "stderr", "") or "").strip())
         return (getattr(r, "stdout", "") or "").strip()

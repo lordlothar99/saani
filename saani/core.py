@@ -393,10 +393,8 @@ def cmd_start(args):
         git("config", "--worktree", "core.hooksPath", ".githooks", cwd=folder)
     if not args.no_assign and c.owner:
         subprocess.run(["gh", "issue", "edit", str(args.issue), "--repo", c.repo, "--add-assignee", c.owner], capture_output=True)
-    if not args.no_comment:
-        comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name})
-    else:
-        status.advance(args.issue, "started")              # the comment would have set it
+    if args.no_comment or not comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name}):
+        status.advance(args.issue, "started")              # the comment sets it; without one (skipped or refused), set it here
     print(f"worktree: {folder}")
     print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
     print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")

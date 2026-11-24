@@ -1,10 +1,12 @@
 """GitHub's issue statuses (saani/status.py, #72): read the repo's list, move an issue only forward, the steps that set them, auto pick on
 Todo, the map's cards, `saani status sync` and the `[status]` settings. Everything on the invented project acme/webshop, gh faked."""
+import argparse
 import json
+import subprocess
 
 import pytest
 
-from saani import auto, board_server, comments, config, status
+from saani import auto, board_server, comments, config, core, status
 
 STATUSES = [{"id": "S1", "name": "Backlog", "category": {"key": "backlog"}}, {"id": "S2", "name": "Todo", "category": {"key": "planned"}},
             {"id": "S3", "name": "In progress", "category": {"key": "started"}},
@@ -218,3 +220,78 @@ def test_sync_plans_from_what_saani_knows():
 def test_sync_on_a_repo_without_statuses_does_nothing(capsys):
     assert status.cmd_sync(type("Args", (), {"apply": True})()) == 0
     assert "not available" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- review of #72: failures, edge statuses, sync end to end
+
+def test_a_gh_failure_is_not_cached_and_strict_callers_stop(fresh):
+    assert status.available(FakeGh(fail=True)) is None
+    assert "acme/webshop" not in status._cache                 # the next call asks again
+    with pytest.raises(SystemExit, match="could not read the repo's issue statuses"):
+        status.available(FakeGh(fail=True), strict=True)
+
+
+def test_auto_pick_stops_when_the_statuses_cannot_be_read(fresh, monkeypatch):
+    monkeypatch.setattr(status, "io_default", lambda: FakeGh(fail=True))
+    with pytest.raises(SystemExit, match="saani auto pick: could not read"):
+        auto.pick_statuses()
+
+
+def test_a_renamed_review_status_is_found_with_the_default_names():
+    renamed = [dict(s, name={"In progress": "Doing", "In review": "Checking"}.get(s["name"], s["name"])) for s in FLAT]
+    assert status.step_of({"name": "Doing", "category": "started"}, renamed) == "started"
+    assert status.step_of({"name": "Checking", "category": "started"}, renamed) == "review"
+
+
+def test_a_repo_with_one_started_status_settles():
+    one = [s for s in FLAT if s["name"] != "In review"]
+    assert status.plan({"name": "In progress", "category": "started"}, "review", one) == (None, "already In progress")
+
+
+def test_a_status_saani_does_not_know_is_left():
+    target, why = status.plan({"name": "Blocked", "category": "blocked"}, "started", FLAT)
+    assert target is None and "not one of Saani's steps" in why
+
+
+def test_the_rest_listing_of_open_issues_is_read(monkeypatch):
+    class Io(FakeGh):
+        def read(self, *cmd):
+            return "\n".join(['{"number":3,"labels":["in-dev"],"milestone":"v1","status":{"id":4,"name":"Todo","category":"planned"}}',
+                              '{"number":4,"labels":[],"milestone":null,"status":null}', ""])
+    assert status.read_open_issues(Io()) == [
+        {"number": 3, "labels": ["in-dev"], "milestone": "v1", "status": {"name": "Todo", "category": "planned"}},
+        {"number": 4, "labels": [], "milestone": None, "status": None}]
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_sync_prints_the_plan_and_applies_only_with_apply(fresh, monkeypatch, capsys, apply):
+    gh = FakeGh(None)
+    status._cache["acme/webshop"] = FLAT
+    monkeypatch.setattr(status, "io_default", lambda: gh)
+    monkeypatch.setattr(status, "read_open_issues", lambda io: [{"number": 7, "labels": ["in-main"], "milestone": None, "status": None}])
+    monkeypatch.setattr(auto, "started_issues", lambda folders, branches: (set(), set()))
+    monkeypatch.setattr(core, "git", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
+    assert status.cmd_sync(type("Args", (), {"apply": apply})()) == 0
+    out = capsys.readouterr().out
+    assert "#7" in out and "In review" in out and "on dev or main" in out
+    assert set_to(gh) == (["S4"] if apply else []) and (("would move" in out) != apply)
+
+
+def test_saani_status_sync_is_wired(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(status, "cmd_sync", lambda args: seen.setdefault("apply", args.apply) or 0)
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    core.add_parsers(sub)
+    args = parser.parse_args(["status", "sync", "--apply"])
+    args.run(args)
+    assert seen == {"apply": True}
+
+
+def test_a_stalled_gh_times_out(monkeypatch):
+    def slow(*a, **k):
+        assert k["timeout"] == comments.GH_TIMEOUT
+        raise subprocess.TimeoutExpired(a[0], k["timeout"])
+    monkeypatch.setattr(comments.subprocess, "run", slow)
+    with pytest.raises(SystemExit, match="took more than"):
+        comments.Direct().read("gh", "api", "graphql")

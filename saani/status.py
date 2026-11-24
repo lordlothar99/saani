@@ -49,9 +49,10 @@ def enabled():
     return cfg().status_enabled != "off"
 
 
-def available(io=None):
-    """The repo's statuses [{id, name, category}] in display order, or None: off in saani.toml, not available for the repo, or gh refused.
-    Read once per process."""
+def available(io=None, strict=False):
+    """The repo's statuses [{id, name, category}] in display order, or None: off in saani.toml or not available for the repo (both read
+    once per process). When gh fails, the answer is unknown: `strict` stops with gh's message (a command that decides from the statuses,
+    like `auto pick`, never guesses), else None for this call only (bookkeeping that never fails its command)."""
     if not enabled():
         return None
     repo = cfg().repo
@@ -60,8 +61,10 @@ def available(io=None):
         try:
             nodes = ((graphql(io or io_default(), QUERY_STATUSES, o=owner, r=name).get("repository") or {})
                      .get("planningStatuses") or {}).get("nodes")
-        except (SystemExit, OSError, ValueError):
-            nodes = None
+        except (SystemExit, OSError, ValueError) as e:
+            if strict:
+                raise SystemExit(f"could not read the repo's issue statuses: {e}")
+            return None
         _cache[repo] = [{"id": s["id"], "name": s["name"], "category": (s.get("category") or {}).get("key")} for s in nodes] if nodes else None
     return _cache[repo]
 
@@ -101,7 +104,11 @@ def plan(current, step, statuses):
     target = resolve(step, statuses)
     if not target:
         return None, f"the repo has no status for {step}"
+    if current and current.get("name") == target["name"]:
+        return None, f"already {target['name']}"
     now = step_of(current, statuses)
+    if current and now is None:                   # a status Saani does not know (a new category in the preview): the owner's, left
+        return None, f"{current.get('name')} is not one of Saani's steps"
     if now is not None and rank(now) >= rank(step):
         return None, f"already {current['name']}"
     return target, None
@@ -174,7 +181,7 @@ def read_open_issues(io):
 def cmd_sync(args):
     from . import auto, core
     io = io_default()
-    statuses = available(io)
+    statuses = available(io, strict=True)
     if not statuses:
         print("saani status sync: issue statuses are " + ("off in saani.toml ([status] enabled)" if not enabled()
                                                           else "not available for this repo: nothing to do"))

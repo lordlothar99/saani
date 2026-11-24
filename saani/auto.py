@@ -124,7 +124,8 @@ def order_key(issue):
 
 def choose(issues, started, running, today, labels=None, types=None, only=None, branched=(), statuses=None):
     """Splits the open `issues` ([{number, title, labels, milestone, body, type}]) into those a run may take now and those it leaves.
-    `statuses`: the repo's GitHub issue statuses (saani/status.py), or None when it has none: then only Todo issues are taken.
+    `statuses`: the repo's GitHub issue statuses (saani/status.py): only Todo issues are taken; None (the repo has none, or they are
+    off): no status filter.
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
     Returns (eligible, skipped): eligible [{number, title, milestone, type, flags}] in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
@@ -265,6 +266,14 @@ def running_issues():
     return out
 
 
+def pick_statuses():
+    """The repo's statuses for the pick; a gh failure stops the pick (never a guess that would let Backlog issues through)."""
+    try:
+        return status.available(strict=True)
+    except SystemExit as e:
+        raise SystemExit(f"saani auto pick: {e}")
+
+
 def pick(today=None, only=None):
     """The whole answer of `saani auto pick` as a dict: slots, parallel, running, eligible, skipped."""
     c = cfg()
@@ -278,7 +287,7 @@ def pick(today=None, only=None):
             running[i["number"]] = running[i["number"]] + issue_paths(i["body"])
     started, branched = started_issues(folders, branches)
     eligible, skipped = choose(issues, started, running, today or datetime.date.today().isoformat(), only=set(only) if only else None,
-                               branched=branched, statuses=status.available())
+                               branched=branched, statuses=pick_statuses())
     parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(running))
     return {"slots": free_slots(parallel, len(running)), "parallel": parallel, "running": sorted(running),
             "eligible": eligible, "skipped": skipped}
