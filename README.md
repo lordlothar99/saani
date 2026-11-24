@@ -18,7 +18,7 @@ and lands it, while Saani's commands and its guard keep the work safe.
    for an approval while you are gone. `/saani:auto here` runs the same in your own session and asks you whenever it needs to; plain
    `/saani:auto` asks which.
 2. **The run.** At most 2 issues in flight per project. For each: its own worktree (`saani start`), a coder subagent, a reviewer
-   subagent on the diff, then `saani land`: a lock, a merge, the landing tests, a push to `dev`. As soon as one issue lands, the next
+   subagent on the diff (a change of a few lines Claude makes itself), then `saani land`: a lock, a merge, the landing tests, a push to `dev`. As soon as one issue lands, the next
    eligible one starts. Stop rules end it early (40 refusals, 10 of the same reason in a row, 10 hours).
 3. **The guard.** A plugin hook that decides every tool call of the run at once, never asking: it allows the run's work and refuses
    what a run must never do (push outside `saani land`, merge, read secrets, edit outside its worktrees, run anything off its list).
