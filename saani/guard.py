@@ -302,7 +302,7 @@ def posix_view(p, cwd):
     def gitbash(x):
         x = str(x).replace("\\", "/")
         if re.match(r"^[A-Za-z]:(?!/)", x):
-            raise Refuse("unsure", "a drive-relative path (C:x, or C: alone: that drive's current folder)", how="use the full path, C:/...")
+            raise Refuse("drive-relative path", "a drive-relative path (C:x, or C: alone: that drive's current folder)", how="use the full path, C:/...")
         m = re.match(r"^([A-Za-z]):(.*)", x)
         return "/" + m.group(1).lower() + m.group(2) if m else x
     q = gitbash(p)
@@ -528,7 +528,12 @@ def holds_protected(p, ctx):
 # ---------------------------------------------------------------- the decision
 
 class Unsure(Exception):
-    """A shell construct the guard does not read for sure: refused."""
+    """A shell construct the guard does not read for sure: refused. `code` is the log's short reason: `redirect` and `here-document` for
+    what the guard reads but does not allow, `unsure` for what it cannot read at all."""
+
+    def __init__(self, what, code="unsure"):
+        super().__init__(what)
+        self.code = code
 
 
 def allow(why):
@@ -691,7 +696,7 @@ def split_bash(text):
         if words:
             parts.append(Part(words, stdin, sep))
         elif stdin:
-            raise Unsure("a here-document without a command")
+            raise Unsure("a here-document without a command", "here-document")
         words, stdin = [], False
 
     while i < n:
@@ -706,14 +711,14 @@ def split_bash(text):
             i += 1
         elif c in "&|":
             if text.startswith("|&", i) or text.startswith("&>", i):
-                raise Unsure(text[i:i + 2])
+                raise Unsure(text[i:i + 2], "redirect")
             op = text[i:i + 2] if text[i:i + 2] in ("&&", "||") else c
             end_part(op)
             i += len(op)
         elif c in "<>":
             fd = "".join(buf) if started and not quoted and "".join(buf) in ("1", "2") else None
             if started and fd is None:
-                raise Unsure("a redirection glued to a word")
+                raise Unsure("a redirection glued to a word", "redirect")
             buf, started = [], False
             if text.startswith("2>&1", i - 1) and fd == "2" and text.startswith(">&1", i) and (i + 3 >= n or text[i + 3] in BOUNDARY):
                 i += 3
@@ -728,7 +733,7 @@ def split_bash(text):
                 if m:
                     i = m.end()
                     continue
-            raise Unsure("a redirection other than 2>&1 and >/dev/null")
+            raise Unsure("a redirection other than 2>&1 and >/dev/null", "redirect")
         elif c == "'":
             j = text.find("'", i + 1)
             if j < 0:
@@ -909,14 +914,14 @@ def command(part, ctx, cwd):
     # Bash expands an unquoted *, ? or [ after the guard has looked, into any number of words (options and -- included, from files the
     # run wrote): no such word passes, in any position. A quoted one stays text for bash and is judged as text.
     if any(w.glob for w in words):
-        return deny("unsure", "an unquoted glob", cmd, how="list files with the Glob tool, read with Read or Grep, or quote a git pathspec "
+        return deny("glob", "an unquoted glob", cmd, how="list files with the Glob tool, read with Read or Grep, or quote a git pathspec "
                     "after --: git diff -- 'src/*.py'"), cwd
     if part.stdin and not (cmd == "git" and args[:1] == ["commit"]):
-        return deny("unsure", "a here-document other than git commit -F -", cmd), cwd
+        return deny("here-document", "a here-document other than git commit -F -", cmd), cwd
     if any(w.heredoc for w in words) and cmd not in ("git", "gh"):
-        return deny("unsure", "a $(cat <<'EOF' ...) other than a commit message or a gh body or title", cmd), cwd
+        return deny("here-document", "a $(cat <<'EOF' ...) other than a commit message or a gh body or title", cmd), cwd
     if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", cmd):
-        return deny("unsure", "an environment assignment", cmd, how="run the command without it"), cwd
+        return deny("environment assignment", "an environment assignment", cmd, how="run the command without it"), cwd
     if cmd == "sudo":
         return deny("sudo", "sudo", cmd), cwd
     if cmd == "cd":
@@ -1178,7 +1183,7 @@ def git_command(part, ctx, cwd):
             elif w.startswith("--message=") or glued_message(w):
                 text.add(k)
     if any(w.heredoc for k, w in enumerate(rest) if k not in text) or (sub != "commit" and any(w.heredoc for w in rest)):
-        return deny("unsure", "a $(cat <<'EOF' ...) other than the value of git commit -m", "git")
+        return deny("here-document", "a $(cat <<'EOF' ...) other than the value of git commit -m", "git")
     words = [w for k, w in enumerate(rest) if k not in text]
     if sub == "push":
         return deny("git push", "git push (only saani land pushes, as its own process)", "git", how="land with saani land")
@@ -1207,13 +1212,17 @@ def git_command(part, ctx, cwd):
         return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
                     "git", how="cd <worktree> && git ...")
     verdict = commit_takes_paths(rest) if sub == "commit" else None
-    verdict = verdict or git_sub(sub, words, ctx, gcwd, part) or revisions(sub, words, ctx, gcwd)
+    verdict = verdict or git_sub(sub, words, ctx, gcwd, part)
     if verdict:
         return verdict
     # A :/<text> search runs over every ref (the owner's stash included): refused anywhere in a word, but a drive's C:/ (from ~ too).
+    # Before the revision allowlist, so a search is logged as one (`every ref`) wherever it is, --ancestry-path=:/x and --with-tree too.
     if any(re.search(r"(?<![A-Za-z]):/|(?<=[A-Za-z]{2}):/", w) for w in words):
-        return deny("revision", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
+        return deny("every ref", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
                     how="name HEAD, origin/<branch> or a worker branch")
+    verdict = revisions(sub, words, ctx, gcwd)
+    if verdict:
+        return verdict
     if scan(ctx, rest, gcwd, text):
         return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
     return None
@@ -1232,26 +1241,29 @@ REF_PATTERNS = ("branches", "remotes", "tags")
 def owner_stash(sub, words):
     """A refusal when a git command would read the owner's stash: a stash revision anywhere, a :/ search, and in the commands that walk
     revisions (log, show, rev-parse, diff) --all, -g, --walk-reflogs, --reflog, --glob, --stdin..., --branches, --remotes, --tags (with or without a pattern)
-    (and their abbreviations)."""
-    no = deny("git stash", f"git {sub} reading the owner's stash (refs/stash is shared by every worktree) or walking every ref", "git",
-              how="name the revisions (HEAD, origin/<branch>, a commit)")
+    (and their abbreviations). A stash revision is logged as `git stash`; a search or a walk over every ref as `every ref`."""
+    how = "name the revisions (HEAD, origin/<branch>, a worker branch)"
+
+    def walk(what):
+        return deny("every ref", f"git {sub} with {what[:40]} (it walks every ref or the reflogs, the owner's stash and unpushed branches "
+                    "included)", "git", how=how)
     for w in words:
         name, eq, value = w[2:].partition("=") if w.startswith("--") else ("", "", "")
         text = bool(eq and name) and any(x.startswith(name) for x in TEXT_OPTIONS)     # --grep=stash: a pattern, not a revision
         if STASH_REV.search(value if eq else w) and not text:
-            return no
+            return deny("git stash", f"git {sub} reading the owner's stash (refs/stash is shared by every worktree)", "git", how=how)
         if sub not in ("log", "show", "rev-parse", "diff", "commit"):     # (restore/checkout: sources are HEAD or origin/<integration>)
             continue
         if re.search(r"(?:^|\.\.|\^):/", w):
-            return no
+            return walk("a :/ search")
         if sub == "commit":
             continue
         if name and (any(x.startswith(name) for x in EVERY_REF) or any(x.startswith(name) for x in REF_PATTERNS)):
-            return no
+            return walk(f"--{name}")
         if re.match(r"-[a-zA-Z]", w):                   # -g alone or in a cluster of flags; never inside a value (-Sdebug, -Gregister)
             for ch in w[1:]:
                 if ch == "g":
-                    return no
+                    return walk("-g")
                 if ch in VALUE_LETTERS or not ch.isalpha():
                     break
     return None
@@ -1404,10 +1416,10 @@ def git_paths_writable(paths, ctx, gcwd, sub):
         return deny("not on the list", f"git {sub} without a file", "git", how="name each file")
     for p in paths:
         if re.search(r"[*?\[]", p) or p.startswith(":"):
-            return deny("unsure", f"git {sub} with a pathspec pattern (*, ?, [ or :magic)", "git", how="name each file")
+            return deny("pathspec", f"git {sub} with a pathspec pattern (*, ?, [ or :magic)", "git", how="name each file")
         target = ctx.path(p, gcwd)
         if p in (".", "..") or p.endswith(("/", "\\")) or os.path.isdir(target):
-            return deny("unsure", f"git {sub} of a folder (it would take every file in it)", "git", how="name each file")
+            return deny("pathspec", f"git {sub} of a folder (it would take every file in it)", "git", how="name each file")
         if secret_name(p, target, strict=False):
             return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
         if not ctx.writable(target) or protected(target, ctx):
@@ -1424,7 +1436,7 @@ def own_source(rev, ctx):
 def git_sub(sub, words, ctx, gcwd, part):
     no = deny("not on the list", f"git {sub} {' '.join(words[:1])[:30]}".strip() + " is not on the guard's list", "git")
     if part.stdin and sub != "commit":
-        return deny("unsure", "a here-document other than git commit -F -", "git")
+        return deny("here-document", "a here-document other than git commit -F -", "git")
     if sub == "diff":
         if any(w.startswith("--no-i") for w in words):
             return deny("git option", "git diff --no-index reads files outside the repository", "git")
@@ -1465,7 +1477,7 @@ def git_sub(sub, words, ctx, gcwd, part):
             return deny("no-verify", "git commit -n skips the commit-msg hook", "git")
         if part.stdin and not any(words[k:k + 2] == ["-F", "-"] or w in ("--file=-",) or words[k:k + 2] == ["--file", "-"]
                                   for k, w in enumerate(words)):
-            return deny("unsure", "a here-document without git commit -F -", "git")
+            return deny("here-document", "a here-document without git commit -F -", "git")
         return None
     if sub == "restore":
         paths, k, ended = [], 0, False
@@ -1663,14 +1675,14 @@ def gh_command(args, ctx, cwd):
     names = [f[0] for f in flags]
     for once in ("repo", "base", "head"):
         if names.count(once) > 1:
-            return deny("unsure", f"gh with --{once} twice", "gh")
+            return deny("gh option", f"gh with --{once} twice", "gh")
     values = {f[0]: f[1] for f in flags}
     if "repo" in values and values["repo"].lower() != ctx.repo.lower():
         return deny("another repository", f"gh on a repository other than {ctx.repo}", "gh")
     text_at = {f[2] for f in flags if f[0] in ("title", "body") and f[2] is not None}
     heredocs = {k for k, w in enumerate(rest) if w.heredoc}
     if heredocs and (key not in GH_HEREDOC or not heredocs <= text_at):
-        return deny("unsure", "a $(cat <<'EOF' ...) other than the --body or --title of gh issue comment, pr create, pr comment", "gh")
+        return deny("here-document", "a $(cat <<'EOF' ...) other than the --body or --title of gh issue comment, pr create, pr comment", "gh")
     own = re.compile(r"https://github\.com/" + re.escape(ctx.repo) + r"(/|$)", re.I)
     for name, value, _ in flags + [(None, p, None) for p, _ in positional]:
         if value is None or name in ("title", "body", "jq", "template", "json"):
@@ -1712,7 +1724,7 @@ def rm_command(args, ctx, cwd):
         else:
             paths.append(w)
     if not paths:
-        return deny("unsure", "rm without a path", "rm")
+        return deny("not on the list", "rm without a path", "rm")
     for w in paths:
         p = ctx.path(w, cwd)
         if secret_name(w, p, strict=False):
@@ -1732,7 +1744,9 @@ def bash(text, ctx):
     try:
         parts = split_bash(text)
     except Unsure as e:
-        return deny("unsure", f"the guard does not read {e} in a shell command", how="write the command plainly: simple commands, "
+        why = (f"the guard does not read {e} in a shell command" if e.code == "unsure"     # cannot read it at all
+               else f"{e} in a shell command (the guard reads it, but it is not on the guard's list)")      # redirect, here-document
+        return deny(e.code, why, how="write the command plainly: simple commands, "
                     "quoted text, no $, backticks, redirections (but 2>&1 and >/dev/null) or subshells")
     if not parts:
         return deny("unreadable command", "an empty command")

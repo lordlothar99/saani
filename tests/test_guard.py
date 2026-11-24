@@ -171,8 +171,8 @@ DENIED = [
     ("saani auto away", "saani command"), ("saani auto away --id r2 --folder {run}", "saani command"),   # #50: never from inside a run
     ("saani test --worktree {main} -- python -m pytest -q", "cd outside the worktrees"),
     ("saani test --worktree {wt} -- python -m pytest -q", "cd outside the worktrees"),
-    ("saani test --worktree {wt}/* -- python -m pytest -q", "unsure"),
-    ("saani test --worktree={wt}/* -- python -m pytest -q", "unsure"),
+    ("saani test --worktree {wt}/* -- python -m pytest -q", "glob"),
+    ("saani test --worktree={wt}/* -- python -m pytest -q", "glob"),
     ("saani test --worktree {work}/src -- python -m pytest -q ../../../evil/tests", "cd outside the worktrees"),   # deeper than the top
     ("cd {work}/src && saani test -- python -m pytest -q ../../evil/tests", "test option"),   # checked from the worktree's top, where it runs
     ("saani test --worktree={home} -- python -m pytest -q", "cd outside the worktrees"),
@@ -192,43 +192,43 @@ DENIED = [
     ("git stash push -a", "git stash"), ("git stash push --all", "git stash"), ("git stash push -p", "git stash"),
     ("git stash push --only-untracked", "git stash"), ("git stash show", "git stash"), ("git stash show -p 'stash@{{0}}'", "git stash"),
     ("git stash apply", "git stash"), ("git stash push src/app.py", "git stash"),
-    ("git diff HEAD refs/stash^3", "git stash"), ("git log --all -p", "git stash"), ("git log --al -p", "git stash"),
+    ("git diff HEAD refs/stash^3", "git stash"), ("git log --all -p", "every ref"), ("git log --al -p", "every ref"),
     ("git diff 'stash@{{0}}'", "git stash"), ("git diff HEAD..stash", "git stash"), ("git log HEAD...STASH", "git stash"),
     ("git log ^stash HEAD", "git stash"), ("git show 'refs\\stash'", "git stash"), ("git rev-parse stash", "git stash"),
-    ("git rev-parse --all", "git stash"), ("git log -g", "git stash"), ("git log --walk-reflogs", "git stash"),
-    ("git log --reflog", "git stash"), ("git log --glob='refs/st*'", "git stash"), ("git log --branches='x*'", "git stash"),
-    ("git log --tags='v*'", "git stash"), ("git log --remotes='*'", "git stash"), ("git log --stdin", "git stash"),
-    ("git show ':/WIP on'", "git stash"), ("git log HEAD..:/fix", "git stash"), ("git diff 'stash^{{tree}}'", "git stash"),
+    ("git rev-parse --all", "every ref"), ("git log -g", "every ref"), ("git log --walk-reflogs", "every ref"),
+    ("git log --reflog", "every ref"), ("git log --glob='refs/st*'", "every ref"), ("git log --branches='x*'", "every ref"),
+    ("git log --tags='v*'", "every ref"), ("git log --remotes='*'", "every ref"), ("git log --stdin", "every ref"),
+    ("git show ':/WIP on'", "every ref"), ("git log HEAD..:/fix", "every ref"), ("git diff 'stash^{{tree}}'", "git stash"),
     ("git restore --source=stash src/app.py", "git stash"), ("git checkout stash -- src/app.py", "git stash"),
     ("git commit -C stash", "git stash"),
-    ("git ls-files --with-tree=':/untracked files on' --format=x", "revision"), ("git ls-files --with-tree ':/x'", "revision"),
+    ("git ls-files --with-tree=':/untracked files on' --format=x", "every ref"), ("git ls-files --with-tree ':/x'", "every ref"),
     ("git ls-files --with-tree=HEAD", "revision"), ("git ls-files --with HEAD", "revision"),
-    ("git log --ancestry-path=:/x", "revision"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
+    ("git log --ancestry-path=:/x", "every ref"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
     ("git show 0123456789abcdef0123456789abcdef01234567", "revision"), ("git diff abc1234 HEAD", "revision"),
-    ("git log --oneline --branches", "git stash"), ("git log --remotes", "git stash"), ("git log --tags", "git stash"),
-    ("git rev-parse --branches", "git stash"), ("git diff --tags", "git stash"), ("git show --remotes", "git stash"),
+    ("git log --oneline --branches", "every ref"), ("git log --remotes", "every ref"), ("git log --tags", "every ref"),
+    ("git rev-parse --branches", "every ref"), ("git diff --tags", "every ref"), ("git show --remotes", "every ref"),
     ("git rev-parse -n -- main", "revision"), ("git rev-parse --prefix -- main", "revision"),
     ("git rev-parse --default -- main", "revision"), ("git rev-parse --default main", "revision"),
     ("git rev-parse --default=abc1234", "revision"), ("git rev-parse HEAD -- main", "revision"),
     ("git rev-parse --author abc1234", "revision"), ("git rev-parse --author 'HEAD@{{1}}'", "revision"),
     ("git rev-parse -S abc1234", "revision"), ("git rev-parse --since main", "revision"),
-    ("git rev-parse --disambiguate=abcd", "git stash"), ("git log -pg", "git stash"), ("git log -gp", "git stash"),
+    ("git rev-parse --disambiguate=abcd", "every ref"), ("git log -pg", "every ref"), ("git log -gp", "every ref"),
     ("git log --ancestry-path=stash HEAD", "git stash"), ("git rev-parse abc1234", "revision"), ("git log FETCH_HEAD", "revision"),
     ("git show v1.0", "revision"), ("git diff 'HEAD@{{1}}'", "revision"), ("git log origin/other..HEAD", "revision"),
     ("git show ORIG_HEAD:src/app.py", "revision"), ("git branch --contains abc1234", "revision"),
     ("git commit --fixup=abc1234", "revision"), ("git commit -C abc1234", "revision"), ("git commit -qCabc1234", "revision"),
-    ("git commit -C origin/main", "revision"), ("git log --oneline -n 5 abc1234", "revision"), ("git ls-files ':/y'", "revision"), ("git status ':/y'", "revision"),
+    ("git commit -C origin/main", "revision"), ("git log --oneline -n 5 abc1234", "revision"), ("git ls-files ':/y'", "every ref"), ("git status ':/y'", "every ref"),
     ("git -C {work} stash pop", "git stash"), ("git stash pop", "git stash"), ("git stash pop -q", "git stash"),      # the owner's stash
     ("git stash", "git stash"), ("git stash push -q -m 'wip'", "git stash"), ("git stash push", "git stash"),        # on top of the owner's
     ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
     ("git show refs/stash", "git stash"), ("git log -p stash", "git stash"), ("git show 'stash@{{0}}^3:notes.txt'", "git stash"),
     ("git show HEAD:../x", "secret"), ("git show HEAD:/etc/passwd", "secret"), ("git show HEAD:config/credentials.yml", "secret"),
-    ("git restore .", "unsure"), ("git restore ..", "unsure"), ("git restore src", "unsure"), ("git restore src/", "unsure"),
-    ("git checkout -- .", "unsure"), ("git checkout origin/dev -- src", "unsure"),
+    ("git restore .", "pathspec"), ("git restore ..", "pathspec"), ("git restore src", "pathspec"), ("git restore src/", "pathspec"),
+    ("git checkout -- .", "pathspec"), ("git checkout origin/dev -- src", "pathspec"),
     ("git restore .gitignore", "write outside the worktrees"), ("git restore CLAUDE.md", "write outside the worktrees"),
     ("git add -A", "not on the list"), ("git add --all", "not on the list"), ("git add -u", "not on the list"),
-    ("git add --update", "not on the list"), ("git add -p src/app.py", "not on the list"), ("git add .", "unsure"),
-    ("git add src", "unsure"), ("git add src/", "unsure"), ("git add '*.py'", "unsure"), ("git add src/*.py", "unsure"),
+    ("git add --update", "not on the list"), ("git add -p src/app.py", "not on the list"), ("git add .", "pathspec"),
+    ("git add src", "pathspec"), ("git add src/", "pathspec"), ("git add '*.py'", "pathspec"), ("git add src/*.py", "glob"),
     ("git add", "not on the list"), ("git add CLAUDE.md", "write outside the worktrees"),
     ("git add .github/workflows/ci.yml", "write outside the worktrees"), ("git add {main}/a.txt", "write outside the worktrees"),
     ("diff src a.txt", "recursive read"), ("diff a.txt {work}", "recursive read"),
@@ -237,7 +237,7 @@ DENIED = [
     ("rm -rf {home}/projects", "rm outside the worktrees"), ("rm -rf {main}/src", "rm outside the worktrees"),
     ("rm -rf {work}", "rm a worktree"), ("rm -rf {wt}", "rm a worktree"), ("rm -rf {run}", "rm a worktree"),
     ("rm -rf {work}/saani", "guard file"), ("rm -rf {work}/.git", "guard file"), ("rm -rf /", ROOT_CODE("rm outside the worktrees")),
-    ("rm -rf {temp}", "guard file"), ("rm -f src/*.tmp", "unsure"), ("rm -rf *", "unsure"),
+    ("rm -rf {temp}", "guard file"), ("rm -f src/*.tmp", "glob"), ("rm -rf *", "glob"), ("rm -rf", "not on the list"),
     ("sudo ls", "sudo"), ("chmod +x x", "not on the list"), ("bash -c ls", "not on the list"), ("node x.js", "not on the list"),
     ("python -c 'print(1)'", "python"), ("python x.py", "python"), ("python saani.py status", "python"),
     ("python -I saani.py status", "python"), ("python -I {work}/saani.py status", "python"), ("./bin/saani status", "not on the list"),
@@ -262,21 +262,21 @@ DENIED = [
     ("cd {run}\nls", "cd outside the worktrees"), ("cd {work}/nope && ls", "cd outside the worktrees"),
     ("ls || cd {run} && ls", "cd outside the worktrees"), ("ls | cd {run} && ls", "cd outside the worktrees"),
     ("grep --rec x .", "recursive read"), ("grep --directories=recurse x .", "recursive read"), ("grep -d recurse x .", "recursive read"),
-    ("grep -nr x .", "recursive read"), ("grep --include=*.py x a", "unsure"), ("grep '--include=*.py' x a", "grep option"), ("[ -d src ]", "unsure"), ("grep -P x a", "grep option"),
+    ("grep -nr x .", "recursive read"), ("grep --include=*.py x a", "glob"), ("grep '--include=*.py' x a", "grep option"), ("[ -d src ]", "glob"), ("grep -P x a", "grep option"),
     ("grep -A x y z", "grep option"), ("grep -f .env a.txt", "grep option"), ("grep --file=x a.txt", "grep option"),
     ("grep --color=always x a", "grep option"), ("diff --recursive a b", "recursive read"), ("diff --rec a b", "recursive read"),
     ("diff -N a b", "diff option"), ("diff --to-file=x a", "diff option"),
     ("git diff --no-index a b", "git option"), ("git diff --no-i a b", "git option"), ("git diff -- {main}/x", "read outside the worktrees"),
     ("git diff HEAD {home}", "read outside the worktrees"),
-    ("git restore '*.py'", "unsure"), ("git restore src/*.py", "unsure"), ("git restore ':/x'", "unsure"),
-    ("git restore --source HEAD~1 {main}/a.txt", "write outside the worktrees"), ("git restore -s HEAD '*.py'", "unsure"),
+    ("git restore '*.py'", "pathspec"), ("git restore src/*.py", "glob"), ("git restore ':/x'", "pathspec"),
+    ("git restore --source HEAD~1 {main}/a.txt", "write outside the worktrees"), ("git restore -s HEAD '*.py'", "pathspec"),
     ("git restore -p x", "not on the list"), ("git restore --source=HEAD", "not on the list"),
     ("git restore --source=abc123 src/app.py", "not on the list"), ("git restore -s abc123 src/app.py", "not on the list"),
     ("git restore --source FETCH_HEAD src/app.py", "not on the list"), ("git restore --source=origin/main src/app.py", "not on the list"),
     ("git restore -s src/app.py", "not on the list"), ("git checkout abc123 -- src/app.py", "not on the list"),
     ("git checkout FETCH_HEAD -- src/app.py", "not on the list"), ("git checkout origin/main -- src/app.py", "not on the list"),
     ("git checkout feat/12-cart-total src/app.py", "not a worker branch"), ("git switch feat/12-cart-total origin/dev", "not a worker branch"),
-    ("git checkout -- '*.py'", "unsure"), ("git checkout origin/dev -- 'src/[a]pp.py'", "unsure"),
+    ("git checkout -- '*.py'", "pathspec"), ("git checkout origin/dev -- 'src/[a]pp.py'", "pathspec"),
     ("gh issue view https://github.com/other/repo/issues/1", "another repository"),
     ("gh pr view https://evil.example/acme/webshop/pull/1", "another repository"), ("gh issue view other/repo#1", "another repository"),
     ("gh issue view https://github.com/acme/webshop.evil/issues/1", "another repository"),
@@ -292,7 +292,7 @@ DENIED = [
     ("saani test -- python -m pytest -q -p evil", "test option"),
     ("cd {main}", "cd outside the worktrees"), ("cd {home}", "cd outside the worktrees"), ("cd", "cd outside the worktrees"),
     ("cd {wt}", "cd outside the worktrees"), ("cd -", "cd outside the worktrees"), ("cd -P {work}", "cd outside the worktrees"),
-    ("cd src*", "unsure"),
+    ("cd src*", "glob"),
     ("cd .. && ls", "cd outside the worktrees"), ("git -C {main} status", "cd outside the worktrees"),
     ("git -C {wt} status", "cd outside the worktrees"),
     ("cd {work}/src && git -C {work} -C ../../webshop stash", "cd outside the worktrees"),        # -C after -C: from the first
@@ -325,8 +325,8 @@ DENIED = [
     ("git restore {main}/a.txt", "write outside the worktrees"), ("git restore .claude/settings.json", "write outside the worktrees"),
     ("git", "not on the list"),
     ("gh pr create --base dev --head feat/12-x", "gh pr create"), ("gh pr create --base main", "gh pr create"),
-    ("gh pr create --head dev", "gh pr create"), ("gh pr create -Bmain -Hdev -Bdev", "unsure"),
-    ("gh pr create --base main --head dev --head feat/1-x", "unsure"), ("gh pr create -Bdev -Hdev", "gh pr create"),
+    ("gh pr create --head dev", "gh pr create"), ("gh pr create -Bmain -Hdev -Bdev", "gh option"),
+    ("gh pr create --base main --head dev --head feat/1-x", "gh option"), ("gh pr create -Bdev -Hdev", "gh pr create"),
     ("gh pr edit 3 --base dev", "gh pr edit"), ("gh pr edit 3 -Bdev", "gh pr edit"),
     ("gh issue edit 12 --title x", "gh option"), ("gh issue edit 12 --milestone v2", "gh option"), ("gh issue edit 12 13x", "gh issue edit"),
     ("gh issue close 12", "not on the list"), ("gh pr close 3", "not on the list"), ("gh workflow run ci.yml", "not on the list"),
@@ -337,26 +337,29 @@ DENIED = [
     ("gh api --hostname evil.example x", "gh option"), ("gh api -H 'X-HTTP-Method-Override: DELETE' x", "gh option"), ("gh api repos/acme/webshop/actions/secrets", "secret"),
     ("gh api repos/acme/webshop/contents/config/credentials.yml", "secret"), ("gh api a b", "gh api write"),
     ("gh issue view 1 -R other/repo", "another repository"), ("gh issue view 1 -Rother/repo", "another repository"),
-    ("gh issue view 1 --repo=other/repo", "another repository"), ("gh issue view 1 -R acme/webshop -R other/repo", "unsure"),
+    ("gh issue view 1 --repo=other/repo", "another repository"), ("gh issue view 1 -R acme/webshop -R other/repo", "gh option"),
     ("gh issue comment 1 --delete-last", "gh option"), ("gh issue comment 1 --body-file .env", "secret"),
     ("gh issue comment 1 -F.env", "secret"),
-    ("gh issue create --body \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"), ("gh pr view \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
+    ("gh issue create --body \"$(cat <<'EOF'\nx\nEOF\n)\"", "here-document"),
+    ("gh pr view \"$(cat <<'EOF'\nx\nEOF\n)\"", "here-document"),
     ("find . -delete", "find writes"), ("find . -name x -execdir ls \\;", "find writes"),
     ("sort -o {main}/x names.txt", "sort option"), ("sort --compress-program=sh names.txt", "sort option"),
     ("sort -T /tmp names.txt", "sort option"), ("grep -r total .", "recursive read"),
     ("grep -rn total src", "recursive read"), ("diff -r a b", "recursive read"),
-    ("echo x > {main}/notes.txt", "unsure"), ("echo x > {work}/notes.txt", "unsure"), ("echo x >> notes.txt", "unsure"),
-    ("ls >| x", "unsure"), ("cat < src/app.py", "unsure"), ("ls 1>&2", "unsure"), ("ls &> x", "unsure"), ("ls |& cat", "unsure"),
-    ("cat <(ls)", "unsure"), ("diff <(ls) >(cat)", "unsure"), ("ls>/dev/null", "unsure"),
+    ("echo x > {main}/notes.txt", "redirect"), ("echo x > {work}/notes.txt", "redirect"), ("echo x >> notes.txt", "redirect"),
+    ("ls >| x", "redirect"), ("cat < src/app.py", "redirect"), ("ls 1>&2", "redirect"), ("ls &> x", "redirect"), ("ls |& cat", "redirect"),
+    ("cat <(ls)", "redirect"), ("diff <(ls) >(cat)", "redirect"), ("ls>/dev/null", "redirect"),
     ("ls $(pwd)", "unsure"), ("ls `pwd`", "unsure"), ("cat $HOME/x", "unsure"), ('echo "$HOME"', "unsure"), ("cat ${{X}}", "unsure"),
     ("echo $'\\x41'", "unsure"), ('echo $"x"', "unsure"), ("echo $[1+1]", "unsure"), ("echo a$", "unsure"), ('echo "a $ b"', "unsure"),
-    ("(cd /; ls)", "unsure"), ("{{ ls; }}", "unsure"), ("cat <<EOF\nx\nEOF", "unsure"), ("cat <<< x", "unsure"), ("echo 'open", "unsure"),
-    ("X=1 ls", "unsure"), ("X=1", "unsure"), ("ls ~root", "unsure"), ("ls\r", "unsure"), ("ls\x00", "unsure"), ("ls;; ls", "unsure"),
+    ("(cd /; ls)", "unsure"), ("{{ ls; }}", "unsure"), ("cat <<EOF\nx\nEOF", "redirect"), ("cat <<< x", "redirect"), ("echo 'open", "unsure"),
+    ("X=1 ls", "environment assignment"), ("X=1", "environment assignment"), ("ls ~root", "unsure"), ("ls\r", "unsure"),
+    ("ls\x00", "unsure"), ("ls;; ls", "unsure"),
     ("git commit -m \"$(cat <<'EOF'\nx\nEOF\nrm -rf /\nEOF\n)\"", "unsure"),
     ("git commit -m \"$(cat <<EOF\nx\nEOF\n)\"", "unsure"), ("git commit -m x\"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
-    ("git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\"x", "unsure"), ("echo \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
-    ("git log \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"), ("git stash push -m \"$(cat <<'EOF'\nx\nEOF\n)\"", "unsure"),
-    ("cat - <<'EOF'\nx\nEOF", "unsure"), ("git commit <<'EOF'\nx\nEOF", "unsure"), ("git status <<'EOF'\nx\nEOF", "unsure"),
+    ("git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\"x", "unsure"), ("echo \"$(cat <<'EOF'\nx\nEOF\n)\"", "here-document"),
+    ("git log \"$(cat <<'EOF'\nx\nEOF\n)\"", "here-document"), ("git stash push -m \"$(cat <<'EOF'\nx\nEOF\n)\"", "here-document"),
+    ("cat - <<'EOF'\nx\nEOF", "here-document"), ("git commit <<'EOF'\nx\nEOF", "here-document"),
+    ("git status <<'EOF'\nx\nEOF", "here-document"),
     ("git commit -F - <<'EOF'\nx\nEOF\nrm -rf /", ROOT_CODE("rm outside the worktrees")),
     ("echo '$(cat <<'EOF'\n'; rm -rf / ; '\nEOF\n)'", ROOT_CODE("rm outside the worktrees")),    # read as bash reads it: the rm is a command
 ]
@@ -391,11 +394,49 @@ def test_every_unquoted_glob_is_refused_in_any_position(ctx):
                     "git log -p main -?", "find . -maxdepth 0 -?xec sh x \\;", "find . -name zz -o -?elete", "git add src/*.py",
                     "find src/*", "wc -l ?n.md", "cat nothing-matches-*", "c?t notes.md", "echo [ab]", "ls src/[a]pp.py"):
         decision, reason, code, _ = sh(ctx, command)
-        assert (decision, code) == ("deny", "unsure"), (command, reason)
+        assert (decision, code) == ("deny", "glob"), (command, reason)
         assert "an unquoted glob" in reason and "git diff -- 'src/*.py'" in reason, command
     for command in ("git diff -- 'src/*.py'", "git log -- 'src/*.py'", "find . -name '*.md'", "grep -n 'a*b' notes.md",
                     "git commit -m 'fix [WIP]?'"):
         assert sh(ctx, command)[0] == "allow", command
+
+
+@pytest.mark.parametrize("command,code,said", [
+    ("ls *", "glob", "an unquoted glob"),
+    ("echo x > notes.txt", "redirect", "a redirection other than 2>&1"),
+    ("ls |& cat", "redirect", "|& in a shell command (the guard reads it, but it is not on the guard's list)"),
+    ("cat <<EOF\nx\nEOF", "redirect", "a redirection other than 2>&1"), ("cat <<< x", "redirect", "a redirection other than 2>&1"),
+    ("git log --ancestry-path=:/x", "every ref", "with :/ (a search over every ref"),
+    ("git ls-files --with-tree ':/x'", "every ref", "with :/ (a search over every ref"),
+    ("git status ':/y'", "every ref", "with :/ (a search over every ref"),
+    ("git log abc1234", "revision", "(only HEAD"),
+    ("git log --all", "every ref", "--all (it walks every ref"),
+    ("git log -g", "every ref", "-g (it walks every ref"),
+    ("git show ':/fix'", "every ref", "a :/ search"),
+    ("git show stash", "git stash", "the owner's stash"),
+    ("cat //host/share/x.txt", "network path", "a network path"),
+    ("cat /dev/clipboard", "posix path", "/dev"),
+    ("cat .env", "secret", "a secret file"),
+    ("cat - <<'EOF'\nx\nEOF", "here-document", "a here-document"),
+    ("X=1 ls", "environment assignment", "an environment assignment"),
+    ("git add src", "pathspec", "of a folder"),
+    ("ls C:x", "drive-relative path", "a drive-relative path"),
+    ("ls $(pwd)", "unsure", "the guard does not read $"),
+    ("echo 'open", "unsure", "an unclosed quote"),
+])
+def test_the_logged_reason_is_as_precise_as_the_message(ctx, command, code, said):
+    """The short reason of the refusal log (saani auto status, the report's refusals by reason) names what the message names; `unsure`
+    is left for what the guard cannot read at all."""
+    decision, reason, got, _ = sh(ctx, command)
+    assert (decision, got) == ("deny", code), (command, reason)
+    assert said in reason, (command, reason)
+
+
+def test_several_reasons_the_logged_one_is_the_one_the_message_names(ctx):
+    decision, reason, code, _ = sh(ctx, "git -C {main} log --all")
+    assert (decision, code) == ("deny", "cd outside the worktrees") and "git -C outside" in reason, reason
+    decision, reason, code, _ = sh(ctx, "git -C {work} log --all")
+    assert (decision, code) == ("deny", "every ref") and "--all" in reason, reason
 
 
 def test_a_compound_command_is_refused_when_any_part_is(ctx):
@@ -542,7 +583,7 @@ def test_an_unquoted_glob_is_refused_before_any_other_rule(ctx, command):
     for name in ("server.key", "notes.txt", ".env"):
         (work / name).write_text("x")
     decision, reason, code, _ = sh(ctx, command)
-    assert (decision, code) == ("deny", "unsure") and "an unquoted glob" in reason, (command, reason)
+    assert (decision, code) == ("deny", "glob") and "an unquoted glob" in reason, (command, reason)
 
 
 def test_a_device_is_refused_but_dev_null(ctx):
@@ -552,8 +593,8 @@ def test_a_device_is_refused_but_dev_null(ctx):
                     "gh issue comment 1 --body-file /dev/clipboard", "git commit -F /dev/clipboard", "cat /DEV/Clipboard"):
         assert sh(ctx, command)[2] == "posix path", command
     assert tool(ctx, "Read", file_path="/dev/clipboard")[2] == "posix path"
-    assert sh(ctx, "ls > /dev/clipboard")[2] == "unsure"                                 # a redirect: only to /dev/null
-    assert sh(ctx, "cat < /dev/clipboard")[2] == "unsure"
+    assert sh(ctx, "ls > /dev/clipboard")[2] == "redirect"                               # a redirect: only to /dev/null
+    assert sh(ctx, "cat < /dev/clipboard")[2] == "redirect"
     assert sh(ctx, "diff a.txt /dev/null")[0] == "allow"
     assert sh(ctx, "ls > /dev/null 2>&1")[0] == "allow"
 
@@ -580,8 +621,8 @@ def test_git_bash_paths_go_through_one_allowlist(ctx):
 
 def test_a_bare_drive_letter_is_its_current_folder_so_refused(ctx):
     for path in ("C:", "d:", "C:x.txt"):
-        assert tool(ctx, "Read", file_path=path)[2] == "unsure", path
-        assert sh(ctx, f"ls {path}")[2] == "unsure", path
+        assert tool(ctx, "Read", file_path=path)[2] == "drive-relative path", path
+        assert sh(ctx, f"ls {path}")[2] == "drive-relative path", path
     assert tool(ctx, "Read", file_path="C:/")[0] == "allow"
 
 
