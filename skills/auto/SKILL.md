@@ -1,12 +1,13 @@
 ---
 name: auto
-description: Run a Saani auto run (Claude Code works for hours on the open GitHub issues of the project), interactive in this session or away in a headless session it starts itself. Use when the owner types /saani:auto, /saani:auto here, /saani:auto away, /saani:auto away 12 15 (only those issues), or /saani:auto off.
+description: Run a Saani auto run (Claude Code works for hours on the open GitHub issues of the project), interactive in this session or away in a headless session it starts itself. Use when the owner types /saani:auto, /saani:auto here, /saani:auto away, /saani:auto away 12 15 (only those issues), /saani:auto away --keep-on (the run stays on when done), or /saani:auto off.
 ---
 
 # /saani:auto: a Saani auto run
 
-**Arguments:** `$ARGUMENTS`. A sub-mode first, then issue numbers (with or without `#`, separated by spaces or commas: only those
-issues; none: a full run):
+**Arguments:** `$ARGUMENTS`. A sub-mode first, then `--keep-on` if the owner typed it, then issue numbers (with or without `#`,
+separated by spaces or commas: only those issues; none: a full run). The run is switched off by itself when it is done; `--keep-on`
+leaves it on (`/saani:auto away --keep-on 12 15`, `/saani:auto here --keep-on`).
 - `here`: the **interactive** sub-mode, in this session.
 - `away`: the **away** sub-mode, a headless session this skill starts itself.
 - neither: ask the owner "here or away?" first (AskUserQuestion, one question, recommending `away` when they are about to leave), never
@@ -33,10 +34,13 @@ the owner answers the prompts. Then "The run" in this session; ask whenever an a
 recommendation.
 
 **Away:** "Before the run" steps 0 to 3 here, then start the headless session, alone, from the project's main folder:
-`saani auto away --id <id> --folder <run folder> [--only <issue numbers>] [--deploy]` (`--deploy` only if the owner said, in their own
-words, that the run may deploy). It prints the id, the log (`build/saani-auto-<id>.log`), how to follow the run and how to end it: give
-the owner those lines, and stop. This session stays in present mode. If it exits 2 (no `claude` on the PATH, or the session could not
-start), give the owner the command it printed, to start by hand from a terminal in the project's main folder. Why headless: an
+`saani auto away --id <id> --folder <run folder> [--only <issue numbers>] [--deploy] [--keep-on]` (`--deploy` only if the owner said, in
+their own words, that the run may deploy; `--keep-on` only if the owner typed it). It starts a small watcher, detached, which runs the
+headless session and, when the session ends (done, stopped or failed), switches the run off by itself and logs it, unless `--keep-on`.
+It prints the id, the log (`build/saani-auto-<id>.log`), how to follow the run and how it ends: give the owner those lines, and stop.
+This session stays in present mode. If it exits 2 (no `claude` on the PATH, or the session could not start), give the owner the command
+it printed, to start by hand from a terminal in the project's main folder, and say that a run started by hand has no watcher: they end
+it with `/saani:auto off` when the session is over. Why headless: an
 interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after repeated classifier blocks,
 a background subagent's prompt waits); `--permission-prompts none` turns every prompt into a refusal Claude reads.
 
@@ -106,12 +110,12 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    It holds the start, end, duration, why the run stopped (a limit, or "finished the list"), the id and the folder's name, the issues landed, the issues left with a question or blocked, the
    refusals by reason, the cost, the timeline and the next step. Add to the chat (headless: your last message, which the owner's
    terminal prints) what only you know: a table of what is pending (issue |
-   question with context | options with pros and cons), and which issues waited for overlapping files (best effort: only the paths an issue names between backticks are compared, so an issue that names none never waits). Then stop: the run is over. A `here` run: end it yourself with `saani auto off --run <id>` (this session is not guarded). An away run's headless session: the guard still confines it and refuses `saani auto off`, so tell the owner to send `/saani:auto off` in their own session, or to run `python -I <project>/saani.py auto off --run <id>` from a terminal in the project's folder (it also lapses after 12 hours). The report ends
+   question with context | options with pros and cons), and which issues waited for overlapping files (best effort: only the paths an issue names between backticks are compared, so an issue that names none never waits). Then stop: the run is over. A `here` run: end it yourself with `saani auto off --run <id>` after the report (this session is not guarded), unless the owner said `--keep-on`. An away run's headless session: the guard confines it and refuses `saani auto off`, and the watcher switches the run off when this session ends (unless `--keep-on`: then the owner sends `/saani:auto off` in their own session, or runs `python -I <project>/saani.py auto off --run <id>` from a terminal in the project's folder; the run also lapses after 12 hours). The report ends
    with `/saani:merge <N>` (or `/saani:merge <N> --deploy`) for the owner, saying that it merges the pull request, relabels the issues and removes this run's folder and
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 
 ## off
-`/saani:auto off`: stop now. Say what is left and run `saani auto report` (with `--pr <N> --post` when there is a pull request; skip it if the report is already posted). Then end the run: `saani auto status` gives its id; in a session the guard does not confine (the owner's own session: a `here` run, or the session that started an away run), run `saani auto off --run <id>` yourself and show its last line. Only inside the run's guarded session (the headless session of an away run), where the guard refuses it so a run never switches itself off, tell the owner to send `/saani:auto off` in their own session, or to run `python -I <project>/saani.py auto off --run <id>` from a terminal in the project's folder (`saani` alone is often not on a plain terminal's PATH).
+`/saani:auto off`: stop now (also the end of a run kept on with `--keep-on`, or started by hand). Say what is left and run `saani auto report` (with `--pr <N> --post` when there is a pull request; skip it if the report is already posted). Then end the run: `saani auto status` gives its id; in a session the guard does not confine (the owner's own session: a `here` run, or the session that started an away run), run `saani auto off --run <id>` yourself and show its last line. Only inside the run's guarded session (the headless session of an away run), where the guard refuses it so a run never switches itself off, tell the owner to send `/saani:auto off` in their own session, or to run `python -I <project>/saani.py auto off --run <id>` from a terminal in the project's folder (`saani` alone is often not on a plain terminal's PATH).
 
 ## Running saani
 Run `saani` with the Bash tool: the plugin's `bin/` puts it on that shell's PATH. If it is not found, run

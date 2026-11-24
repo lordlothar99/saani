@@ -871,32 +871,97 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     main = pathlib.Path(cfg().root)                       # the main folder: the project's committed relative settings resolve from it
     log = main / "build" / f"saani-auto-{run_id}.log"
     argv = away_command(run_id, folder, args.only or (), bool(args.deploy))
+    keep_on = bool(getattr(args, "keep_on", False))
     exe = (which or shutil.which)("claude")
     if exe is None:
         print("saani auto away: `claude` is not on the PATH, so the run cannot start by itself. Start it by hand, in a terminal, from "
-              f"{main}:\n  {by_hand(argv)}")
+              f"{main}:\n  {by_hand(argv)}\n{BY_HAND_END.format(id=run_id)}")
         return 2
     if not folder_trusted(main):
         print(f"saani auto away: WARNING: {main} is not marked as trusted in Claude Code's config, so the project's allow rules may be "
               "ignored by the headless session. Open Claude Code interactively in that folder once and accept the trust dialog "
               "(the run starts anyway).")
     try:
-        pid = start_detached([exe] + argv[1:], main, log, popen)
-    except OSError as e:
-        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}")
-        return 2
-    try:
-        pid_path(run_id).write_text(str(pid), encoding="utf-8")
+        pid_path(run_id).unlink(missing_ok=True)           # the watcher writes the session's id here; none of an older start stays
     except OSError:
         pass
-    print(f"saani auto: away {run_id} started (process {pid}), in a minimized window" if os.name == "nt" else
-          f"saani auto: away {run_id} started (process {pid})")
+    try:
+        pid = start_detached(watch_command(run_id, folder, args.only or (), bool(args.deploy), keep_on), main, log, popen)
+    except OSError as e:
+        print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}\n"
+              + BY_HAND_END.format(id=run_id))
+        return 2
+    print(f"saani auto: away {run_id} started (watcher process {pid}), in a minimized window" if os.name == "nt" else
+          f"saani auto: away {run_id} started (watcher process {pid})")
     print(f"  log:    {log}")
     print("  follow: saani auto status (once the run is on), the log, or /saani:ui")
-    print(f"  end:    saani auto off --run {run_id} (from a terminal)")
+    if keep_on:
+        print(f"  end:    --keep-on: the run stays on when the session ends; end it with saani auto off --run {run_id} (from a terminal)")
+    else:
+        print(f"  end:    the run is switched off by itself when the session ends (saani auto off --run {run_id} ends it earlier, from a terminal)")
+    return 0
+
+
+BY_HAND_END = ("  Started by hand there is no watcher: when the session ends, end the run yourself with `/saani:auto off` "
+               "(or `saani auto off --run {id}` from a terminal).")
+
+
+def watch_command(run_id, folder, only=(), deploy=False, keep_on=False, python=None):
+    """What `saani auto away` starts detached: this saani's `auto watch`, which runs the session and then switches the run off."""
+    saani_py = pathlib.Path(__file__).resolve().parent.parent / "saani.py"
+    return ([python or sys.executable, "-I", str(saani_py), "auto", "watch", "--id", run_id, "--folder", str(folder)]
+            + (["--deploy"] if deploy else []) + (["--keep-on"] if keep_on else []) + (["--only"] + [str(n) for n in only] if only else []))
+
+
+def watch_note(text):
+    print(f"saani auto watch {stamp(utc_now())}: {text}", flush=True)
+
+
+def cmd_watch(args, which=None, popen=subprocess.Popen):
+    """The away run's watcher (started by `saani auto away`, never typed): runs the headless session with the log as its output, writes the
+    session's process id for `away_gone`, waits for it, and then, unless --keep-on, switches the run off in-process (what the owner would
+    do from a terminal). A session that cannot start is logged and the run is switched off the same way. Exits 0 whatever the session did."""
+    import shutil
+    run_id = args.id
+    if not run_id or not valid_id(run_id) or not args.folder:
+        raise SystemExit("saani auto watch: --id (letters, digits, - and _ only) and --folder are needed; `saani auto away` starts it")
+    keep_on = bool(getattr(args, "keep_on", False))
+    argv = away_command(run_id, args.folder, args.only or (), bool(args.deploy))
+    exe = (which or shutil.which)("claude")
+    code = None
+    try:
+        if exe is None:
+            raise OSError("`claude` is not on the PATH")
+        log = build_dir() / f"saani-auto-{run_id}.log"
+        with open(log, "ab") as out:          # the session's output, appended to the log the watcher's own lines go to
+            proc = popen([exe] + argv[1:], cwd=str(cfg().root), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         env=away_env())
+            try:
+                pid_path(run_id).write_text(str(proc.pid), encoding="utf-8")
+            except OSError:
+                pass
+            watch_note(f"session started (process {proc.pid})")
+            code = proc.wait()
+        what = f"session ended with code {code}"
+    except OSError as e:
+        what = f"session could not start ({e})"
+    if keep_on:
+        watch_note(f"{what}; kept on (--keep-on)")
+        return 0
+    rec = read_record()
+    if not rec or rec.get("id") != run_id:
+        watch_note(f"{what}; no run record for {run_id}, nothing to switch off")
+        return 0
+    try:
+        cmd_off(type("Args", (), {"run_id": run_id})())
+    except SystemExit as e:
+        watch_note(f"{what}; the run could not be switched off ({e}): saani auto off --run {run_id}")
+        return 0
+    watch_note(f"{what}; run switched off")
     return 0
 
 
 def cmd_run(args):
     """`saani auto on|off|status|report|away`."""
-    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "away": cmd_away}[args.action](args)
+    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "away": cmd_away,
+            "watch": cmd_watch}[args.action](args)

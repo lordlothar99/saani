@@ -24,7 +24,8 @@ and lands it, while Saani's commands and its guard keep the work safe.
 3. **The guard.** A plugin hook that decides every tool call of the run at once, never asking: it allows the run's work and refuses
    what a run must never do (push outside `saani land`, merge, read secrets, edit outside its worktrees, run anything off its list).
 4. **The end.** One `dev` -> `main` pull request, its CI run (`saani ci`), and a report on it: what landed, what waits for you and
-   why, the refusals, the cost. `saani auto status` shows a running run; you end it with `/saani:auto off` in your session.
+   why, the refusals, the cost. `saani auto status` shows a running run. The run switches itself off when it is done (add `--keep-on`, as in
+   `/saani:auto away --keep-on`, to keep it on; `/saani:auto off` in your session ends it any time).
 5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
    when the merge changes the version, creates the GitHub release `v<version>` with notes written from the issues.
    `/saani:merge --deploy` (or `/saani:deploy` later) then deploys, if the project deploys.

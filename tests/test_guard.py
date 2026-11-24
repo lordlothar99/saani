@@ -244,6 +244,7 @@ DENIED = [
     ("saani merge", "saani command"), ("saani prune", "saani command"), ("saani deploy", "saani command"),
     ("saani projects add x", "saani command"), ("saani ci merged 3", "saani command"), ("saani ci sync", "saani command"),
     ("saani check-msg x", "saani command"), ("saani auto prune", "saani command"),
+    ("saani auto watch --id x --folder y", "saani command"), ("saani auto away --keep-on", "saani command"),
     ("cd {run} && saani auto on", "saani auto switch"), ("saani auto on", "saani auto switch"), ("saani auto off", "saani auto switch"),
     ("saani auto on --deploy", "saani auto switch"), ("saani auto off --run 2026-01-02_0300", "saani auto switch"),
     ("python -I {plugin}/saani.py auto on", "saani auto switch"),
