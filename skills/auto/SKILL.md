@@ -40,9 +40,9 @@ headless session and, when the session ends (done, stopped or failed), switches 
 It prints the id, the log (`build/saani-auto-<id>.log`), how to follow the run and how it ends: give the owner those lines, and stop.
 This session stays in present mode. If it exits 2 (no `claude` on the PATH, or the session could not start), give the owner the command
 it printed, to start by hand from a terminal in the project's main folder, and say that a run started by hand has no watcher: they end
-it with `/saani:auto off` when the session is over. Why headless: an
-interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking after repeated classifier blocks,
-a background subagent's prompt waits); `--permission-prompts none` turns every prompt into a refusal Claude reads.
+it with `/saani:auto off` when the session is over. Why headless: an interactive session can still stop on a prompt the guard never sees
+(Claude Code falls back to asking after repeated classifier blocks, a background subagent's prompt waits); `--permission-prompts none`
+turns every prompt into a refusal Claude reads. `saani auto away` refuses while a run is on: say so and ask the owner to end it first.
 
 The project's own rules (its CLAUDE.md, its saani.toml) win where they differ from this checklist.
 

@@ -218,10 +218,11 @@ the workers are covered too); nothing the model can write or the folder it is in
   main checkout, the worktrees folder and the settings from the main checkout's `saani.toml` (copied in, so nothing the run edits changes
   the rules), the run's folder, `deploy`, the start time. A session already on is never re-armed.
 - **The switch off: the owner's.** Inside an auto run `saani auto on` and `saani auto off` are refused: a run never re-arms, resets or
-  ends itself. The owner ends it from their own session (`/saani:auto off`, which runs `saani auto off --run <id>` and removes that
-  run's entries: `turn_off_run`). An entry older than 12 hours is over: renamed `<session>.over`, and every call of that session is
-  refused (`run over`), never back to present mode, until the owner's `saani auto off --run <id>` removes the mark too. A mark that cannot be read (no run id to match it by) keeps
-  its session refused; `saani auto off` removes such marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and
+  ends itself. What ends it is outside the run: the watcher of an away run once its session is gone, the skill after the report of a `here`
+  run (that session is not guarded), the owner's `/saani:auto off` or `saani auto off --run <id>` from a terminal, and always when the run
+  was started with `--keep-on` or by hand (`turn_off_run` removes the run's entries). An entry older than 12 hours is over: renamed
+  `<session>.over`, and every call of that session is refused (`run over`), never back to present mode, until `saani auto off --run <id>`
+  removes the mark too. A mark that cannot be read (no run id to match it by) keeps its session refused; `saani auto off` removes such marks too and names them. `turn_on`, `turn_off`, `turn_off_run`, `state` and
   `refusals` in `saani/guard.py` are the same switch for code.
 - **Fail closed.** An entry that cannot be read, a registry that cannot be listed, or hook input that cannot be read while an entry
   exists: refused (`guard error: <what>`). An internal error is a refusal, never a crash. If the hook cannot run at all (timeout, no
@@ -333,7 +334,9 @@ The session is run by a small detached watcher (`saani auto watch`, #67): it rec
 and `saani auto status` says when that process is gone while the run is still on (then read the log and `saani auto off --run <id>`). When
 the session ends, whatever the exit code, the watcher switches the run off by itself, so a finished run does not stay on and refuse the
 owner's next commands; `--keep-on` (`/saani:auto away --keep-on`) leaves it on. A `here` run is ended by the skill itself after the report,
-unless `--keep-on`. A run started by hand has no watcher: the owner ends it with `/saani:auto off`. With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
+unless `--keep-on`. A run started by hand has no watcher: the owner ends it with `/saani:auto off`. `saani auto away` refuses while a run
+is on (younger than 12 hours), and the watcher ends a run only if its record is newer than the watcher's own start, so a second start never
+ends the first run. With no sub-mode, `/saani:auto` asks "here or away?". Why headless: the guard decides
 every call of a run that is on, but an interactive session can still stop on a prompt the guard never sees (Claude Code falls back to asking
 after repeated blocks by its auto mode classifier; a background subagent's prompt waits for an answer). With `--permission-prompts none`
 every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's; `--permission-mode auto` lets Claude Code's
@@ -341,8 +344,8 @@ classifier decide the calls the guard cannot (a hook that timed out). Neither ca
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
 
 **The run's record and its stop rules.** `saani auto on` is the last step before the work (after the owner's questions); `saani auto off
---run <id>` the end: by itself when an away session ends (the watcher) or after a `here` report, else the owner's, from a terminal. The stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied
-into the run's record at `on`:
+--run <id>` the end: by itself when an away session ends (the watcher) or after a `here` report, else the owner's, from a terminal. The
+stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied into the run's record at `on`:
 
 | Rule | Limit | Measured by |
 |---|---|---|
@@ -352,10 +355,10 @@ into the run's record at `on`:
 
 The skill runs `saani auto status --check` before each pick and whenever a slot frees (so after each landing); exit 3 (also written to the
 journal as a `stop` line) means start no new issue, finish or park the running ones, do the end of the run (full run, the pull request if
-anything landed, `saani ci pr` rounds), write the report, and stop (the watcher ends the run; with `--keep-on`, the owner does: `saani auto off --run <id>`). Exit 3 also when
-the record is missing while the guard still holds a run for this repository ("the run record is missing"). Refusals are counted for this
-repository only: a refusal line that names its project counts for that project, and a run id the registry holds only for other projects
-counts nothing here. The guard's own entry also lapses after 12 hours, so a run that never stops is never in auto mode for ever.
+anything landed, `saani ci pr` rounds), write the report, and stop (the watcher ends an away run, the skill a `here` run; with `--keep-on`
+the owner does: `saani auto off --run <id>`). Exit 3 also when the record is missing while the guard still holds a run for this repository
+("the run record is missing"). Refusals are counted for this repository only: a refusal line that names its project counts for that
+project, and a run id the registry holds only for other projects counts nothing here. The guard's own entry also lapses after 12 hours, so a run that never stops is never in auto mode for ever.
 
 **The journal.** While a run is on, every status comment (`saani comment`, and those `start`, `ci pr` and `ci merged` post) and every
 landing adds one JSON line `{time, issue, kind}` to `build/saani-auto-<id>.jsonl`; it never fails the command it notes.

@@ -904,11 +904,24 @@ def test_the_away_options_belong_to_away_and_on_only(world):
 FAKE_CLAUDE = "import sys\nprint('session works')\nsys.exit(int(sys.argv[-1]) if sys.argv[-1].isdigit() else 0)\n"
 
 
-def fake_popen(tmp_path, code=0):
-    """A popen that runs a tiny python script (exit code `code`) in place of `claude -p ...`."""
+def fake_popen(tmp_path, code=0, during=None):
+    """A popen that runs a tiny python script (exit code `code`) in place of `claude -p ...`; `during()` first, as the session's `on`."""
     script = tmp_path / "fake_claude.py"
     script.write_text(FAKE_CLAUDE, encoding="utf-8")
-    return lambda argv, **kw: subprocess.Popen([sys.executable, str(script), str(code)], **kw)
+
+    def popen(argv, **kw):
+        if during:
+            during()
+        return subprocess.Popen([sys.executable, str(script), str(code)], **kw)
+    return popen
+
+
+def session_on(world, run="r1"):
+    """What the headless session does first: `saani auto on` (a record newer than the watcher's start, and the guard's entry)."""
+    def on():
+        record(world, started=auto.utc_now() + datetime.timedelta(seconds=1), id=run)
+        guard.turn_on("sess", run, world.root, world.wt, folder=world.run)
+    return on
 
 
 def watch_args(**kw):
@@ -916,9 +929,7 @@ def watch_args(**kw):
 
 
 def test_the_watcher_switches_the_run_off_when_the_session_ends_and_logs_it(world, tmp_path, capsys):
-    record(world)
-    guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
-    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path)) == 0
+    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=session_on(world))) == 0
     assert auto.read_record() is None and guard.state("sess") is None
     out = capsys.readouterr().out
     assert "session ended with code 0; run switched off" in out and "auto run r1 is off" in out
@@ -950,38 +961,58 @@ def test_the_watcher_runs_the_same_session_command_and_env(world, tmp_path):
 
 
 def test_keep_on_leaves_the_run_on(world, tmp_path, capsys):
-    record(world)
-    assert auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=fake_popen(tmp_path)) == 0
+    assert auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=fake_popen(tmp_path, during=session_on(world))) == 0
     assert auto.read_record()["id"] == "r1"
     assert "session ended with code 0; kept on (--keep-on)" in capsys.readouterr().out
 
 
 def test_a_failing_session_is_switched_off_too(world, tmp_path, capsys):
-    record(world)
-    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, code=3)) == 0
+    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, code=3, during=session_on(world))) == 0
     assert auto.read_record() is None
     assert "session ended with code 3; run switched off" in capsys.readouterr().out
 
 
-def test_a_session_that_cannot_start_is_logged_and_switched_off(world, capsys):
-    record(world)
+def test_a_session_that_cannot_start_is_logged_and_the_run_of_this_start_switched_off(world, capsys):
     def popen(argv, **kw):
         raise OSError("policy")
     assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=popen) == 0
-    assert auto.read_record() is None
-    assert "session could not start (policy); run switched off" in capsys.readouterr().out
-    record(world)
-    assert auto.cmd_watch(watch_args(), which=lambda n: None, popen=popen) == 0         # no claude on the PATH
-    assert "`claude` is not on the PATH" in capsys.readouterr().out and auto.read_record() is None
-    record(world)
-    auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=popen)
-    assert auto.read_record() is not None and "could not start (policy); kept on" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "session could not start (policy)" in out and "nothing to switch off" in out          # no record at all
+    assert auto.cmd_watch(watch_args(), which=lambda n: None, popen=popen) == 0                  # no claude on the PATH
+    assert "`claude` is not on the PATH" in capsys.readouterr().out
+    def start_then_fail(argv, **kw):                                                              # `on` ran, then the start failed
+
+        session_on(world)()
+        raise OSError("late")
+    auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=start_then_fail)
+    assert auto.read_record() is None and "session could not start (late); run switched off" in capsys.readouterr().out
+    auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=start_then_fail)
+    assert auto.read_record() is not None and "could not start (late); kept on" in capsys.readouterr().out
 
 
 def test_the_watcher_leaves_another_run_alone_and_survives_no_record(world, tmp_path, capsys):
     record(world, id="other")
     auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path))
-    assert auto.read_record()["id"] == "other" and "no run record for r1" in capsys.readouterr().out
+    assert auto.read_record()["id"] == "other" and "nothing to switch off" in capsys.readouterr().out
+
+
+def test_a_run_that_was_on_before_the_watcher_started_is_never_ended_by_it(world, tmp_path, capsys):
+    record(world, started=auto.utc_now())                                       # run r1 of an earlier start, still going
+    guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
+    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, code=1)) == 0
+    assert auto.read_record()["id"] == "r1" and guard.state("sess") is not None
+    assert "nothing to switch off" in capsys.readouterr().out
+
+
+def test_away_refuses_while_a_run_is_on_and_leaves_the_pid_file_alone(world):
+    record(world, started=auto.utc_now())
+    auto.pid_path("r1").write_text("4242", encoding="utf-8")
+    called = []
+    with pytest.raises(SystemExit, match="saani auto away: run r1 is on"):
+        auto.cmd_away(args(only=None, id="r1"), which=lambda n: "claude", popen=lambda *a, **k: called.append(a))
+    assert not called and auto.pid_path("r1").read_text(encoding="utf-8") == "4242"
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=guard.MAX_HOURS + 1))      # a run past its 12 hours is over
+    assert auto.cmd_away(args(only=None, id="r2"), which=lambda n: "claude", popen=lambda *a, **k: type("P", (), {"pid": 1})()) == 0
 
 
 def test_the_watcher_is_for_away_and_asks_for_an_id_and_a_folder(world):

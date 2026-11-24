@@ -24,8 +24,8 @@ and lands it, while Saani's commands and its guard keep the work safe.
 3. **The guard.** A plugin hook that decides every tool call of the run at once, never asking: it allows the run's work and refuses
    what a run must never do (push outside `saani land`, merge, read secrets, edit outside its worktrees, run anything off its list).
 4. **The end.** One `dev` -> `main` pull request, its CI run (`saani ci`), and a report on it: what landed, what waits for you and
-   why, the refusals, the cost. `saani auto status` shows a running run. The run switches itself off when it is done (add `--keep-on`, as in
-   `/saani:auto away --keep-on`, to keep it on; `/saani:auto off` in your session ends it any time).
+   why, the refusals, the cost. `saani auto status` shows a running run. The run is switched off when it is done (add `--keep-on`,
+   as in `/saani:auto away --keep-on`, to keep it on; `/saani:auto off` in your session ends it any time).
 5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
    when the merge changes the version, creates the GitHub release `v<version>` with notes written from the issues.
    `/saani:merge --deploy` (or `/saani:deploy` later) then deploys, if the project deploys.
@@ -107,7 +107,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 
 | Terminal | Claude Code | What it does |
 |---|---|---|
-| `saani auto ...` | `/saani:auto [here\|away] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
+| `saani auto ...` | `/saani:auto [here\|away] [--keep-on] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
 | `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request; "Stale" when Saani does not answer |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers: one map shows them all |
 | `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |

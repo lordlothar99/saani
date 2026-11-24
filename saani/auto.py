@@ -597,8 +597,8 @@ def cmd_status(args):
         print(f"STOP: {LIMIT_WORDS[k]} reached ({shown} of {limit})")
         journal(None, "stop", note=f"{LIMIT_WORDS[k]} reached ({shown} of {limit})")
     if hit:
-        print("stop starting issues, finish the end of the run (full run, the pull request, `saani auto report`), then tell the owner to end "
-              "the run from a terminal: `saani auto off --run <id>`.")
+        print("stop starting issues, finish the end of the run (full run, the pull request, `saani auto report`), then stop: the run is "
+              "switched off when its session ends (unless it was started with `--keep-on`: then the owner ends it, `saani auto off --run <id>`).")
     return EXIT_LIMIT if hit else 0
 
 
@@ -868,7 +868,11 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     import shutil
     folder = run_folder(args.folder, "away")
     run_id = run_id_of(args.id, folder, "away")
-    main = pathlib.Path(cfg().root)                       # the main folder: the project's committed relative settings resolve from it
+    from . import guard
+    old = read_record()
+    if old and (utc_now() - parse_stamp(old["started"])).total_seconds() < guard.MAX_HOURS * 3600:
+        raise SystemExit(f"saani auto away: run {old['id']} is on (since {old['started']}): `saani auto off` first (nothing was started)")
+    main = pathlib.Path(cfg().root)                     # the main folder: the project's committed relative settings resolve from it
     log = main / "build" / f"saani-auto-{run_id}.log"
     argv = away_command(run_id, folder, args.only or (), bool(args.deploy))
     keep_on = bool(getattr(args, "keep_on", False))
@@ -929,6 +933,8 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
     argv = away_command(run_id, args.folder, args.only or (), bool(args.deploy))
     exe = (which or shutil.which)("claude")
     code = None
+    before = read_record()                  # a record of this id that is already on is not this session's: it is never switched off here
+    started_before = before.get("started") if before and before.get("id") == run_id else None
     try:
         if exe is None:
             raise OSError("`claude` is not on the PATH")
@@ -943,14 +949,17 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
             watch_note(f"session started (process {proc.pid})")
             code = proc.wait()
         what = f"session ended with code {code}"
-    except OSError as e:
+    except (OSError, SystemExit) as e:
         what = f"session could not start ({e})"
     if keep_on:
         watch_note(f"{what}; kept on (--keep-on)")
         return 0
-    rec = read_record()
-    if not rec or rec.get("id") != run_id:
-        watch_note(f"{what}; no run record for {run_id}, nothing to switch off")
+    try:
+        rec = read_record()
+    except SystemExit:
+        rec = None
+    if not rec or rec.get("id") != run_id or rec.get("started") == started_before:
+        watch_note(f"{what}; no run record of this session for {run_id} (none, or one that was on before it started), nothing to switch off")
         return 0
     try:
         cmd_off(type("Args", (), {"run_id": run_id})())
