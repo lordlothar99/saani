@@ -201,9 +201,9 @@ DENIED = [
     ("git show ':/WIP on'", "every ref"), ("git log HEAD..:/fix", "every ref"), ("git diff 'stash^{{tree}}'", "git stash"),
     ("git restore --source=stash src/app.py", "git stash"), ("git checkout stash -- src/app.py", "git stash"),
     ("git commit -C stash", "git stash"),
-    ("git ls-files --with-tree=':/untracked files on' --format=x", "revision"), ("git ls-files --with-tree ':/x'", "revision"),
+    ("git ls-files --with-tree=':/untracked files on' --format=x", "every ref"), ("git ls-files --with-tree ':/x'", "every ref"),
     ("git ls-files --with-tree=HEAD", "revision"), ("git ls-files --with HEAD", "revision"),
-    ("git log --ancestry-path=:/x", "revision"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
+    ("git log --ancestry-path=:/x", "every ref"), ("git log --ancestry-path=abc1234 HEAD", "revision"),
     ("git show 0123456789abcdef0123456789abcdef01234567", "revision"), ("git diff abc1234 HEAD", "revision"),
     ("git log --oneline --branches", "every ref"), ("git log --remotes", "every ref"), ("git log --tags", "every ref"),
     ("git rev-parse --branches", "every ref"), ("git diff --tags", "every ref"), ("git show --remotes", "every ref"),
@@ -217,7 +217,7 @@ DENIED = [
     ("git show v1.0", "revision"), ("git diff 'HEAD@{{1}}'", "revision"), ("git log origin/other..HEAD", "revision"),
     ("git show ORIG_HEAD:src/app.py", "revision"), ("git branch --contains abc1234", "revision"),
     ("git commit --fixup=abc1234", "revision"), ("git commit -C abc1234", "revision"), ("git commit -qCabc1234", "revision"),
-    ("git commit -C origin/main", "revision"), ("git log --oneline -n 5 abc1234", "revision"), ("git ls-files ':/y'", "revision"), ("git status ':/y'", "revision"),
+    ("git commit -C origin/main", "revision"), ("git log --oneline -n 5 abc1234", "revision"), ("git ls-files ':/y'", "every ref"), ("git status ':/y'", "every ref"),
     ("git -C {work} stash pop", "git stash"), ("git stash pop", "git stash"), ("git stash pop -q", "git stash"),      # the owner's stash
     ("git stash", "git stash"), ("git stash push -q -m 'wip'", "git stash"), ("git stash push", "git stash"),        # on top of the owner's
     ("git show stash", "git stash"), ("git show 'stash@{{0}}'", "git stash"), ("git show stash^3", "git stash"),
@@ -404,7 +404,11 @@ def test_every_unquoted_glob_is_refused_in_any_position(ctx):
 @pytest.mark.parametrize("command,code,said", [
     ("ls *", "glob", "an unquoted glob"),
     ("echo x > notes.txt", "redirect", "a redirection other than 2>&1"),
-    ("ls |& cat", "redirect", "|&"),
+    ("ls |& cat", "redirect", "|& in a shell command (the guard reads it, but it is not on the guard's list)"),
+    ("cat <<EOF\nx\nEOF", "redirect", "a redirection other than 2>&1"), ("cat <<< x", "redirect", "a redirection other than 2>&1"),
+    ("git log --ancestry-path=:/x", "every ref", "with :/ (a search over every ref"),
+    ("git ls-files --with-tree ':/x'", "every ref", "with :/ (a search over every ref"),
+    ("git status ':/y'", "every ref", "with :/ (a search over every ref"),
     ("git log abc1234", "revision", "(only HEAD"),
     ("git log --all", "every ref", "--all (it walks every ref"),
     ("git log -g", "every ref", "-g (it walks every ref"),

@@ -1212,13 +1212,17 @@ def git_command(part, ctx, cwd):
         return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
                     "git", how="cd <worktree> && git ...")
     verdict = commit_takes_paths(rest) if sub == "commit" else None
-    verdict = verdict or git_sub(sub, words, ctx, gcwd, part) or revisions(sub, words, ctx, gcwd)
+    verdict = verdict or git_sub(sub, words, ctx, gcwd, part)
     if verdict:
         return verdict
     # A :/<text> search runs over every ref (the owner's stash included): refused anywhere in a word, but a drive's C:/ (from ~ too).
+    # Before the revision allowlist, so a search is logged as one (`every ref`) wherever it is, --ancestry-path=:/x and --with-tree too.
     if any(re.search(r"(?<![A-Za-z]):/|(?<=[A-Za-z]{2}):/", w) for w in words):
-        return deny("revision", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
+        return deny("every ref", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
                     how="name HEAD, origin/<branch> or a worker branch")
+    verdict = revisions(sub, words, ctx, gcwd)
+    if verdict:
+        return verdict
     if scan(ctx, rest, gcwd, text):
         return deny("secret", f"git {sub} of a secret file", "git", how=SECRETS_HOW)
     return None
@@ -1740,7 +1744,9 @@ def bash(text, ctx):
     try:
         parts = split_bash(text)
     except Unsure as e:
-        return deny(e.code, f"the guard does not read {e} in a shell command", how="write the command plainly: simple commands, "
+        why = (f"the guard does not read {e} in a shell command" if e.code == "unsure"     # cannot read it at all
+               else f"{e} in a shell command (the guard reads it, but it is not on the guard's list)")      # redirect, here-document
+        return deny(e.code, why, how="write the command plainly: simple commands, "
                     "quoted text, no $, backticks, redirections (but 2>&1 and >/dev/null) or subshells")
     if not parts:
         return deny("unreadable command", "an empty command")

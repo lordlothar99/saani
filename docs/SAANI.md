@@ -235,12 +235,14 @@ Each refusal adds a line to `~/.saani/auto/refusals.jsonl`: time, run id, tool, 
 (never the command's text, never a file's contents), and the project (the run's main checkout, normalized), so two projects' runs
 never mix. `refusals(run, project)` counts them, in total and by reason, for the run's stop rules. The short reason names what the
 message to the session names, so `saani auto status` and the report's refusals by reason say what was refused: among others `glob` (an
-unquoted `*`, `?` or `[`), `redirect` (a redirection but `2>&1` and `>/dev/null`, `|&`, `&>`, process substitution), `here-document`,
+unquoted `*`, `?` or `[`), `redirect` (a redirection but `2>&1` and `>/dev/null`, `|&`, `&>`, process substitution, a here-document
+with an unquoted delimiter `<<EOF` and a here-string `<<<`), `here-document` (a quoted `<<'EOF'` one where it is not allowed),
 `environment assignment`, `revision` (off the allowlist), `every ref` (`--all`, `-g`, `--reflog`, `--branches`..., a `:/` search),
 `git stash` (the owner's stash), `pathspec` (a folder or a pattern in `add`, `restore`, `checkout`), `network path`, `posix path`,
 `drive-relative path`, `secret`, `cd outside the worktrees`, `not on the list`; `unsure` only for what the guard cannot read (`$`,
 backticks, subshells, an unclosed quote, a control character). When several rules apply, the first that refuses gives both the message
-and the logged reason (`git -C <main checkout> log --all` is `cd outside the worktrees`).
+and the logged reason (`git -C <main checkout> log --all` is `cd outside the worktrees`). The stop rule "the same refusal reason in a
+row" (below) reads these codes: a run of one precise reason reaches it; a mix of them does not, and still counts toward the total.
 
 "The run's places" are the worktrees folder (`[worktrees] folder`), the run's folder and the system temp folder. **Protected**, never
 written in an auto run, wherever they are: any path through `.git`, `.githooks` or `.claude`, `.mcp.json`, `CLAUDE.md`,
@@ -366,7 +368,7 @@ stop rules live in one place, `LIMITS` in `saani/auto.py`, and are copied into t
 | Rule | Limit | Measured by |
 |---|---|---|
 | refusals in total | 40 | the guard's counter (`guard.refusals(run id)`) |
-| the same refusal reason in a row | 10 | the longest run of one reason in the guard's log for this run (3 is too tight with the strict grammar) |
+| the same refusal reason in a row | 10 | the longest run of one reason in the guard's log for this run (3 is too tight with the strict grammar); the reason is the precise short code (`glob`, `redirect`, `here-document`...), so a session alternating between them never reaches this rule: those refusals still count toward the 40 in total |
 | hours | 10 | now less the record's start |
 
 The skill runs `saani auto status --check` before each pick and whenever a slot frees (so after each landing); exit 3 (also written to the
