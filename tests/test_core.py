@@ -298,7 +298,25 @@ def test_a_worktree_is_named_by_its_path_and_anything_else_is_refused(repo_with_
 def test_saani_test_runs_in_the_named_worktree(repo_with_worktree, monkeypatch):
     main, wt = repo_with_worktree
     seen = []
-    monkeypatch.setattr(core, "queued_run", lambda kind, command, cwd: seen.append((kind, command, cwd)) or 0)
-    args = type("A", (), {"kind": "landing", "worktree": str(wt), "command": ["--", "python", "-m", "pytest", "-q"]})()
-    assert core.cmd_test(args) == 0
+    monkeypatch.setattr(core, "queued_run", lambda kind, command, cwd, fresh=False: seen.append((kind, command, cwd, fresh)) or 0)
+    args = type("A", (), {"kind": "landing", "worktree": str(wt), "command": ["--", "python", "-m", "pytest", "-q"], "fresh": True})()
+    assert core.cmd_test(args) == 0 and seen[0][3] is True                            # --fresh is passed on
     assert seen[0][1] == ["python", "-m", "pytest", "-q"] and core._within(seen[0][2], wt) and core._within(wt, seen[0][2])
+
+
+def test_clean_tree_is_the_trees_id_only_for_a_clean_checkout(repo_with_worktree):
+    """#58: a dirty checkout or an untracked file the tests could read never takes a stored result."""
+    _, wt = repo_with_worktree
+    tree = core.clean_tree(wt)
+    assert tree and tree == core.git("rev-parse", "HEAD^{tree}", cwd=wt)
+    (wt / "new-file.txt").write_text("x", encoding="utf-8")
+    assert core.clean_tree(wt) is None                                           # untracked
+    (wt / "new-file.txt").unlink()
+    assert core.clean_tree(wt) == tree
+    (wt / "a.txt").write_text("one\n", encoding="utf-8")
+    core.git("add", "a.txt", cwd=wt)
+    core.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "a", cwd=wt)
+    tree2 = core.clean_tree(wt)
+    assert tree2 and tree2 != tree                                               # another commit, another tree
+    (wt / "a.txt").write_text("changed\n", encoding="utf-8")
+    assert core.clean_tree(wt) is None                                           # modified

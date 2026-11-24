@@ -993,15 +993,18 @@ def saani_command(args, ctx, cwd):
         if "--" in rest:
             opts, rest = rest[:rest.index("--")], rest[rest.index("--") + 1:]
         else:
-            while rest and (rest[0].startswith("--kind") or rest[0].startswith("--worktree")):
-                n = 1 if "=" in rest[0] else 2
+            while rest and (rest[0].startswith("--kind") or rest[0].startswith("--worktree") or rest[0] == "--fresh"):
+                n = 1 if "=" in rest[0] or rest[0] == "--fresh" else 2
                 opts, rest = opts + rest[:n], rest[n:]
         where, k = checkout_top(ctx, ctx.path(".", cwd)), 0
         while k < len(opts):
             w = opts[k]
             name, eq, value = w.partition("=")
+            if w == "--fresh":                                  # run it again whatever a stored result says
+                k += 1
+                continue
             if name not in ("--kind", "--worktree"):
-                return deny("saani command", "saani test with an option other than --kind and --worktree", "saani")
+                return deny("saani command", "saani test with an option other than --kind, --worktree and --fresh", "saani")
             if not eq:
                 if k + 1 >= len(opts):
                     return deny("saani command", f"saani test {name} without a value", "saani")

@@ -89,7 +89,7 @@ flowchart TB
 | `saani prune [--dry-run] [--local-only]` | Deletes the merged branches: local ones inside production or the integration branch, on GitHub the ones inside production; never those two or a branch checked out in a worktree. An `auto/*` branch (or an old `longrun/*` one) goes with its folder once the run is finished: merged into production or the integration branch, nothing uncommitted in the folder, and started more than 12 hours ago (the run's own limit is 10); a run's folder holds no commits, so its age is what tells it from one still working. GitHub's own "Automatically delete head branches" stays off (it would delete `dev` after every `dev` into `main` pull request); the workflow `.github/workflows/delete-merged-branch.yml` deletes the head branch of a merged pull request into production instead, except `main`, `master` and `dev`. |
 | `saani merge [PR] [--deploy] [--dry-run]` | The owner's one word at the end of an auto run. Finds the open integration -> production pull request (the number given, else the only one; none or several are refused) and refuses unless it is open, between those two branches, mergeable, and its CI is green on the exact head: the `[ci] status_context` status is `success` and no check run failed or is still running (each refusal says the next step, e.g. `saani ci pr`). Merges with a merge commit (`gh pr merge --merge`: never squash or rebase, the trailers stay; never `--delete-branch`, the head is the integration branch), then does what `saani ci merged` does, then, when `[release] version_file` is set and the pull request changed the version in it, creates the GitHub release (below, Releases). `--deploy` then runs `saani deploy` (below). `--dry-run` checks and prints, merges nothing. |
 | `saani deploy [--dry-run]` | The deployer (below): CI green on the production head (a merge of a green commit counts), no issue in production since the prod tag whose Deploy row says not to deploy ("⛔", "Do not deploy"), the `[deploy]` checks and dry run, the deploy with a timeout, its log, the prod tag moved, `✔ Deployed` and the close on each `in-main` issue of the range. `--dry-run` stops after the dry run and prints the command (the key as `<key>`). |
-| `saani test [--kind landing\|full] [--worktree PATH] -- <cmd>` | Runs a test command through the test queue: `landing` (the default) or `full`; the old `tier1` still runs, as `landing`. `--worktree` runs it in that worktree of the project instead of the current folder's checkout, so an agent never needs a `cd` (a subagent's `cd` does not last, and Claude Code asks before `cd <folder> && <command>`). |
+| `saani test [--kind landing\|full] [--worktree PATH] [--fresh] -- <cmd>` | Runs a test command through the test queue: `landing` (the default) or `full`; the old `tier1` still runs, as `landing`. A clean checkout whose tree and command already passed reuses that result (see The test queue); `--fresh` runs anyway. `--worktree` runs it in that worktree of the project instead of the current folder's checkout, so an agent never needs a `cd` (a subagent's `cd` does not last, and Claude Code asks before `cd <folder> && <command>`). |
 | `saani check-msg <file>` | The commit-msg hook. |
 | `saani guard` | The plugin's Claude Code hook before every tool call and after every Bash call (below, The guard): JSON on stdin, a decision on stdout during an auto run, nothing otherwise. |
 | `saani ci status\|sync\|pr\|merged\|place` | Hybrid CI (below). `ci pr` also posts `In PR` on the issues the pull request names, `ci merged` posts `On main` on those it relabels. |
@@ -128,7 +128,15 @@ whole PC.
 - **Dead jobs** (the process is gone) and a runner lock whose holder is gone are dropped by the next caller.
 - **Shared landing tests:** a second `landing` job of the same worktree, commit and command, queued while the first runs, takes the first
   one's result.
-- **The measure:** one line per job in `build/saani-tests.jsonl` of the main checkout.
+- **Reused green results:** a finished job that passed is kept (`.git/saani-tests/result-*.json`) under the git tree id of the tested
+  checkout, the expanded command and the kind. A later job of a **clean** checkout (no uncommitted change, no untracked file that is not
+  ignored) with the same tree, command and kind does not run: it prints `reused: green on <tree> at <time> (job <id>)` and the log line says
+  `reused`. `saani land` reuses when its merged tree equals a tested one; a `full` run (the end of an auto run) also takes a green `landing`
+  result of the same tree and command. Never reused: a dirty checkout, a red result (a red run also deletes the green one it contradicts),
+  another command or tree, and `saani ci pr` (it always runs). `saani test --fresh` forces a run. Ignored files (such as `build/`) are not
+  part of the tree: a test that reads them can differ, so use `--fresh` then. A result expires after 7 days and the store keeps at most the
+  100 newest.
+- **The measure:** one line per job in `build/saani-tests.jsonl` of the main checkout (`reused: true` for a reuse).
 
 ## Test tiers
 | Tier | When | What runs | Setting |

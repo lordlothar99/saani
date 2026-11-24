@@ -115,7 +115,7 @@ def pc_run(monkeypatch, tmp_path, check_code=0, full_code=0):
     monkeypatch.setattr(fci.core, "main_checkout", lambda cwd=None: main)
     monkeypatch.setattr(fci.core, "latest_timing_report", lambda cwd=None: None)
     monkeypatch.setattr(fci.core, "git", git)
-    monkeypatch.setattr(fci.core, "queued_run", lambda kind, command, cwd: calls.append(("queue", kind, command[-1], cwd)) or full_code)
+    monkeypatch.setattr(fci.core, "queued_run", lambda kind, command, cwd, fresh=False: calls.append(("queue", kind, command[-1], cwd) + (("fresh",) if fresh else ())) or full_code)
     monkeypatch.setattr(fci.subprocess, "run", lambda cmd, cwd=None: calls.append(("run", cmd[-1], cwd)) or FakeProcess(check_code))
     return fci.on_pc("ab432e0da646abf025f055f1b8f0e920abd2a22b")[0], calls, fci.cfg().wt_dir / "ci-ab432e0da646"
 
@@ -126,7 +126,7 @@ def test_the_pc_tests_the_pull_requests_head_in_its_own_worktree_through_the_que
     assert result == "passed"
     assert calls[0] == ("git", "worktree", "add", "--detach", str(folder), "ab432e0da646abf025f055f1b8f0e920abd2a22b")
     assert ("run", "scripts/check_repo.py", folder) in calls
-    assert ("queue", "full", "scripts/test_all.py", folder) in calls        # one test job at a time on the PC
+    assert ("queue", "full", "scripts/test_all.py", folder, "fresh") in calls   # one test job at a time on the PC; the CI never reuses (#58)
     assert calls[-1] == ("git", "worktree", "remove", "--force", str(folder))
 
 

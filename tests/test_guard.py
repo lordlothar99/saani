@@ -106,6 +106,8 @@ ALLOWED = [
     "cd {work}/src && saani test -- python -m pytest -q tests",
     "saani status", "saani land --worktree {work}", "saani start 12", "saani test --kind landing -- python -m pytest -q",
     "saani test --kind tier1 -- python -m pytest -q", "saani test --kind=landing -- python -m pytest -q",
+    "saani test --fresh -- python -m pytest -q", "saani test --kind landing --fresh --worktree {work} -- python -m pytest -q",
+    "saani test --worktree {work} --fresh python -m pytest -q",
     "saani test -- npm test", "saani test --kind=full -- python -m pytest -q", "saani comment 12 progress",
     "saani comment 12 progress --text 'half done, the token is not here' --field Step=2", "saani kpis", "saani kpis --since 2026-01-01 --json",
     "saani progress show build/run.txt", "saani progress watch build/run.txt --every 60", "saani ui", "saani ui --port 8772", "saani map",

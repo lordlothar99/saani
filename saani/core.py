@@ -19,7 +19,7 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
                                                     branch, for an auto run to work in (never landed)
   saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
-  saani test [--kind landing|full] [--worktree P] -- <cmd...>  run a test command through the test queue (saani/queue.py)
+  saani test [--kind landing|full] [--worktree P] [--fresh] -- <cmd...> run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
 
@@ -883,10 +883,21 @@ def cmd_status(args):
     return 0
 
 
-def queued_run(kind, command, cwd):
-    """Run a test command through the test queue from the worktree `cwd`; its exit code."""
+def clean_tree(cwd):
+    """The git tree id of the checkout `cwd` when it is clean, else None: no uncommitted change and no untracked file (not ignored) that the
+    tests could read. Only then is a stored test result for that tree the result of this checkout; when git says anything unclear: None."""
+    status = git("status", "--porcelain", "--untracked-files=all", cwd=cwd, check=False)
+    if status.returncode != 0 or status.stdout.strip():
+        return None
+    tree = git("rev-parse", "HEAD^{tree}", cwd=cwd, check=False)
+    return tree.stdout.strip() or None if tree.returncode == 0 else None
+
+
+def queued_run(kind, command, cwd, fresh=False):
+    """Run a test command through the test queue from the worktree `cwd`; its exit code. A clean checkout whose tree and command have a green
+    result in the queue's store reuses it (`fresh`: run anyway; saani/queue.py)."""
     return queue.run(kind, command, lock_path(cwd).parent, cwd, git("rev-parse", "HEAD", cwd=cwd),
-                     main_checkout(cwd) / "build" / TESTS_LOG)
+                     main_checkout(cwd) / "build" / TESTS_LOG, tree=clean_tree(cwd), fresh=fresh)
 
 
 def test_kind(kind):
@@ -907,7 +918,7 @@ def cmd_test(args):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("give the command after --, e.g. saani test -- python -m pytest")
-    return queued_run(test_kind(args.kind), command, named_worktree(args.worktree))
+    return queued_run(test_kind(args.kind), command, named_worktree(args.worktree), fresh=bool(getattr(args, "fresh", False)))
 
 
 def cmd_check_msg(args):
@@ -972,6 +983,7 @@ def add_parsers(sub):
     p.add_argument("--kind", default="landing", metavar="{landing,full}",
                    help="landing (the tests before a landing) goes before full; a landing's own run goes first")
     p.add_argument("--worktree", help="run in this worktree instead of the current folder (a subagent's cd does not last)")
+    p.add_argument("--fresh", action="store_true", help="run the command even when a green result for this tree and command is stored")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(run=cmd_test)
     p = sub.add_parser("check-msg", help="the commit-msg hook")
