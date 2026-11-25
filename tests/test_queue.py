@@ -174,3 +174,156 @@ def test_the_old_kind_tier1_is_read_as_landing():
     assert q.twin(job("me", "landing", "5"), [job("a", "tier1", "1", state="running")])["id"] == "a"
     assert q.summary([{"kind": "tier1", "wait": 1, "run": 2}]) == {"landing": {"jobs": 1, "wait": 1, "run": 2}}
     assert q.KINDS == ("landing", "full") and "land" in q.PRIORITY
+
+
+# ---------------------------------------------------------------- #58: a green result for the same tree and command is reused
+
+def run_job(tmp_path, kind="landing", command=("t",), code=0, tree="tree1", fresh=False):
+    calls = []
+    got = q.run(kind, list(command), tmp_path, tmp_path / "wt", "h", tmp_path / "log.jsonl", poll=0.01,
+                runner=lambda c, cwd: calls.append(c) or code, tree=tree, fresh=fresh)
+    return got, calls
+
+
+def test_a_green_result_of_the_same_tree_and_command_is_reused_and_logged(tmp_path, capsys):
+    assert run_job(tmp_path) == (0, [["t"]])
+    capsys.readouterr()
+    assert run_job(tmp_path) == (0, [])                                       # not run again
+    out = capsys.readouterr().out
+    assert "reused: green on tree1 at " in out and "(job " in out
+    assert [r.get("reused", False) for r in q.rows(tmp_path / "log.jsonl")] == [False, True]
+    assert run_job(tmp_path, kind="land") == (0, [])                          # the run inside saani land is the landing tests
+
+
+def test_a_full_run_takes_a_green_landing_result_but_a_landing_does_not_take_a_full_one(tmp_path):
+    run_job(tmp_path, kind="land")
+    assert run_job(tmp_path, kind="full") == (0, [])
+    other = tmp_path / "other"
+    other.mkdir()
+    run_job(other, kind="full")
+    assert run_job(other, kind="landing")[1] == [["t"]]
+
+
+def test_a_dirty_checkout_has_no_tree_so_it_never_reuses_and_never_records(tmp_path):
+    run_job(tmp_path)
+    assert run_job(tmp_path, tree=None)[1] == [["t"]]                         # dirty: no tree given
+    other = tmp_path / "o"
+    other.mkdir()
+    run_job(other, tree=None)
+    assert not list((other / q.QUEUE_DIR).glob("result-*.json"))              # a dirty run is stored for no tree
+    assert run_job(other)[1] == [["t"]]
+
+
+def test_a_red_result_is_never_reused_and_deletes_the_green_before_it(tmp_path):
+    assert run_job(tmp_path, code=1) == (1, [["t"]])
+    assert run_job(tmp_path, code=1)[1] == [["t"]]                            # red: runs again
+    assert run_job(tmp_path)[1] == [["t"]]                                    # runs, green now
+    assert run_job(tmp_path, code=1, fresh=True)[1] == [["t"]]                # a red run after a green one...
+    assert run_job(tmp_path)[1] == [["t"]]                                    # ...takes the green away: it runs
+
+
+def test_another_command_or_another_tree_runs(tmp_path):
+    run_job(tmp_path)
+    assert run_job(tmp_path, command=("t", "-q"))[1] == [["t", "-q"]]
+    assert run_job(tmp_path, tree="tree2")[1] == [["t"]]
+    assert run_job(tmp_path, command=("t",))[1] == []                         # the first one is still there
+
+
+def test_fresh_forces_a_run_and_the_new_result_is_stored(tmp_path):
+    run_job(tmp_path)
+    assert run_job(tmp_path, fresh=True)[1] == [["t"]]
+    assert run_job(tmp_path)[1] == []
+
+
+def test_a_result_expires_after_seven_days_and_the_store_stays_small(tmp_path, monkeypatch):
+    folder = tmp_path / q.QUEUE_DIR
+    run_job(tmp_path)
+    now = q.datetime.datetime.now()
+    assert q.find_green(folder, "tree1", ["t"], "landing", now + q.datetime.timedelta(days=6)) is not None
+    assert q.find_green(folder, "tree1", ["t"], "landing", now + q.datetime.timedelta(days=8)) is None
+    assert q.find_green(folder, "tree1", ["t"], "landing", now - q.datetime.timedelta(days=1)) is None     # a time from the future: unclear
+    (result,) = folder.glob("result-*.json")
+    data = json.loads(result.read_text(encoding="utf-8"))
+    data["finished"] = (now - q.datetime.timedelta(days=8)).isoformat(timespec="seconds")
+    result.write_text(json.dumps(data), encoding="utf-8")
+    assert run_job(tmp_path, tree="tree2")[1] == [["t"]]                      # the old file is dropped when a result is stored
+    assert not result.exists()
+    monkeypatch.setattr(q, "RESULT_MAX", 3)
+    for n in range(6):
+        run_job(tmp_path, tree=f"x{n}")
+    assert len(list(folder.glob("result-*.json"))) == 3
+
+
+def scripted_tree(values, on_call=None):
+    """A tree function that answers the given values in turn (the last one again and again); on_call(n) runs before answer n (1-based)."""
+    seen = []
+
+    def read():
+        seen.append(1)
+        if on_call:
+            on_call(len(seen))
+        return values[min(len(seen), len(values)) - 1]
+    return read
+
+
+def green_job(tmp_path, tree):
+    q.store_result(tmp_path / q.QUEUE_DIR, {"id": "other", "kind": "landing", "command": ["t"]}, tree, 0)
+
+
+def stored(tmp_path):
+    return list((tmp_path / q.QUEUE_DIR).glob("result-*.json"))
+
+
+def test_a_result_stored_by_another_job_while_this_one_waited_is_taken(tmp_path):
+    tree = scripted_tree(["tree1"], on_call=lambda n: green_job(tmp_path, "tree1") if n == 2 else None)
+    assert run_job(tmp_path, tree=tree) == (0, [])
+
+
+def test_a_tree_that_changed_while_waiting_gets_no_stale_reuse(tmp_path):
+    tree = scripted_tree(["tree1", "tree2", "tree2", "tree2"], on_call=lambda n: green_job(tmp_path, "tree1") if n == 2 else None)
+    assert run_job(tmp_path, tree=tree) == (0, [["t"]])                       # green for tree1 exists, but the checkout is tree2 now
+    assert q.find_green(tmp_path / q.QUEUE_DIR, "tree2", ["t"], "landing") is not None
+
+
+def test_a_tree_read_that_fails_runs_the_tests_and_stores_nothing(tmp_path):
+    def broken():
+        raise FileNotFoundError("git")
+    assert run_job(tmp_path, tree=broken) == (0, [["t"]])                     # the run happens and its code comes back
+    assert stored(tmp_path) == []
+
+
+def test_a_tree_read_that_fails_around_the_run_keeps_the_runs_code(tmp_path):
+    def after_fails(n):
+        if n >= 3:
+            raise FileNotFoundError("git")
+    assert run_job(tmp_path, code=1, tree=scripted_tree(["tree1"], on_call=after_fails)) == (1, [["t"]])
+    assert stored(tmp_path) == []
+
+
+def test_a_tree_that_changes_or_gets_dirty_during_the_run_stores_nothing(tmp_path):
+    assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", "tree1", "tree2"]))[1] == [["t"]]
+    assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", "tree1", None]))[1] == [["t"]]
+    assert run_job(tmp_path, tree=scripted_tree(["tree1", "tree1", None, None]))[1] == [["t"]]
+    assert not stored(tmp_path)
+    assert run_job(tmp_path, tree=scripted_tree(["tree1"]))[1] == [["t"]]     # the plain path: same tree before and after
+    assert len(stored(tmp_path)) == 1
+
+
+def test_the_newest_results_are_kept_even_in_the_same_second(tmp_path, monkeypatch):
+    monkeypatch.setattr(q, "RESULT_MAX", 2)
+    base = q.datetime.datetime.now()
+    for n in range(4):
+        q.store_result(tmp_path, {"id": str(n), "kind": "landing", "command": ["t"]}, f"x{n}", 0, base + q.datetime.timedelta(microseconds=n))
+    assert sorted(q.read_json(p)["tree"] for p in tmp_path.glob("result-*.json")) == ["x2", "x3"]
+
+
+def test_an_unreadable_or_foreign_result_file_is_not_a_result(tmp_path):
+    folder = tmp_path / q.QUEUE_DIR
+    folder.mkdir()
+    key = q.result_key("tree1", ["t"], "landing")
+    (folder / f"result-{key}.json").write_text("{not json", encoding="utf-8")
+    assert run_job(tmp_path)[1] == [["t"]]
+    path = folder / f"result-{key}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**data, "tree": "other"}), encoding="utf-8")
+    assert run_job(tmp_path)[1] == [["t"]]

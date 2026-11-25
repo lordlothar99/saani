@@ -13,7 +13,9 @@ argument-hint: "[landing|full] [-- command]"
 2. Pick the command: the one after `--` if given, else the project's own from saani.toml (`[tests] landing`, or `[tests] full` for
    `full`), with `{python}` replaced by the Python running Saani. Neither: say so and stop.
 3. Run `saani test --kind <kind> -- <command>`. A slow run (`full`): start it in the background and say how to follow it (`/saani:progress`).
-4. Report the result: passed, or the failures and what they point to.
+4. Report the result: passed, or the failures and what they point to. A line `reused: green on <tree> ...` means the queue took a stored
+   green result of the same tree and command instead of running (clean checkout only); say so, and run `saani test --fresh ...` only if
+   the owner wants a real run.
 
 ## Running saani
 Run `saani` with the Bash tool: the plugin's `bin/` puts it on that shell's PATH. If it is not found, run

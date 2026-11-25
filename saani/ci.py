@@ -224,7 +224,7 @@ def on_pc(sha):
             shutil.copy2(report, folder / "build" / report.name)
         print(f"testing {sha[:7]} in {folder}", flush=True)
         ok = subprocess.run(c.command("check"), cwd=folder).returncode == 0 if c.check else True
-        ok = ok and core.queued_run("full", c.command("full"), folder) == 0
+        ok = ok and core.queued_run("full", c.command("full"), folder, fresh=True) == 0   # the CI always runs (#58)
         return ("passed" if ok else "failed"), math.ceil((time.monotonic() - start) / 60)
     finally:
         core.git("worktree", "remove", "--force", str(folder), check=False)

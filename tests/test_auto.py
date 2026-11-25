@@ -34,7 +34,8 @@ def choose(issues, started=(), running=None, today="2026-11-22"):
     (0, None, 32, 1),
     (0, 12, 16, 2),                                     # the 12-core, 16 GB machine
     (0, 12, 4, 2),                                      # other projects hold the rest: still its 2
-    (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 2), (3, 4, 2, 2),   # fixed, capped at 2, whatever the machine says
+    (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 5), (3, 4, 2, 3),   # fixed, whatever the machine says
+    (6, 4, 1, 6), (10, 2, 1, 10), (11, 64, 64, 10),             # fixed up to 10 (the config refuses more)
 ])
 def test_the_size_of_the_run(configured, cpus, gb, want):
     assert auto.parallel_size(configured, cpus, gb) == want
@@ -68,10 +69,30 @@ def test_free_ram_is_a_number_or_none():
 def test_parallel_is_a_setting():
     assert config.Config().parallel == 0
     assert config.from_toml({"auto": {"parallel": 2}}, "x").parallel == 2
-    with pytest.raises(SystemExit):
-        config.from_toml({"auto": {"parallel": -1}}, "x")
-    with pytest.raises(SystemExit):
-        config.from_toml({"auto": {"parallel": "many"}}, "x")
+    for ok in (0, 1, 5, 6, 10):
+        assert config.from_toml({"auto": {"parallel": ok}}, "x").parallel == ok
+    for bad in (-1, 11, 2.5, "many", True):
+        with pytest.raises(SystemExit, match="from 0 to 10"):
+            config.from_toml({"auto": {"parallel": bad}}, "x")
+
+
+@pytest.mark.parametrize("configured,slots,warned", [(0, 2, False), (1, 1, False), (2, 2, False), (5, 5, False), (6, 6, True), (10, 10, True)])
+def test_pick_says_the_slots_and_warns_above_five(monkeypatch, capsys, configured, slots, warned):
+    config.use(config.Config(repo="acme/webshop", parallel=configured))
+    fake_world(monkeypatch, [issue(1)], cpus=16, gb=32)
+    got = auto.pick("2026-11-22")
+    assert got["parallel"] == slots and got["slots"] == slots
+    assert ("warning" in got) == warned
+    if warned:
+        assert "coder, a reviewer and a test run" in got["warning"]
+    args = type("A", (), {"wait": None, "only": None, "limit": None, "json": False})()
+    assert auto.cmd_pick(args) == 0
+    assert (f"{slots} slots" in capsys.readouterr().out) == warned
+
+
+def test_the_warning_is_not_printed_by_reading_the_config(capsys):
+    config.from_toml({"auto": {"parallel": 10}}, "x")
+    assert capsys.readouterr().out == ""
 
 
 # ---------------------------------------------------------------- eligibility and order
@@ -256,10 +277,12 @@ def test_the_files_a_worktree_changed_are_read_from_its_diff(tmp_path, monkeypat
 
 # ---------------------------------------------------------------- pick and the command line
 
-def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32):
+def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32, mine=None):
+    """`mine`: the running issues this run started (default: all of `running`; the owner's own worktrees are the rest)."""
     monkeypatch.setattr(auto, "read_issues", lambda: issues)
     monkeypatch.setattr(auto, "fetch", lambda: None)
     monkeypatch.setattr(auto, "running_issues", lambda: dict(running or {}))
+    monkeypatch.setattr(auto, "run_started_issues", lambda: set(running or {}) if mine is None else set(mine))
     monkeypatch.setattr(auto, "free_ram_gb", lambda: gb)
     monkeypatch.setattr(auto.os, "cpu_count", lambda: cpus)
     monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="dev\n", stderr=""))
@@ -297,7 +320,7 @@ def test_saani_auto_pick_prints_and_saani_auto_still_makes_the_worktree(monkeypa
 
     assert run_saani(monkeypatch, ["auto", "pick", "--json", "--limit", "0"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert set(data) == {"slots", "parallel", "running", "eligible", "skipped"} and data["eligible"] == []
+    assert set(data) == {"slots", "parallel", "running", "owner_running", "eligible", "skipped"} and data["eligible"] == []
 
     made = []
 
@@ -328,3 +351,55 @@ def test_pick_only_reaches_the_choice(monkeypatch, capsys):
 def test_an_unknown_action_is_refused():
     with pytest.raises(SystemExit):
         run_saani(None, ["auto", "stop"])
+
+
+# ---------------------------------------------------------------- the owner's worktrees take no slot (#56)
+
+def test_the_owners_worktrees_take_no_slot_of_the_run(monkeypatch):
+    fake_world(monkeypatch, [issue(1)], running={534: [], 540: [], 556: []}, mine=[])
+    got = auto.pick("2026-11-22")
+    assert got["slots"] == 2 and got["running"] == [] and got["owner_running"] == [534, 540, 556]
+    assert [e["number"] for e in got["eligible"]] == [1]
+
+
+def test_only_the_run_s_own_issues_count_against_the_slots(monkeypatch):
+    fake_world(monkeypatch, [issue(1)], running={5: [], 534: []}, mine=[5])
+    got = auto.pick("2026-11-22")
+    assert got["slots"] == 1 and got["running"] == [5] and got["owner_running"] == [534]
+
+
+def test_a_file_an_owner_worktree_changed_still_keeps_an_overlapping_issue_waiting(monkeypatch):
+    fake_world(monkeypatch, [issue(1, text=body(extra="touches `saani/core.py`"))], running={534: ["saani/core.py"]}, mine=[])
+    got = auto.pick("2026-11-22")
+    assert got["eligible"] == [] and got["skipped"][0]["reason"].startswith("overlaps #534")
+
+
+def test_pick_says_no_slot_and_names_the_owners_worktrees(monkeypatch, capsys):
+    monkeypatch.setattr(auto, "journal_pick", lambda note: None)
+    fake_world(monkeypatch, [issue(1)], running={5: [], 6: [], 12: [], 15: []}, mine=[5, 6])
+    assert run_saani(monkeypatch, ["auto", "pick"]) == 0
+    out = capsys.readouterr().out
+    assert "slots: 0 free of 2 (running: #5, #6)" in out and "the owner's worktrees #12, #15 are in flight" in out
+    assert "no slot: this run's issues #5, #6 are in flight (2 allowed)" in out
+
+
+def test_pick_says_nothing_eligible_and_journals_it(monkeypatch, capsys):
+    notes = []
+    monkeypatch.setattr(auto, "journal_pick", notes.append)
+    fake_world(monkeypatch, [issue(1, text=body("⛔ No"))])
+    assert run_saani(monkeypatch, ["auto", "pick", "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got["note"] == "nothing eligible (1 issue skipped)" and notes == [got["note"]]
+
+
+def test_the_nothing_eligible_note_has_the_right_plural():
+    base = {"slots": 1, "parallel": 1, "running": [], "eligible": []}
+    assert auto.pick_note({**base, "skipped": [{}, {}]}) == "nothing eligible (2 issues skipped)"
+    assert auto.pick_note({**base, "skipped": []}) == "nothing eligible (0 issues skipped)"
+
+
+def test_a_pick_with_something_to_start_writes_no_note(monkeypatch, capsys):
+    monkeypatch.setattr(auto, "journal_pick", lambda note: pytest.fail("no note"))
+    fake_world(monkeypatch, [issue(1)])
+    assert run_saani(monkeypatch, ["auto", "pick", "--json"]) == 0
+    assert "note" not in json.loads(capsys.readouterr().out)

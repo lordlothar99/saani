@@ -9,7 +9,7 @@ Saani's steps (the decision of #72), the status only ever moving forward:
   start                                   -> started  (In progress)
   the review starts, land, merge          -> review   (In review); `in-dev` / `in-main` say where the change waits
   deploy closes the issue as completed    -> Done (GitHub sets it on close)
-`saani auto pick` takes only `todo` (Todo) issues when the repo has statuses. `[status] enabled = "off"`, or a repo without statuses:
+`saani auto pick` takes every ready issue except those in `backlog` (Backlog) when the repo has statuses. `[status] enabled = "off"`, or a repo without statuses:
 nothing here does anything, and Saani works from its labels alone. `gh` has no status flag (2.92): reads and writes go through `gh api`.
 
   saani status sync [--apply]    give each open issue the status its state implies (a dry run without --apply)

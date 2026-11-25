@@ -18,7 +18,7 @@ and lands it, while Saani's commands and its guard keep the work safe.
    one at a time, while you are still there. Then it starts the run in a headless Claude Code session in the background, so nothing waits
    for an approval while you are gone. `/saani:auto here` runs the same in your own session and asks you whenever it needs to; plain
    `/saani:auto` asks which.
-2. **The run.** At most 2 issues in flight per project. For each: its own worktree (`saani start`), a coder subagent, a reviewer
+2. **The run.** By default up to 2 issues in flight per project, sized from the machine (`[auto] parallel` sets up to 10; a warning above 5). For each: its own worktree (`saani start`), a coder subagent, a reviewer
    subagent on the diff (a change of a few lines Claude makes itself), then `saani land`: a lock, a merge, the landing tests, a push
    to `dev`. As soon as one issue lands, the next eligible one starts. Stop rules end it early (40 refusals, 10 of the same reason in
    a row, 10 hours).
@@ -26,8 +26,10 @@ and lands it, while Saani's commands and its guard keep the work safe.
    what a run must never do (push outside `saani land`, merge, read secrets, edit outside its worktrees, run anything off its list).
 4. **The end.** One `dev` -> `main` pull request, its CI run (`saani ci`), and a report on it: what landed, what waits for you and
    why, the refusals, the cost. `saani auto status` shows a running run. The run is switched off when it is done: by a small watcher
-   when an away session ends, by the skill after the report of a `here` run (add `--keep-on`, as in `/saani:auto away --keep-on`, to
-   keep it on; `/saani:auto off` in your own session ends it any time).
+   when an away session ends, by the skill after the report of a `here` run (`/saani:auto off` in your own session ends it any time).
+   Add `--keep-on`, as in `/saani:auto away --keep-on`, and the run stays on and keeps taking issues that become eligible while it works
+   (nothing is spent while it waits) until a stop rule or an hour without work ends it the normal way. (In v1.1.0, `--keep-on` only meant that
+   the watcher did not switch the run off when the session ended; since #70 it is this.)
 5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
    when the merge changes the version, creates the GitHub release `v<version>` with notes written from the issues.
    `/saani:merge --deploy` (or `/saani:deploy` later) then deploys, if the project deploys.
@@ -52,7 +54,7 @@ The full design (principles, landing rules, test tiers, CI placement, the guard,
   [Type](https://docs.github.com/en/issues/tracking-your-work-with-issues/configuring-issues/managing-issue-types-in-an-organization)
   (Task, Feature, Bug), or labels mapped to branch prefixes
 - Optional: GitHub's issue statuses. Saani moves them (In progress, In review; GitHub sets Done when the deploy closes the issue) and
-  `auto` takes only Todo issues: drag a card to Todo on a repository board to let a run take it. Without them, Saani works from its labels
+  `auto` takes every ready issue except those in Backlog: Backlog is your "not now", drag a card out of it to let a run take it. Without them, Saani works from its labels
 
 Developed and used on Windows (PowerShell 5.1). The code has guards for macOS and Linux, but they are not tested there yet.
 
@@ -114,10 +116,10 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | `saani auto ...` | `/saani:auto [here\|away] [--keep-on] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
 | `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button (ending with the Saani release or commit that serves the map); "Stale" when Saani does not answer |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers: one map shows them all |
-| `saani status` | `/saani:status` | landing lock, worktrees, conflicts per landing, test queue |
+| `saani status` | `/saani:status` | what runs, what is blocked or waits in Saani's machinery (or: no activity); `--stats`: landings, test queue medians |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | a worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land a worktree: lock, merge, rebuild, landing tests, push, clean up |
-| `saani test [--kind landing\|full] -- <cmd>` | `/saani:test`, `/saani:test full` | a test command through the machine-wide queue |
+| `saani test [--kind landing\|full] [--fresh] -- <cmd>` | `/saani:test`, `/saani:test full` | a test command through the machine-wide queue (a green result for the same tree and command is reused; `--fresh` runs anyway) |
 | `saani comment <n> <kind>` | `/saani:comment 42 blocked` | a status comment on an issue and its label (`start`, `land` and `ci` post theirs by themselves) |
 | `saani merge [PR] [--deploy] [--dry-run]` | `/saani:merge` | merge the green `dev` -> `main` pull request, relabel, clean up, create the release when the version changed |
 | `saani deploy [--dry-run]` | `/saani:deploy` | CI green, no issue says "⛔ Do not deploy", checks, dry run, deploy, log, prod tag, issues closed |
@@ -139,7 +141,7 @@ A slash command for every `saani` command, the auto skill, the worker subagents 
 [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Status
-On `dev` after v1.1.0 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
+On `dev` after v1.2.0 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
 change goes through `saani start` and `saani land`, and its releases are made by `saani merge`. The roadmap is in the issues.
 
 ## Contributing

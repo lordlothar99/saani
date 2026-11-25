@@ -17,9 +17,11 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
   saani auto on|off|status|report ...               an auto run's record, stop rules and report (saani/auto.py)
   saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
                                                     branch, for an auto run to work in (never landed)
-  saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
+  saani status [--stats]                            what runs, is blocked or waits in Saani's machinery (landing lock, test queue, auto run,
+                                                    tests started outside the queue), or that it is idle; --stats: the landing counts,
+                                                    the merged branches waiting, the test queue's medians (saani/activity.py)
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
-  saani test [--kind landing|full] [--worktree P] -- <cmd...>  run a test command through the test queue (saani/queue.py)
+  saani test [--kind landing|full] [--worktree P] [--fresh] -- <cmd...> run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
                                                     trailers (Why: and Undo: by default)
 
@@ -49,7 +51,7 @@ import subprocess
 import sys
 import time
 
-from . import comments, config, queue, status
+from . import activity, comments, config, queue, status
 
 LOCK_NAME = "saani-landing.lock"
 LANDINGS = "saani-landings.jsonl"
@@ -320,11 +322,12 @@ def cmd_auto(args):
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     action = getattr(args, "action", None)
     for name, only in (("folder", ("on", "away", "watch")), ("deploy", ("on", "away", "watch")), ("here", ("on",)), ("check", ("status",)),
-                       ("pr", ("report",)), ("post", ("report",)), ("run_id", ("off",)), ("keep_on", ("away", "watch"))):
+                       ("pr", ("report",)), ("post", ("report",)), ("reason", ("report",)), ("run_id", ("off",)), ("wait", ("pick",)), ("keep_on", ("away", "watch"))):
         given = getattr(args, name, None)
         if given is not None and given is not False and action not in only:
             raise SystemExit(f"saani auto: --{name.removesuffix('_id').replace('_', '-')} belongs to "
-                             + " and ".join(f"`saani auto {o}`" for o in only))
+                             + " and ".join(f"`saani auto {o}`" for o in only)
+                             + (" (the run's mode is --keep-on; [auto] keep_on_quiet_minutes sets its quiet time)" if name == "wait" else ""))
     if action in ("on", "off", "status", "report", "away", "watch"):
         if action not in ("on", "away", "watch") and getattr(args, "id", None):
             raise SystemExit(f"saani auto {action}: --id belongs to `saani auto`, `saani auto on` and `saani auto away`" + ("; `off` takes --run" if action == "off" else ""))
@@ -352,7 +355,7 @@ def cmd_auto(args):
     (folder / "build").mkdir(exist_ok=True)
     print(f"auto run:  {stamp}")
     print(f"worktree:  {folder}")
-    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` and `saani ci merged` remove it once it is finished)")
+    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` removes it once the run is off, it started more than 2 hours ago and it has no commit of its own, `saani ci merged` once it is merged)")
 
 
 def cmd_start(args):
@@ -395,6 +398,8 @@ def cmd_start(args):
         subprocess.run(["gh", "issue", "edit", str(args.issue), "--repo", c.repo, "--add-assignee", c.owner], capture_output=True)
     if args.no_comment or not comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name}):
         status.advance(args.issue, "started")              # the comment sets it; without one (skipped or refused), set it here
+        from . import auto
+        auto.journal(args.issue, "started")                # the comment journals it itself; inside a run this marks the issue as the run's (#56)
     print(f"worktree: {folder}")
     print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
     print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
@@ -747,10 +752,76 @@ def finished_auto_runs(before=None, cwd=None):
         started = auto_started(branch, path)
         if started is None or started >= cutoff:
             continue
-        if path and git("status", "--porcelain", cwd=path):
+        if path and (not pathlib.Path(path).is_dir() or git("status", "--porcelain", cwd=path)):
             continue
         out.append((path, branch))
     return out
+
+
+AUTO_GRACE_HOURS = 2       # a run younger than this is never pruned as unused: `saani auto` made its folder, `saani auto on` may not have run yet
+
+
+def _same_path_key(p):
+    """A path as a comparison key: normalised, forward slashes, no trailing slash, case-folded on Windows."""
+    return os.path.normcase(os.path.normpath(str(p))).replace("\\", "/").rstrip("/")
+
+
+def unused_auto_runs(cwd=None):
+    """(found, kept): the auto runs (`auto/<id>`, with or without a worktree) of which the run is off (no run record, or the record is for
+    another id) and the branch has no commit beyond the integration branch it came from, with nothing uncommitted: `found` is
+    [(worktree path or None, branch)] as `finished_auto_runs`; `kept` is [(branch, reason)] for every other auto run branch (#75).
+    A run that finished with nothing landed has no pull request, so nothing else would ever remove it."""
+    from . import auto
+    c = cfg()
+    unreadable, on, on_folder = False, None, None      # fail safe: a record that cannot be read keeps every run
+    try:
+        rpath = auto.record_path()
+    except SystemExit:
+        rpath = None
+    if rpath is None:
+        unreadable = True
+    elif pathlib.Path(rpath).exists():
+        try:
+            rec = json.loads(pathlib.Path(rpath).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rec = None
+        if isinstance(rec, dict) and rec.get("id"):
+            on = str(rec["id"])
+            on_folder = _same_path_key(rec["folder"]) if rec.get("folder") else None
+        else:
+            unreadable = True
+    held = {b: p for p, b in worktrees(cwd) if b}
+    branches = git("branch", "--format=%(refname:short)", cwd=cwd).splitlines()
+    cutoff = datetime.datetime.now() - datetime.timedelta(hours=AUTO_GRACE_HOURS)
+    found, kept = [], []
+    for branch in sorted(b for b in branches if b.startswith(RUN_BRANCHES)):
+        path = held.get(branch)
+        if unreadable:
+            kept.append((branch, "run record unreadable"))
+            continue
+        if on is not None and (branch.split("/", 1)[1] == on or (path and on_folder and _same_path_key(path) == on_folder)):
+            kept.append((branch, "the run is still on"))
+            continue
+        started = auto_started(branch, path)
+        if started is None:                                    # no timestamp in the id, no folder: the branch's last commit
+            tip = git("log", "-1", "--format=%ct", branch, cwd=cwd, check=False)
+            started = datetime.datetime.fromtimestamp(int(tip.stdout.strip())) if tip.returncode == 0 and tip.stdout.strip().isdigit() else None
+        if started is None or started >= cutoff:
+            kept.append((branch, f"started less than {AUTO_GRACE_HOURS} h ago" if started else "its start is unknown"))
+            continue
+        if path and not pathlib.Path(path).is_dir():
+            kept.append((branch, "its folder is missing (`git worktree prune` clears it)"))
+            continue
+        ahead = git("rev-list", "--count", f"origin/{c.integration}..{branch}", cwd=cwd, check=False)
+        if ahead.returncode != 0:
+            kept.append((branch, f"cannot compare with origin/{c.integration}"))
+        elif ahead.stdout.strip() != "0":
+            kept.append((branch, f"it has commits that are not on {c.integration}"))
+        elif path and (lambda r: r.returncode != 0 or r.stdout.strip())(git("status", "--porcelain", cwd=path, check=False)):
+            kept.append((branch, "its folder has uncommitted changes (or its state cannot be read)"))
+        else:
+            found.append((path, branch))
+    return found, kept
 
 
 def remove_auto_runs(found, dry=False, cwd=None):
@@ -758,13 +829,16 @@ def remove_auto_runs(found, dry=False, cwd=None):
     number removed."""
     done = 0
     for path, branch in found:
-        print(("would remove" if dry else "removing") + f" the auto run {branch}" + (f" and its folder {path}" if path else ""))
+        what = f"the auto run {branch}" + (f" and its folder {path}" if path else "")
         if dry:
+            print(f"would remove {what}")
+            done += 1
             continue
         if path and git("worktree", "remove", str(path), cwd=cwd, check=False).returncode != 0:
-            print(f"  kept: git would not remove {path}")
+            print(f"kept the auto run {branch}: git would not remove {path}")
             continue
         git("branch", "-D", branch, cwd=cwd, check=False)
+        print(f"removed {what}")
         done += 1
     return done
 
@@ -772,10 +846,14 @@ def remove_auto_runs(found, dry=False, cwd=None):
 def cmd_prune(args):
     local, remote = prune_candidates()
     runs = finished_auto_runs()
-    if runs:
-        remove_auto_runs(runs, args.dry_run)
+    unused, kept = unused_auto_runs()
+    runs += [r for r in unused if r[1] not in {b for _, b in runs}]
+    kept = [(b, why) for b, why in kept if b not in {b2 for _, b2 in runs}]
+    for branch, why in kept:
+        print(f"kept the auto run {branch}: {why}")
+    removed = remove_auto_runs(runs, args.dry_run) if runs else 0
     if not local and (args.local_only or not remote):
-        if not runs:
+        if not removed:
             print("nothing to prune: every merged branch is already gone")
         return 0
     if local:
@@ -857,11 +935,23 @@ def cmd_status(args):
     warning = worktrees_warning(cfg())
     if warning:
         print(warning)
-    held = read_lock(lock_path())
-    print("landing lock: " + ("free" if held is None else f"held by {held.get('branch')} since {held.get('started')}"))
-    for path, branch in worktrees():
-        if in_wt_dir(path):
-            print(f"  {branch:45} {path}")
+    if not getattr(args, "stats", False):
+        held = read_lock(lock_path())                      # None: free; {}: there, but unreadable
+        folder = lock_path().parent / queue.QUEUE_DIR
+        jobs = queue.jobs_in(folder) if folder.is_dir() else []
+        busy = queue.read_json(folder / queue.RUNNER) if folder.is_dir() else None
+        if busy and not queue.alive(busy.get("pid")):
+            busy = None                                    # a runner whose process is gone runs nothing
+        waiting = queue.order([j for j in jobs if j.get("state") == "waiting"])
+        wts = [(p, b) for p, b in worktrees() if in_wt_dir(p)]
+        procs = activity.processes()
+        outside = activity.outside_runs(procs, [j.get("pid") for j in jobs] + [(busy or {}).get("pid")],
+                                        activity.known_commands(cfg())) if procs is not None else []
+        from . import auto
+        lines = activity.tasks(held, busy, waiting, auto.read_record(), wts, outside, job_since=lambda j: activity.job_since(j, folder))
+        print("\n".join(activity.render(lines, wts, outside_unknown=procs is None)))
+        return 0
+    print("statistics:")
     log = main_checkout() / "build" / LANDINGS
     rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()] if log.is_file() else []
     s = landing_summary(rows)
@@ -874,21 +964,26 @@ def cmd_status(args):
             print(f"merged branches waiting: {len(local)} local, {len(remote)} on GitHub, {len(runs)} finished auto run(s) (saani prune)")
     except SystemExit:                                   # offline: status still prints the rest
         print("merged branches: unknown (git fetch failed)")
-    folder = lock_path().parent / queue.QUEUE_DIR
-    jobs = queue.jobs_in(folder) if folder.is_dir() else []
-    busy = queue.read_json(folder / queue.RUNNER) if folder.is_dir() else None
-    waiting = queue.order([j for j in jobs if j.get("state") == "waiting"])
-    print("test queue: " + (f"{busy.get('kind')} of {pathlib.Path(busy.get('worktree', '')).name} runs" if busy else "idle")
-          + (f"; waiting: {', '.join(j['kind'] + ' of ' + pathlib.Path(j['worktree']).name for j in waiting)}" if waiting else ""))
     for kind, k in queue.summary(queue.rows(main_checkout() / "build" / TESTS_LOG)).items():
         print(f"  {kind:6} {k['jobs']} job(s), median wait {k['wait']} s, median run {k['run']} s")
     return 0
 
 
-def queued_run(kind, command, cwd):
-    """Run a test command through the test queue from the worktree `cwd`; its exit code."""
+def clean_tree(cwd):
+    """The git tree id of the checkout `cwd` when it is clean, else None: no uncommitted change and no untracked file (not ignored) that the
+    tests could read. Only then is a stored test result for that tree the result of this checkout; when git says anything unclear: None."""
+    status = git("status", "--porcelain", "--untracked-files=all", cwd=cwd, check=False)
+    if status.returncode != 0 or status.stdout.strip():
+        return None
+    tree = git("rev-parse", "HEAD^{tree}", cwd=cwd, check=False)
+    return tree.stdout.strip() or None if tree.returncode == 0 else None
+
+
+def queued_run(kind, command, cwd, fresh=False):
+    """Run a test command through the test queue from the worktree `cwd`; its exit code. A clean checkout whose tree and command have a green
+    result in the queue's store reuses it (`fresh`: run anyway; saani/queue.py)."""
     return queue.run(kind, command, lock_path(cwd).parent, cwd, git("rev-parse", "HEAD", cwd=cwd),
-                     main_checkout(cwd) / "build" / TESTS_LOG)
+                     main_checkout(cwd) / "build" / TESTS_LOG, tree=lambda: clean_tree(cwd), fresh=fresh)
 
 
 def test_kind(kind):
@@ -909,7 +1004,7 @@ def cmd_test(args):
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("give the command after --, e.g. saani test -- python -m pytest")
-    return queued_run(test_kind(args.kind), command, named_worktree(args.worktree))
+    return queued_run(test_kind(args.kind), command, named_worktree(args.worktree), fresh=bool(getattr(args, "fresh", False)))
 
 
 def cmd_check_msg(args):
@@ -947,12 +1042,16 @@ def add_parsers(sub):
     p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM); with `on`, the id of the run")
     p.add_argument("--folder", help="on, away: the run's folder (default: the current one), inside the worktrees folder")
     p.add_argument("--deploy", action="store_true", help="on, away: the owner started the run so that it may deploy")
-    p.add_argument("--keep-on", dest="keep_on", action="store_true", help="away: leave the run on when the session ends (default: switched off)")
+    p.add_argument("--keep-on", dest="keep_on", action="store_true",
+                   help="away: the run stays on and keeps taking newly eligible issues when its list is empty (ends after [auto] keep_on_quiet_minutes of quiet)")
+    p.add_argument("--wait", type=float, default=None, metavar="MINUTES",
+                   help="pick: block up to MINUTES until an issue is eligible or a stop rule is reached (JSON)")
     p.add_argument("--here", action="store_true", help="on: the interactive sub-mode: the run's record, the guard left in present mode")
     p.add_argument("--run", dest="run_id", help="off: end this run (its guard entries and the record), from a terminal")
     p.add_argument("--check", action="store_true", help="status: exit 3 when a stop rule is reached")
     p.add_argument("--pr", type=int, help="report: the pull request the report is for (the merge commands name it)")
     p.add_argument("--post", action="store_true", help="report: comment the report on the pull request (--pr)")
+    p.add_argument("--reason", help="report: why the run stopped (no slot, nothing eligible, a stop rule), in the report and its journal")
     p.add_argument("--json", action="store_true", help="pick: as JSON")
     p.add_argument("--limit", type=int, help="pick: at most this many eligible issues")
     p.add_argument("--only", type=int, nargs="+", metavar="N", help="pick, away: take only these issues (pick: before the overlap check)")
@@ -964,7 +1063,9 @@ def add_parsers(sub):
     p.add_argument("--worktree", help="land this worktree instead of the current folder's (an auto run cannot change folder)")
     p.add_argument("--no-comment", action="store_true", help="do not comment the landing on the issue or label it in-dev (print the step instead)")
     p.set_defaults(run=cmd_land)
-    p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue; `status sync`: the issues' GitHub statuses")
+    p = sub.add_parser("status", help="what runs, what is blocked, what waits (or: everything is idle); `--stats`: landings and test queue medians; "
+                                      "`status sync`: the issues' GitHub statuses")
+    p.add_argument("--stats", action="store_true", help="print instead the landing counts, the merged branches waiting and the test queue's medians")
     p.add_argument("action", nargs="?", choices=["sync"],
                    help="sync: give each open issue the GitHub status its state implies (saani/status.py), a dry run without --apply")
     p.add_argument("--apply", action="store_true", help="sync: set the statuses (default: print what would move)")
@@ -977,6 +1078,7 @@ def add_parsers(sub):
     p.add_argument("--kind", default="landing", metavar="{landing,full}",
                    help="landing (the tests before a landing) goes before full; a landing's own run goes first")
     p.add_argument("--worktree", help="run in this worktree instead of the current folder (a subagent's cd does not last)")
+    p.add_argument("--fresh", action="store_true", help="run the command even when a green result for this tree and command is stored")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(run=cmd_test)
     p = sub.add_parser("check-msg", help="the commit-msg hook")

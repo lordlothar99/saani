@@ -1,2 +1,2 @@
 """Saani: an AI workshop that takes GitHub issues from idea to production (README.md)."""
-__version__ = "1.1.0"
+__version__ = "1.2.0"
