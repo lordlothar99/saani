@@ -320,11 +320,14 @@ def cmd_auto(args):
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     action = getattr(args, "action", None)
     for name, only in (("folder", ("on", "away", "watch")), ("deploy", ("on", "away", "watch")), ("here", ("on",)), ("check", ("status",)),
-                       ("pr", ("report",)), ("post", ("report",)), ("run_id", ("off",)), ("keep_on", ("away", "watch"))):
+                       ("pr", ("report",)), ("post", ("report",)), ("run_id", ("off",)), ("wait", ("pick", "away", "watch"))):
         given = getattr(args, name, None)
         if given is not None and given is not False and action not in only:
             raise SystemExit(f"saani auto: --{name.removesuffix('_id').replace('_', '-')} belongs to "
                              + " and ".join(f"`saani auto {o}`" for o in only))
+    if action in ("away", "watch") and getattr(args, "wait", None) not in (None, True, False):
+        raise SystemExit(f"saani auto {action}: --wait takes no number here (the minutes belong to `saani auto pick --wait <minutes>`; "
+                         "[auto] wait_quiet_minutes sets the run's quiet time)")
     if action in ("on", "off", "status", "report", "away", "watch"):
         if action not in ("on", "away", "watch") and getattr(args, "id", None):
             raise SystemExit(f"saani auto {action}: --id belongs to `saani auto`, `saani auto on` and `saani auto away`" + ("; `off` takes --run" if action == "off" else ""))
@@ -958,7 +961,9 @@ def add_parsers(sub):
     p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM); with `on`, the id of the run")
     p.add_argument("--folder", help="on, away: the run's folder (default: the current one), inside the worktrees folder")
     p.add_argument("--deploy", action="store_true", help="on, away: the owner started the run so that it may deploy")
-    p.add_argument("--keep-on", dest="keep_on", action="store_true", help="away: leave the run on when the session ends (default: switched off)")
+    p.add_argument("--wait", nargs="?", type=float, const=True, default=None, metavar="MINUTES",
+                   help="away: the run waits for new eligible issues when its list is empty (ends after [auto] wait_quiet_minutes of quiet); "
+                        "pick: block up to MINUTES until an issue is eligible or a stop rule is reached (JSON)")
     p.add_argument("--here", action="store_true", help="on: the interactive sub-mode: the run's record, the guard left in present mode")
     p.add_argument("--run", dest="run_id", help="off: end this run (its guard entries and the record), from a terminal")
     p.add_argument("--check", action="store_true", help="status: exit 3 when a stop rule is reached")

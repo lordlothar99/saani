@@ -34,6 +34,16 @@ def test_a_setting_outside_a_table_is_refused():
         config.from_toml({"project": {"repo": "acme/webshop"}, "repo": "acme/webshop"}, ".")
 
 
+def test_auto_wait_quiet_minutes_is_read_and_validated():
+    base = {"project": {"repo": "acme/webshop"}}
+    assert config.from_toml({**base, "auto": {"wait_quiet_minutes": 30}}, ".").wait_quiet_minutes == 30
+    assert config.from_toml({**base, "auto": {"wait_quiet_minutes": 2.5}}, ".").wait_quiet_minutes == 2.5
+    assert config.from_toml(base, ".").wait_quiet_minutes == 60
+    for bad in (True, 0, -5, "60"):
+        with pytest.raises(SystemExit, match="wait_quiet_minutes must be a number of minutes"):
+            config.from_toml({**base, "auto": {"wait_quiet_minutes": bad}}, ".")
+
+
 def test_repo_must_be_owner_slash_name():
     with pytest.raises(SystemExit, match="owner/name"):
         config.from_toml({"project": {"repo": "webshop"}}, ".")

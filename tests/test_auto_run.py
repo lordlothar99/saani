@@ -770,7 +770,7 @@ def test_away_starts_the_headless_session_detached_from_the_main_checkout_with_i
     assert auto.cmd_away(args(only=[12]), which=lambda name: "/bin/claude", popen=popen) == 0
     argv, kw = seen[0]
     assert argv[0] == sys.executable and argv[1] == "-I" and pathlib.Path(argv[2]).name == "saani.py"      # the watcher, not the session
-    assert argv[3:7] == ["auto", "watch", "--id", "2026-11-22_0800"] and argv[7] == "--folder" and "--keep-on" not in argv
+    assert argv[3:7] == ["auto", "watch", "--id", "2026-11-22_0800"] and argv[7] == "--folder" and "--wait" not in argv
     assert argv[-2:] == ["--only", "12"]
     assert pathlib.Path(kw["cwd"]).resolve() == world.root.resolve()          # the main folder: the committed relative settings apply
     assert kw["stdin"] is subprocess.DEVNULL and kw["stderr"] is subprocess.STDOUT
@@ -937,7 +937,7 @@ def session_on(world, run="r1", session="sess"):
 
 
 def watch_args(**kw):
-    return args(**{"id": "r1", "folder": "/w/auto-r1", "only": None, "keep_on": False, **kw})
+    return args(**{"id": "r1", "folder": "/w/auto-r1", "only": None, "wait": False, **kw})
 
 
 def test_the_watcher_switches_the_run_off_when_the_session_ends_and_logs_it(world, tmp_path, capsys):
@@ -956,7 +956,7 @@ def test_the_pid_file_holds_the_session_s_process_id(world, tmp_path):
         proc = fake_popen(tmp_path)(argv, **kw)
         seen.append(proc.pid)
         return proc
-    auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=popen)
+    auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=popen)
     assert auto.pid_path("r1").read_text(encoding="utf-8") == str(seen[0])
 
 
@@ -972,10 +972,15 @@ def test_the_watcher_runs_the_same_session_command_and_env(world, tmp_path):
     assert kw["env"][auto.WAIT_VAR] == "0" and pathlib.Path(kw["cwd"]).resolve() == world.root.resolve()
 
 
-def test_keep_on_leaves_the_run_on(world, tmp_path, capsys):
-    assert auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=fake_popen(tmp_path, during=session_on(world))) == 0
-    assert auto.read_record()["id"] == "r1"
-    assert "session ended with code 0; kept on (--keep-on)" in capsys.readouterr().out
+def test_wait_runs_the_session_with_wait_and_the_watcher_still_switches_the_run_off(world, tmp_path, capsys):
+    seen = []
+    real = fake_popen(tmp_path, during=session_on(world))
+    def popen(argv, **kw):
+        seen.append(argv)
+        return real(argv, **kw)
+    assert auto.cmd_watch(watch_args(wait=True), which=lambda n: "claude", popen=popen) == 0
+    assert seen[0][2] == "/saani:auto run r1 --folder /w/auto-r1 --wait"
+    assert auto.read_record() is None and "session ended with code 0; run switched off" in capsys.readouterr().out
 
 
 def test_a_failing_session_is_switched_off_too(world, tmp_path, capsys):
@@ -997,8 +1002,6 @@ def test_a_session_that_cannot_start_is_logged_and_the_run_of_this_start_switche
         raise OSError("late")
     auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=start_then_fail)
     assert auto.read_record() is None and "session could not start (late); run switched off" in capsys.readouterr().out
-    auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=start_then_fail)
-    assert auto.read_record() is not None and "could not start (late); kept on" in capsys.readouterr().out
 
 
 def test_the_watcher_leaves_another_run_alone_and_survives_no_record(world, tmp_path, capsys):
@@ -1057,17 +1060,23 @@ def test_away_refuses_while_a_run_is_on_and_leaves_the_pid_file_alone(world):
 def test_the_watcher_is_for_away_and_asks_for_an_id_and_a_folder(world):
     with pytest.raises(SystemExit, match="--id"):
         auto.cmd_watch(args(only=None, folder=None))
-    with pytest.raises(SystemExit, match="--keep-on belongs to `saani auto away` and `saani auto watch`"):
-        core.cmd_auto(type("A", (), {"action": "off", "keep_on": True, "id": None, "folder": None, "deploy": False, "run_id": None})())
+    with pytest.raises(SystemExit, match="--wait belongs to `saani auto pick` and `saani auto away` and `saani auto watch`"):
+        core.cmd_auto(type("A", (), {"action": "off", "wait": True, "id": None, "folder": None, "deploy": False, "run_id": None})())
 
 
-def test_away_passes_keep_on_to_the_watcher(world):
+def test_away_passes_wait_to_the_watcher(world):
     seen = []
     def popen(argv, **kw):
         seen.append(argv)
         return type("P", (), {"pid": 5})()
-    assert auto.cmd_away(args(only=None, keep_on=True), which=lambda n: "claude", popen=popen) == 0
-    assert "--keep-on" in seen[0] and "--only" not in seen[0]
+    assert auto.cmd_away(args(only=None, wait=True), which=lambda n: "claude", popen=popen) == 0
+    assert "--wait" in seen[0] and "--only" not in seen[0]
+    assert auto.watch_command("r1", "/f", wait=True)[-1] == "--wait"
+
+
+def test_away_wait_takes_no_number(world):
+    with pytest.raises(SystemExit, match="--wait takes no number"):
+        core.cmd_auto(type("A", (), {"action": "away", "wait": 5.0, "id": None, "folder": None, "deploy": False, "run_id": None})())
 
 
 def test_on_here_writes_the_record_but_never_the_guard_s_marker(world, capsys):
@@ -1083,3 +1092,121 @@ def test_plain_on_is_the_away_mode_and_prints_the_marker(world, capsys):
     assert auto.cmd_on(args()) == 0
     assert guard.MARKER.search(capsys.readouterr().out)
     assert json.loads((world.git / auto.RECORD).read_text(encoding="utf-8"))["mode"] == "away"
+
+
+# ---------------------------------------------------------------- pick --wait (#70): injected clock and sleep, no real waiting
+
+class FakeTime:
+    def __init__(self):
+        self.now, self.slept = 1000.0, []
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def answer(*numbers):
+    return {"slots": 2, "parallel": 2, "running": [], "eligible": [{"number": n} for n in numbers], "skipped": []}
+
+
+def test_pick_wait_returns_as_soon_as_an_issue_is_eligible(world):
+    t, answers = FakeTime(), [answer(), answer(), answer(7)]
+    got = auto.wait_pick(60, pick_fn=lambda only=None: answers.pop(0), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert [e["number"] for e in got["eligible"]] == [7] and not answers
+    assert t.slept == [180, 180] and got["waited_minutes"] == 6.0 and got["wait_quiet_minutes"] == 60
+
+
+def test_pick_wait_times_out_with_an_empty_list(world):
+    t = FakeTime()
+    got = auto.wait_pick(10, pick_fn=lambda only=None: answer(), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["eligible"] == [] and "stop" not in got
+    assert t.slept == [180, 180, 180, 60] and got["waited_minutes"] == 10.0          # the last sleep stops at the deadline
+
+
+def test_pick_wait_returns_promptly_when_a_stop_rule_is_reached(world):
+    t = FakeTime()
+    hit = [("hours", 10.2, 10)]
+    got = auto.wait_pick(60, pick_fn=lambda only=None: answer(3), stop_fn=lambda: hit, clock=t.clock, sleep=t.sleep)
+    assert t.slept == [] and got["eligible"] == [] and got["stop"] == [{"rule": "hours", "value": 10.2, "limit": 10}]
+    t, calls = FakeTime(), []
+    def stop():
+        calls.append(1)
+        return [("refusals", 40, 40)] if len(calls) == 3 else []
+    got = auto.wait_pick(60, pick_fn=lambda only=None: answer(), stop_fn=stop, clock=t.clock, sleep=t.sleep)
+    assert t.slept == [180, 180] and got["stop"][0]["rule"] == "refusals"
+
+
+def test_stop_rules_come_from_the_run_s_record(world):
+    assert auto.stop_rules_hit() == []                                           # no run on: no rules
+    record(world, started=auto.utc_now())
+    assert auto.stop_rules_hit() == []
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=11))
+    assert [k for k, _, _ in auto.stop_rules_hit()] == ["hours"]
+
+
+def test_pick_wait_command_prints_the_pick_json(world, monkeypatch, capsys):
+    monkeypatch.setattr(auto, "pick", lambda only=None: answer(4))
+    a = type("A", (), {"wait": 5.0, "only": None, "limit": None, "json": False})()
+    assert auto.cmd_pick(a) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [e["number"] for e in data["eligible"]] == [4] and data["waited_minutes"] == 0.0
+    with pytest.raises(SystemExit, match="needs the minutes"):
+        auto.cmd_pick(type("A", (), {"wait": True, "only": None, "limit": None, "json": False})())
+
+
+def test_pick_wait_keeps_waiting_while_no_slot_is_free(world):
+    t = FakeTime()
+    full = {**answer(7), "slots": 0}
+    got = auto.wait_pick(10, pick_fn=lambda only=None: dict(full), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert t.slept == [180, 180, 180, 60] and got["waited_minutes"] == 10.0          # waited out, never returned for a full house
+    answers = [dict(full), answer(7)]
+    t = FakeTime()
+    got = auto.wait_pick(10, pick_fn=lambda only=None: answers.pop(0), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert t.slept == [180] and [e["number"] for e in got["eligible"]] == [7]
+
+
+def test_pick_wait_starts_no_pick_that_could_end_past_the_deadline(world):
+    t, picks = FakeTime(), []
+    def pick_fn(only=None):
+        picks.append(t.now)
+        return answer()
+    auto.wait_pick(10, pick_fn=pick_fn, stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert picks == [1000.0, 1180.0, 1360.0, 1540.0]                              # none at the deadline (1600) itself
+
+
+def test_a_missing_run_record_is_a_stop_rule_while_the_guard_holds_the_run(world):
+    assert auto.stop_rules_hit() == []
+    guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)               # the guard's entry, no record: `auto off` ran
+    assert [k for k, _, _ in auto.stop_rules_hit()] == ["record missing"]
+    got = auto.wait_pick(60, pick_fn=lambda only=None: answer(3), clock=FakeTime().clock, sleep=lambda s: pytest.fail("slept"))
+    assert got["eligible"] == [] and got["stop"][0]["rule"] == "record missing"
+
+
+def test_a_stop_rule_met_in_a_wait_is_journalled(world):
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=11))
+    assert auto.stop_rules_hit()
+    assert "hours reached" in auto.journal_path("r1").read_text(encoding="utf-8")
+
+
+def test_pick_wait_refuses_a_number_that_is_not_finite(world):
+    for bad in (float("inf"), float("nan"), -1.0, 0.0):
+        with pytest.raises(SystemExit, match="needs the minutes"):
+            auto.cmd_pick(type("A", (), {"wait": bad, "only": None, "limit": None, "json": False})())
+
+
+def test_the_command_line_reads_wait_as_minutes_for_pick_and_a_flag_for_away(world):
+    import argparse
+    parser = argparse.ArgumentParser()
+    core.add_parsers(parser.add_subparsers(dest="cmd", required=True))
+    got = parser.parse_args(["auto", "pick", "--wait", "9", "--json"])
+    assert got.wait == 9.0 and got.json is True
+    got = parser.parse_args(["auto", "away", "--wait", "--only", "12"])
+    assert got.wait is True and got.only == [12]
+    assert parser.parse_args(["auto", "away"]).wait is None
+
+
+def test_wait_quiet_minutes_is_a_setting(world):
+    assert config.Config().wait_quiet_minutes == 60
