@@ -870,8 +870,8 @@ def commits_word(n):
 
 def end_decision(ahead, pr, landed, version_file, before, after):
     """What the End of a run does about the integration -> production pull request (pure). `ahead`: the commits the integration branch
-    has that production has not; `pr`: the number of the open release pull request, or None; `landed`: the issues the run landed;
-    `version_file`, `before`, `after`: `[release] version_file` and the version in it on production and on the integration branch.
+    has that production has not; `pr`: the number of the open release pull request, or None; `landed`: how many issues the run landed (the
+    result's `landed_count`); `version_file`, `before`, `after`: `[release] version_file` and the version in it on production and on the integration branch.
     The pull request is opened or updated whenever the branch is ahead, whether the run landed anything or not. When it does not change
     the version (or no version file is set) it says so: `saani merge` then creates no release. The run never bumps the version."""
     action = "none" if not ahead else ("update" if pr else "open")
@@ -882,7 +882,7 @@ def end_decision(ahead, pr, landed, version_file, before, after):
     else:
         why = f"the integration branch is ahead of production: {commits_word(ahead)}"
     no_bump = bool(ahead) and (not version_file or after is None or before == after)
-    return {"action": action, "ahead": ahead, "pr": pr, "landed": landed, "why": why, "no_bump": no_bump, "note": NO_BUMP if no_bump else None}
+    return {"action": action, "ahead": ahead, "pr": pr, "landed_count": landed, "why": why, "no_bump": no_bump, "note": NO_BUMP if no_bump else None}
 
 
 def ahead_count():
@@ -906,15 +906,25 @@ def open_release_pr():
 
 
 def end_state(landed):
-    """`end_decision` from what git and GitHub say now; `landed`: how many issues the run landed."""
+    """`end_decision` from what git and GitHub say now (origin is fetched first, a failure only warns); `landed`: how many issues the run landed."""
     from . import notes
     c = cfg()
+    fetch()
     ahead = ahead_count()
     before = after = None
     if ahead and c.version_file:
         before = notes.version_of(notes.file_at(c.production, c.version_file))
         after = notes.version_of(notes.file_at(c.integration, c.version_file))
     return end_decision(ahead, open_release_pr() if ahead else None, landed, c.version_file, before, after)
+
+
+def end_or_error(landed):
+    """`end_state` for a report: a failure never stops the report, it becomes {"error": brief reason} (the section says it could not be read)."""
+    try:
+        return end_state(landed)
+    except (SystemExit, Exception) as e:
+        text = " ".join(str(getattr(e, "code", None) or e or type(e).__name__).split())
+        return {"error": text[:200]}
 
 
 def cmd_end(args):
@@ -970,7 +980,9 @@ def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None
            f"| Folder | {esc(folder)} |", f"| Deploy | {'the owner started the run so' if rec.get('deploy') else 'no'} |", "",
            f"## Issues landed on the integration branch ({len(landed)})"]
     out += [f"- #{n} {esc(title) or esc(subject)}" for n, title, subject in landed] or ["- none"]
-    if end:
+    if end and end.get("error"):
+        out += ["", "## Release pull request", f"- Could not be read, check by hand whether the integration branch is ahead of production: {esc(end['error'])}"]
+    elif end:
         out += ["", "## Release pull request", f"- {esc(end['why'])[0].upper()}{esc(end['why'])[1:]}"]
         if end.get("note"):
             out.append(f"- {esc(end['note']).capitalize()}")
@@ -1010,10 +1022,7 @@ def cmd_report(args):
     if reason:
         journal(None, "stop", note=reason)
     landed = [(n, issue_title(n), subject) for n, subject in landed_issues(rec)]
-    try:
-        end = end_state(len(landed))
-    except SystemExit:                                           # the report is still written: the section is left out
-        end = None
+    end = end_or_error(len(landed))
     text = render_report(rec, now, landed, left_issues(rec, rows, [n for n, _, _ in landed]), refusals_by_reason(rec["id"]), rows,
                          cost_text(rec, now), args.pr, reached(rec, now), reason=reason, end=end)
     path = build_dir() / f"saani-auto-{rec['id']}.md"
@@ -1192,7 +1201,7 @@ def fallback_report(rec, what):
         rows = read_journal(rec["id"])
         landed = [(n, "", subject) for n, subject in landed_issues(rec)]
         text = render_report(rec, now, landed, {}, refusals_by_reason(rec["id"]), rows, cost_text(rec, now), None, reached(rec, now),
-                             reason=None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})")
+                             end=end_or_error(len(landed)), reason=None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})")
         path.write_text(text, encoding="utf-8")
         watch_note(f"no report was written by the session: written for it, {path}")
     except (Exception, SystemExit) as e:

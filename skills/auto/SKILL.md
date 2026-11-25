@@ -113,7 +113,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 4. **End** (also after a stop rule, and also when the run landed nothing). Run `saani auto end --json`: it says whether the integration branch is ahead of
    production (`ahead`), whether a release pull request is open (`pr`) and what to do (`action`: `open`, `update` or `none`). `none`: no pull request; the report says so.
    Otherwise the full run (`[tests] full`); open the ONE integration -> production pull request (milestone set, `refs #n` for every
-   in-dev issue) or, with `update`, update the one already open (its description too); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
+   in-dev issue) or, with `update`, update the one already open (its description too). Write the description to a file and pass it with `--body-file` to both `gh pr create` and `gh pr edit` (the guard refuses a here-document or an inline body on `gh pr edit`). `saani auto end` fetches origin first and its JSON `landed_count` is the number of issues the run landed. Then `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
    most `[auto] ci_attempts` attempts (default 3), then leave the pull request open and say what fails. When `note` is not null (the pull request does not change the version in `[release] version_file`,
    or none is set), put it in the pull request's description and the chat: "no version bump: merging creates no release; bump it or merge as is". The run never bumps the version itself: the owner decides at merge time
    whether it is a release. A run never merges, and never runs `saani merge`: that is the owner's word.

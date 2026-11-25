@@ -218,7 +218,7 @@ every 5 s, read-only.
 The auto checklist is the plugin's skill (`skills/auto/SKILL.md`). An auto run ends with one green integration -> production pull request
 and a report, whenever the integration branch is ahead of production, even if the run landed nothing (issues landed by hand the same day
 wait there too): `saani auto end [--json]` decides (ahead: open the pull request, or update the open one; not ahead: none, and the report
-says so) and changes nothing itself. When the pull request does not change the version in `[release] version_file` (or none is set), its
+says so) and changes nothing itself (it fetches origin first, so the count is current). When the pull request does not change the version in `[release] version_file` (or none is set), its
 description and the report say "no version bump: merging creates no release; bump it or merge as is": the run never bumps the version,
 the owner decides at merge time whether it is a release. This holds after a stop rule too; the owner then says **merge** or **merge and deploy** (`/saani:merge`, `/saani:merge --deploy`), the only way that pull
 request is merged by Saani: the run itself never merges.
@@ -439,7 +439,7 @@ the run stopped ("Stopped by": the limit reached, or for a run that started noth
 eligible ...", else "finished the list"; `--reason TEXT` adds one), id and the folder's name only (a report posted on a pull request
 holds no path of the owner's machine; the watcher of an away run writes the report itself, from git and the journal, when the session ended without one, and prints its path in the log); the issues landed (the `refs #n` of the integration commits since the start, with their titles); the
 issues left with a question or blocked (open issues whose latest status comment, written since the start, is the question or blocked kind,
-or whose latest journal line is; an issue that landed is never left); a "Release pull request" section (why there is one, "the integration branch was ahead: N commits" when the run landed nothing, or that the branch was not ahead; the no-bump note); the refusals by reason; the cost for the window (`saani/cost.py`:
+or whose latest journal line is; an issue that landed is never left); a "Release pull request" section (why there is one, "the integration branch was ahead: N commits" when the run landed nothing, or that the branch was not ahead; the no-bump note; the watcher's fallback report has it too; when it cannot be read, the section says so and why); the refusals by reason; the cost for the window (`saani/cost.py`:
 tokens and the estimate per issue, role and model; the window counts whole days from the start's date); the timeline; and the next step:
 `/saani:merge N` or `/saani:merge N --deploy`. With `--post` it is also a comment on the pull request. The skill adds what only Claude Code
 knows (the options for each pending issue).

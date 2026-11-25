@@ -1313,8 +1313,13 @@ def test_end_decision_no_bump_note_when_the_version_is_not_changed_or_not_set():
 
 def test_end_state_reads_git_and_github_and_never_bumps(world, monkeypatch):
     from saani import notes
-    monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="4\n", stderr=""))
-    seen = []
+    seen, order = [], []
+    monkeypatch.setattr(auto, "fetch", lambda: order.append("fetch"))
+
+    def git(*a, cwd=None, check=True):
+        order.append(a)
+        return subprocess.CompletedProcess(a, 0, stdout="4\n", stderr="")
+    monkeypatch.setattr(core, "git", git)
 
     def gh(*a):
         seen.append(a)
@@ -1323,14 +1328,27 @@ def test_end_state_reads_git_and_github_and_never_bumps(world, monkeypatch):
     monkeypatch.setattr(notes, "file_at", lambda ref, path: 'version = "1.0.0"')
     c = config.current()
     d = auto.end_state(0)
-    assert d["ahead"] == 4 and d["pr"] == 9 and d["action"] == "update"
+    assert d["ahead"] == 4 and d["pr"] == 9 and d["action"] == "update" and d["landed_count"] == 0
+    assert order == ["fetch", ("rev-list", "--count", f"origin/{c.production}..origin/{c.integration}")]      # fetched first, then the origin refs
     assert seen and seen[0][:2] == ("pr", "list") and f"{c.production}" in seen[0] and not any(a[0] == "pr" and a[1] in ("create", "edit") for a in seen)
 
 
 def test_end_state_stops_when_git_cannot_count(world, monkeypatch):
+    monkeypatch.setattr(auto, "fetch", lambda: None)
     monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 128, stdout="", stderr="bad ref"))
     with pytest.raises(SystemExit):
         auto.end_state(0)
+
+
+def test_a_failed_end_state_becomes_a_line_in_the_report(world, monkeypatch):
+    def boom(landed):
+        raise SystemExit("gh pr list failed: no network")
+    monkeypatch.setattr(auto, "end_state", boom)
+    end = auto.end_or_error(0)
+    assert end == {"error": "gh pr list failed: no network"}
+    rec = {"id": "r1", "started": auto.stamp(auto.utc_now()), "folder": "x"}
+    text = auto.render_report(rec, auto.utc_now(), [], {}, {}, [], "c", end=end)
+    assert "## Release pull request" in text and "Could not be read" in text and "no network" in text
 
 
 def test_the_report_says_why_there_is_a_pull_request_when_nothing_landed():
@@ -1363,6 +1381,7 @@ def test_the_watcher_writes_the_report_a_dead_session_did_not(world, tmp_path, m
     monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
     monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $0.00")
     monkeypatch.setattr(auto, "gh", lambda *a: pytest.fail("the fallback report reads no gh"))
+    monkeypatch.setattr(auto, "fetch", lambda: None)
     def on(env):                                                 # a run that has just started: no stop rule is reached
         record(world, started=auto.utc_now(), watch=env[auto.WATCH_VAR])
         guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
@@ -1370,6 +1389,7 @@ def test_the_watcher_writes_the_report_a_dead_session_did_not(world, tmp_path, m
     path = world.root / "build" / "saani-auto-r1.md"
     text = path.read_text(encoding="utf-8")
     assert "the session ended without writing its report (session ended with code 1)" in text
+    assert "## Release pull request" in text and "Could not be read" in text          # the fallback report has the section, a failure included
     assert f"written for it, {path}" in capsys.readouterr().out
     assert auto.read_record() is None
 
