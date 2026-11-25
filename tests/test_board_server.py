@@ -354,7 +354,7 @@ def test_a_refresh_button_asks_everything_again_and_the_pull_request_tasks_start
     assert "issues" not in fp._cache
 
 
-STEPS = {"inbox", "backlog", "you", "started", "building", "testing", "landing", "dev", "pr", "deploy", "close", "checks", "done"}
+STEPS = {"backlog", "todo", "you", "started", "building", "testing", "landing", "dev", "pr", "deploy", "close", "checks", "done"}
 
 
 def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
@@ -405,17 +405,19 @@ def test_one_board_shows_the_listed_projects_and_the_selector_picks_one(monkeypa
     assert fp.cfg() is home                                   # the settings are put back after every request
 
 
-def test_a_ready_issue_with_no_agent_is_in_the_backlog_not_the_workshops():
-    """the map page puts a Ready card in the backlog until an agent works on it, then in the Workshops."""
+def test_a_ready_issue_with_no_agent_waits_in_the_tents_or_the_granary_not_the_workshops():
+    """the map page puts a Ready card in the Wayfarers' Tents (queue backlog) or the Granary (queue todo, also when it has none) until an
+    agent works on it, then in the Workshops."""
     source = fp.MAP_FILE.read_text(encoding="utf-8")
-    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "backlog"' in source
+    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "todo"' in source
+    assert 'col.id === "ready" && c.queue === "backlog" ? "backlog"' in source
 
 
 def test_the_sample_shows_every_zone_and_keeps_out_private_text():
     """The sample is synthetic, every step is a known one, and it holds no session text or path."""
     mock = json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))
     steps = {c["step"] for c in mock["cards"]}
-    assert steps <= STEPS and {"backlog", "you", "started", "testing", "pr", "deploy", "close", "checks", "done"} <= steps
+    assert steps <= STEPS and {"backlog", "todo", "you", "started", "testing", "pr", "deploy", "close", "checks", "done"} <= steps
     assert set(mock["sample"]["staged"]) == {c["number"] for c in mock["cards"] if c.get("staged")}
     raw = json.dumps(mock)
     assert "C:\\Users" not in raw and "/Users/" not in raw and "@" not in raw.replace("@pytest", "")
@@ -687,3 +689,73 @@ def test_the_map_names_the_saani_it_runs_a_release_tag_a_commit_or_the_package_v
     assert fp.saani_version(code, lambda *a: answers.get(a[1], "")) == {"label": "abc1234", "kind": "commit"}
     page = (pathlib.Path(fp.__file__).parent / "map.html").read_text(encoding="utf-8")
     assert 'id="legend-ver"' in page and "DATA.saani" in page
+
+
+# ---------------------------------------------------------------- the Wayfarers' Tents are Backlog, the Granary is Todo (#83)
+
+def ready(issue_list):
+    """{number: queue} of the Ready column of a board built from `issue_list`."""
+    board = {c["id"]: c for c in fp.build_board(issue_list, [], set(), [], [])}
+    return {c["number"]: c.get("queue") for c in board["ready"]["cards"]}
+
+
+def listed(number, status=None, milestone=None, labels=()):
+    return {"number": number, "title": f"t{number}", "labels": list(labels), "state": "OPEN", "milestone": milestone,
+            "status": {"name": status[0], "category": status[1]} if status else None}
+
+
+TODO, BACKLOG = ("Todo", "planned"), ("Backlog", "backlog")
+
+
+def test_with_statuses_a_ready_card_waits_by_its_github_status():
+    assert ready([listed(1, TODO), listed(2, BACKLOG), listed(3)]) == {1: "todo", 2: "backlog", 3: "backlog"}
+    assert ready([listed(1, ("In progress", "started")), listed(2, ("In review", "started")), listed(3, TODO)]) == {1: "todo", 2: "todo", 3: "todo"}
+    # an open issue marked Done, Not planned or Duplicate is not taken by a run: it waits with the Backlog
+    assert ready([listed(1, ("Done", "completed")), listed(2, ("Not planned", "not_planned")), listed(3, ("Duplicate", "duplicate")),
+                  listed(4, TODO)]) == {1: "backlog", 2: "backlog", 3: "backlog", 4: "todo"}
+
+
+def test_with_statuses_the_milestone_does_not_decide():
+    assert ready([listed(1, BACKLOG, "v1.0.0"), listed(2, TODO), listed(3, None, "v1.0.0"), listed(4, TODO, "v1.0.0")]) == {
+        1: "backlog", 2: "todo", 3: "backlog", 4: "todo"}
+
+
+def test_without_statuses_the_milestone_decides_as_status_sync_does():
+    assert ready([listed(1, None, "v1.0.0"), listed(2), listed(3, None, "Later")]) == {1: "todo", 2: "backlog", 3: "todo"}
+
+
+def test_a_repo_with_statuses_off_in_saani_toml_is_read_as_without(monkeypatch, cfg):
+    issues = [listed(1, BACKLOG, "v1.0.0"), listed(2, TODO)]
+    assert ready(issues) == {1: "backlog", 2: "todo"}
+    cfg.status_enabled = "off"
+    assert ready(issues) == {1: "todo", 2: "backlog"}
+
+
+def test_a_renamed_status_is_still_read_by_its_category():
+    assert ready([listed(1, ("Icebox", "backlog")), listed(2, ("Ready to go", "planned"))]) == {1: "backlog", 2: "todo"}
+
+
+def test_only_ready_cards_carry_a_queue():
+    issues = [listed(1, TODO), listed(2, ("In review", "started"), labels=["in-dev"]), listed(3, TODO, labels=["help wanted"])]
+    board = {c["id"]: c for c in fp.build_board(issues, [], set(), [], [])}
+    assert [c["number"] for c in board["ready"]["cards"]] == [1]
+    assert all("queue" not in c for key in ("dev", "you") for c in board[key]["cards"])
+
+
+def test_the_map_names_the_zones_and_their_subtitles_after_the_statuses():
+    source = fp.MAP_FILE.read_text(encoding="utf-8")
+    assert '{id: "backlog", stage: "Backlog",' in source and "name: \"Wayfarers' Tents\"" in source
+    assert '{id: "todo",    cmd: "/saani:start <issue>", stage: "Todo",' in source and 'name: "The Granary"' in source
+    assert 'id: "inbox"' not in source and "Inbox" not in source and "stage: \"Backlog\",         name: \"The Granary\"" not in source
+
+
+def test_the_old_step_ids_are_gone_from_the_map_the_contract_and_the_sample():
+    source = fp.MAP_FILE.read_text(encoding="utf-8")
+    assert 'case "inbox"' not in source and "inbox:" not in source
+    mock = json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))
+    assert "inbox" not in {c["step"] for c in mock["cards"]}
+    # the sample shows both zones, with the statuses that put a card there
+    by_step = {step: {(c.get("status") or {}).get("name") for c in mock["cards"] if c["step"] == step} for step in ("backlog", "todo")}
+    assert by_step["todo"] == {"Todo"} and by_step["backlog"] <= {None, "Backlog"} and by_step["backlog"]
+    contract = (fp.MAP_FILE.parent.parent / "docs" / "map-data-contract.md").read_text(encoding="utf-8")
+    assert "`backlog` (the Wayfarers' Tents" in contract and "`todo` (the Granary" in contract and "`queue`" in contract

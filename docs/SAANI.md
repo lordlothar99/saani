@@ -190,7 +190,12 @@ every 5 s, read-only.
   the PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above.
   Each lifecycle step is a zone along a road from START (bottom left) to END (top right), with branches (to deploy or to close) and the ways
-  back (tests failed, CI red, needs you, hotfix, not planned). Each issue is a block parked at its zone (its colour is its Type, the same
+  back (tests failed, CI red, needs you, hotfix, not planned). The first two zones follow GitHub's issue statuses: **Wayfarers' Tents**,
+  stage Backlog (filed, not released: status Backlog or none, and Done, Not planned or Duplicate on an open issue: `saani auto pick` takes
+  none of them), and **The Granary**, stage Todo (released: status Todo, or In progress / In review with nobody on it; an auto run takes
+  it when it is ready). A repo without statuses (or `[status] enabled = "off"`) has the same two zones, filled as `saani status sync`
+  would set them: a milestone is Todo, none is Backlog. The server decides it per Ready card (`queue`, saani/board_server.py).
+  Each issue is a block parked at its zone (its colour is its Type, the same
   everywhere; a ring when it needs the owner; a pennant for whether an auto run can take it), the blocks of one milestone side by side, the
   milestone written in the sand in front of them; a search box and the milestone and auto-fit filters narrow what is shown. Each worker is a
   figure: one per running subagent (two coders at once are two figures, each on its own issue; an idle role is one figure in the camp, and a

@@ -43,6 +43,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import config, core, glance, progress
+from . import status as issue_status
 
 HERE = pathlib.Path(__file__).resolve().parent
 SAANI_PY = HERE.parent / "saani.py"
@@ -419,6 +420,22 @@ def lifecycle(issue, open_numbers, today=None):
     return out
 
 
+def has_statuses(issues):
+    """True when the repo has GitHub issue statuses and Saani uses them: any listed issue carries one (the REST listing gives none on a repo
+    without), and `[status] enabled` is not off."""
+    return issue_status.enabled() and any(i.get("status") for i in issues)
+
+
+def queue_for(issue, statuses_on):
+    """Where a Ready card waits on the map: `backlog` (the Wayfarers' Tents: filed, not released) or `todo` (the Granary: released, an auto run
+    takes it when it is ready). With statuses, by the issue's GitHub status: Todo, and In progress / In review with nobody working on it, are
+    `todo`; Backlog, no status, and Done, Not planned or Duplicate on an open issue are `backlog` (`saani auto pick` takes none of those).
+    Without statuses, as `saani status sync` would set them: a milestone is `todo`, none is `backlog`."""
+    if statuses_on:
+        return "todo" if issue_status.step_of(issue.get("status")) in ("todo", "started", "review") else "backlog"
+    return "todo" if issue.get("milestone") else "backlog"
+
+
 def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
     """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
     by_number = {}
@@ -434,6 +451,7 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=())
         if n:
             crew.setdefault(n, []).append(s)
     columns = {key: [] for key, _, _ in COLUMNS}
+    statuses_on = has_statuses(issues)
     landed = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
     open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not landed & set(i.get("labels") or [])}
     for n, issue in by_number.items():
@@ -443,6 +461,7 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=())
             continue
         need = need_of(issue.get("labels"))
         columns[col].append({**issue, **lifecycle(issue, open_numbers), "worktree": w, "agents": crew.get(n, []), "need": need,
+                             **({"queue": queue_for(issue, statuses_on)} if col == "ready" else {}),
                              "prompt": prompt_for(n, col, need),
                              "runs": [r for r in runs if w and r.get("checkout") == w["folder"]]})
     order = lambda c: (milestone_key(c.get("milestone")), c["number"])
