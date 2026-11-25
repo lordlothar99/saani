@@ -132,6 +132,34 @@ def test_start_posts_started_with_the_folder_name_only_unless_no_comment(monkeyp
     assert core.cmd_start(ns) == 0 and posted == []
 
 
+def test_start_journals_started_itself_only_when_the_comment_did_not(monkeypatch, tmp_path):
+    from saani import auto
+    journaled, posted = [], []
+    monkeypatch.setattr(auto, "journal", lambda issue, kind, **k: journaled.append((issue, kind)))
+    monkeypatch.setattr(core, "issue_info", lambda n: {"title": "Add a thing", "type": "Task", "milestone": "v1"})
+    monkeypatch.setattr(core, "latest_timing_report", lambda cwd=None: None)
+    folder = tmp_path / "wt" / "5-add-thing"
+
+    def git(*args, cwd=None, check=True):
+        if args[:2] == ("worktree", "add"):
+            folder.mkdir(parents=True, exist_ok=True)
+        return ""
+    monkeypatch.setattr(core, "git", git)
+    core.cfg().worktree_folder = str(tmp_path / "wt")
+    core.cfg().owner = ""
+    ns = type("A", (), {"issue": 5, "hotfix": False, "slug": None, "no_assign": True, "no_comment": True})()
+    assert core.cmd_start(ns) == 0 and journaled == [(5, "started")]            # --no-comment: the run's marker is still written
+    shutil.rmtree(folder)
+    journaled.clear()
+    ns.no_comment = False
+    monkeypatch.setattr(core.comments, "try_post", lambda *a, **k: False)          # the comment was refused
+    assert core.cmd_start(ns) == 0 and journaled == [(5, "started")]
+    shutil.rmtree(folder)
+    journaled.clear()
+    monkeypatch.setattr(core.comments, "try_post", lambda *a, **k: posted.append(a) or True)   # posted: the comment journals it, not start
+    assert core.cmd_start(ns) == 0 and journaled == [] and len(posted) == 1
+
+
 class FakeCi(FakeIo):
     """ci.Run stand-in: `pr view` answers `pr`, issue views answer `existing` comments, writes recorded."""
     def __init__(self, pr, existing=(), labels=("in-dev",)):

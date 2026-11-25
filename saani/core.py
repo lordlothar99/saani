@@ -320,7 +320,7 @@ def cmd_auto(args):
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     action = getattr(args, "action", None)
     for name, only in (("folder", ("on", "away", "watch")), ("deploy", ("on", "away", "watch")), ("here", ("on",)), ("check", ("status",)),
-                       ("pr", ("report",)), ("post", ("report",)), ("run_id", ("off",)), ("wait", ("pick", "away", "watch"))):
+                       ("pr", ("report",)), ("post", ("report",)), ("reason", ("report",)), ("run_id", ("off",)), ("wait", ("pick", "away", "watch"))):
         given = getattr(args, name, None)
         if given is not None and given is not False and action not in only:
             raise SystemExit(f"saani auto: --{name.removesuffix('_id').replace('_', '-')} belongs to "
@@ -398,6 +398,8 @@ def cmd_start(args):
         subprocess.run(["gh", "issue", "edit", str(args.issue), "--repo", c.repo, "--add-assignee", c.owner], capture_output=True)
     if args.no_comment or not comments.try_post(args.issue, "started", {"Branch": name, "Worktree": folder.name}):
         status.advance(args.issue, "started")              # the comment sets it; without one (skipped or refused), set it here
+        from . import auto
+        auto.journal(args.issue, "started")                # the comment journals it itself; inside a run this marks the issue as the run's (#56)
     print(f"worktree: {folder}")
     print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
     print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
@@ -969,6 +971,7 @@ def add_parsers(sub):
     p.add_argument("--check", action="store_true", help="status: exit 3 when a stop rule is reached")
     p.add_argument("--pr", type=int, help="report: the pull request the report is for (the merge commands name it)")
     p.add_argument("--post", action="store_true", help="report: comment the report on the pull request (--pr)")
+    p.add_argument("--reason", help="report: why the run stopped (no slot, nothing eligible, a stop rule), in the report and its journal")
     p.add_argument("--json", action="store_true", help="pick: as JSON")
     p.add_argument("--limit", type=int, help="pick: at most this many eligible issues")
     p.add_argument("--only", type=int, nargs="+", metavar="N", help="pick, away: take only these issues (pick: before the overlap check)")
