@@ -1,6 +1,6 @@
 ---
 name: Task
-about: No new capability: upgrades, checks, tests, tooling, docs, research, owner-only steps
+about: No new capability (upgrades, checks, tests, tooling, docs, research, owner-only steps)
 type: Task
 ---
 ## At a glance

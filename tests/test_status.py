@@ -148,7 +148,7 @@ def test_a_comment_whose_label_the_caller_sets_still_moves_the_status(fresh, mon
     assert set_to(gh) == ["S4"]
 
 
-# ---------------------------------------------------------------- auto pick: Todo only
+# ---------------------------------------------------------------- auto pick: everything but Backlog
 
 def issue(n, status_name=None, **kw):
     cat = next((s["category"] for s in FLAT if s["name"] == status_name), None)
@@ -156,12 +156,25 @@ def issue(n, status_name=None, **kw):
             "status": {"name": status_name, "category": cat} if status_name else None, **kw}
 
 
-def test_with_statuses_auto_pick_takes_only_todo_issues():
-    issues = [issue(1, "Todo"), issue(2, "Backlog"), issue(3), issue(4, "In review")]
+def test_with_statuses_auto_pick_skips_only_backlog():
+    issues = [issue(1, "Todo"), issue(2, "Backlog"), issue(3), issue(4, "In review"), issue(5, "In progress")]
     eligible, skipped = auto.choose(issues, set(), {}, "2026-11-24", statuses=FLAT)
-    assert [e["number"] for e in eligible] == [1]
-    assert {s["number"]: s["reason"] for s in skipped} == {2: "not Todo (status: Backlog)", 3: "not Todo (status: none)",
-                                                           4: "not Todo (status: In review)"}
+    assert [e["number"] for e in eligible] == [1, 3, 4, 5]
+    assert skipped == [{"number": 2, "reason": "in Backlog"}]
+
+
+def test_an_open_issue_marked_done_not_planned_or_duplicate_is_not_taken():
+    issues = [issue(1, "Done"), issue(2, "Not planned"), issue(3, "Duplicate"), issue(4, "Todo")]
+    eligible, skipped = auto.choose(issues, set(), {}, "2026-11-24", statuses=FLAT)
+    assert [e["number"] for e in eligible] == [4]
+    assert [s["reason"] for s in skipped] == ["status: Done (open, but marked finished)", "status: Not planned (open, but marked finished)",
+                                             "status: Duplicate (open, but marked finished)"]
+
+
+def test_a_renamed_backlog_is_still_backlog():
+    statuses = [{"id": "S1", "name": "Icebox", "category": "backlog"}]
+    eligible, skipped = auto.choose([issue(1, status={"name": "Icebox", "category": "backlog"})], set(), {}, "2026-11-24", statuses=statuses)
+    assert eligible == [] and skipped == [{"number": 1, "reason": "in Backlog"}]
 
 
 def test_without_statuses_auto_pick_is_as_before():
