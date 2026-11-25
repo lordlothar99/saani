@@ -468,7 +468,7 @@ between them. Saani moves an issue's status forward at its steps, next to the la
 
 The status never moves back: an issue In review stays there through the landing, the release pull request and main, until the deploy
 closes it; a closed issue is never reopened by Saani. `saani auto pick` takes every ready issue except those in Backlog, so Backlog is the
-place for what may not be taken yet (an issue with no status, Todo or In progress is taken when it is ready). Statuses are matched by the names in `[status] names`, then by category (a renamed status still works). On a repo without
+place for what may not be taken yet (an issue with no status, Todo or In progress is taken when it is ready; an open issue still marked Done, Not planned or Duplicate is not). Statuses are matched by the names in `[status] names`, then by category (a renamed status still works). On a repo without
 statuses (`planningStatuses` is null), or with `[status] enabled = "off"`, none of this happens and Saani works from its labels alone.
 `gh` has no status flag yet: Saani reads and sets statuses with `gh api` (GraphQL `setIssueStatus`, the REST `status` field).
 

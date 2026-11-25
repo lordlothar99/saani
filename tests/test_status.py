@@ -163,6 +163,14 @@ def test_with_statuses_auto_pick_skips_only_backlog():
     assert skipped == [{"number": 2, "reason": "in Backlog"}]
 
 
+def test_an_open_issue_marked_done_not_planned_or_duplicate_is_not_taken():
+    issues = [issue(1, "Done"), issue(2, "Not planned"), issue(3, "Duplicate"), issue(4, "Todo")]
+    eligible, skipped = auto.choose(issues, set(), {}, "2026-11-24", statuses=FLAT)
+    assert [e["number"] for e in eligible] == [4]
+    assert [s["reason"] for s in skipped] == ["status: Done (open, but marked finished)", "status: Not planned (open, but marked finished)",
+                                             "status: Duplicate (open, but marked finished)"]
+
+
 def test_a_renamed_backlog_is_still_backlog():
     statuses = [{"id": "S1", "name": "Icebox", "category": "backlog"}]
     eligible, skipped = auto.choose([issue(1, status={"name": "Icebox", "category": "backlog"})], set(), {}, "2026-11-24", statuses=statuses)

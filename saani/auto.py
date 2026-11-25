@@ -158,6 +158,8 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
             reason = "needs the owner or is an idea (label " + ", ".join(sorted(have & owner_labels)) + ")"
         elif statuses is not None and status.step_of(i.get("status"), statuses) == "backlog":
             reason = "in Backlog"
+        elif statuses is not None and status.step_of(i.get("status"), statuses) in ("done", "closed"):
+            reason = "status: " + i["status"]["name"] + " (open, but marked finished)"   # reopened with Done, or left open as Not planned
         elif fit == "no":
             reason = "Auto: no"
         elif glance.is_blocked(g, open_numbers, today):
