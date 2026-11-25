@@ -1079,7 +1079,7 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     print(f"  log:    {log}")
     print("  follow: saani auto status (once the run is on), the log, or /saani:ui")
     if keep_on:
-        print(f"  keep-on: --keep-on: the run stays on and takes newly eligible issues, until a stop rule or {cfg().keep_on_quiet_minutes:g} quiet minutes end it the normal way")
+        print(f"  mode:   --keep-on: the run stays on and takes newly eligible issues, until a stop rule or {cfg().keep_on_quiet_minutes:g} quiet minutes end it the normal way")
     print(f"  end:    the run is switched off by itself when the session ends (saani auto off --run {run_id} ends it earlier, from a terminal)")
     return 0
 
