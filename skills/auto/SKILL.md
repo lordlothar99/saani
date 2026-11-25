@@ -62,7 +62,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those. If the answer lists `owner_running` (the output says "the owner's worktrees #n are in
    flight"), tell the owner before they go away: those worktrees take no slot of the run, but the files they change are not given to
-   another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release`) will be left for them.
+   another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release create`) will be left for them.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then, away: start it (section "The two
    sub-modes"); here: "The run".
 4. **Away only, the headless session's first step: switch it on.** The run's id and folder come from the arguments (`run <id>
