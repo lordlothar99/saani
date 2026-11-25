@@ -2,8 +2,12 @@
 guard's tests start a process; the others call the hook in this process)."""
 import json
 
+import pytest
+
 from saani import guard
 from guard_helpers import ROOT, fake_repo, hook_cli
+
+pytestmark = pytest.mark.usefixtures("home")                                             # never the machine's real ~/.saani
 
 
 def test_the_plugin_ships_the_hook_through_its_own_saani_command():

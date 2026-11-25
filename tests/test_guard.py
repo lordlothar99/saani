@@ -12,6 +12,8 @@ import pytest
 from saani import guard
 from guard_helpers import ROOT_CODE, sh
 
+pytestmark = pytest.mark.usefixtures("home")                                             # never the machine's real ~/.saani
+
 
 # ---------------------------------------------------------------- the security review's cases
 
@@ -361,6 +363,9 @@ def test_every_unquoted_glob_is_refused_in_any_position_before_any_other_rule(ct
 
 
 def test_a_quoted_glob_is_text(ctx):
+    work = pathlib.Path(ctx.places["work"])
+    for name in ("--all", "main", "--", "-exec", "-delete", "notes.md", "-n.md"):
+        (work / name).write_text("x")
     for command in ("git diff -- 'src/*.py'", "git log -- 'src/*.py'", "find . -name '*.md'", "grep -n 'a*b' notes.md",
                     "git commit -m 'fix [WIP]?'"):
         assert sh(ctx, command)[0] == "allow", command

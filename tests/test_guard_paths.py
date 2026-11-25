@@ -8,6 +8,8 @@ import pytest
 from saani import guard
 from guard_helpers import sh, tool
 
+pytestmark = pytest.mark.usefixtures("home")                                             # never the machine's real ~/.saani
+
 
 def test_a_device_is_refused_but_dev_null(ctx):
     depth = "../" * (len(pathlib.Path(ctx.places["work"]).parts) + 2)

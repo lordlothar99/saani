@@ -8,6 +8,8 @@ import pytest
 from saani import guard
 from guard_helpers import AUTO_ON, fake_repo, fwd, hook, marker, post, ran, run_folder
 
+pytestmark = pytest.mark.usefixtures("home")                                             # never the machine's real ~/.saani
+
 
 def test_the_shared_git_folder_is_found_from_a_worktree_without_git(tmp_path):
     main, work = fake_repo(tmp_path)

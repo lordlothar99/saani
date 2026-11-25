@@ -1,9 +1,12 @@
 """Against a real, temporary git repository (no network, no gh): the frozen-file rule, the worktree list, the commit-msg hook."""
 import argparse
+import subprocess
+import sys
 
 import pytest
 
 from saani import core
+from guard_helpers import ROOT
 
 
 @pytest.fixture
@@ -42,3 +45,18 @@ def test_the_hook_refuses_a_commit_without_why_and_undo_on_a_worker_branch(repo,
     assert check("Login form refs #12\n\nWhy: users ask.\nUndo: git revert.\n") == 0
     git("checkout", "-q", "dev", cwd=repo)
     assert check("A note on the integration branch\n") == 1                              # the integration branch needs them too
+
+
+def test_the_commit_msg_hook_runs_through_the_command(repo, tmp_path, git):
+    """The one end-to-end check of the wiring: `python -I saani.py check-msg <file>` as git's commit-msg hook runs it."""
+    git("checkout", "-q", "-b", "feat/12-login", cwd=repo)
+    (repo / "saani.toml").write_text('[project]\nrepo = "acme/webshop"\n', encoding="utf-8")
+    msg = tmp_path / "msg.txt"
+
+    def check(text):
+        msg.write_text(text, encoding="utf-8")
+        return subprocess.run([sys.executable, "-I", str(ROOT / "saani.py"), "check-msg", str(msg)], cwd=repo, capture_output=True, text=True)
+
+    refused = check("Login form refs #12\n")
+    assert refused.returncode != 0 and "Why:" in refused.stdout + refused.stderr
+    assert check("Login form refs #12\n\nWhy: users ask.\nUndo: git revert.\n").returncode == 0

@@ -54,12 +54,20 @@ def _event(cwd, tool_name, session, event_name, response, tool_input):
     return event
 
 
+def _no_hard_exit(code):
+    raise AssertionError(f"the guard cut the decision off (hard exit {code}): a slow decision fails the test, it does not end pytest")
+
+
 def hook(home, cwd, tool_name, session="s-1", raw=None, event_name="PreToolUse", response=None, **tool_input):
     """What `saani guard` prints for one hook event (the `home` fixture has set HOME): the hook's answer, or None when it prints nothing."""
     data = raw if raw is not None else json.dumps(_event(cwd, tool_name, session, event_name, response, tool_input)).encode()
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        assert guard.main(data) == 0
+    real_exit, guard.hard_exit = guard.hard_exit, _no_hard_exit
+    try:
+        with contextlib.redirect_stdout(out):
+            assert guard.main(data) == 0
+    finally:
+        guard.hard_exit = real_exit
     text = out.getvalue().strip()
     return json.loads(text)["hookSpecificOutput"] if text else None
 

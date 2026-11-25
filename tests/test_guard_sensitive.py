@@ -7,6 +7,8 @@ import pytest
 from saani import guard
 from guard_helpers import ROOT_CODE, sh, tool
 
+pytestmark = pytest.mark.usefixtures("home")                                             # never the machine's real ~/.saani
+
 SECRETS = [".env", ".env.local", "config/.env.production", ".envrc", "server.pem", "tls/server.key", "id_rsa", "id_rsa.pub", "id_ed25519",
            "{home}/.ssh/config", "{home}/.ssh/known_hosts", "credentials.json", "aws/credentials", "my-CREDENTIALS.txt",
            "application_default_credentials.json", "cert.p12", "{home}/.netrc", "{home}/.npmrc", "{home}/.config/gh/hosts.yml",

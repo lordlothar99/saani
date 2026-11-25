@@ -9,6 +9,8 @@ import pytest
 from saani import guard
 from guard_helpers import fake_repo, sh, tool
 
+pytestmark = pytest.mark.usefixtures("home")                                             # never the machine's real ~/.saani
+
 
 def test_grep_and_rm_refuse_a_tree_too_big_to_look_through(ctx, monkeypatch):
     monkeypatch.setattr(guard, "WALK_CAP", 3)
@@ -51,7 +53,7 @@ def test_a_decision_that_blocks_is_cut_off_with_a_deny_within_the_budget(tmp_pat
     guard.turn_on("s-1", "r", main, tmp_path / "webshop-wt")
     monkeypatch.setattr(guard, "HARD_STOP_SECONDS", 0.3)
     release = threading.Event()
-    monkeypatch.setattr(guard.os.path, "realpath", lambda p, *a, **k: release.wait(5) or p)   # a disconnected drive: every lookup blocks
+    monkeypatch.setattr(guard.os.path, "realpath", lambda p, *a, **k: (release.wait(5), p)[1])   # a disconnected drive: every lookup blocks
     monkeypatch.setattr(guard, "log_refusal", lambda *a: None)                            # (its own lookup would block too)
     exits = []
     monkeypatch.setattr(guard, "hard_exit", exits.append)
