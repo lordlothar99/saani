@@ -171,20 +171,69 @@ def test_an_auto_run_that_is_off_and_has_no_commit_of_its_own_is_removed_but_not
     origin, main = origin_clone
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
     wt = tmp_path / "webshop-wt"
-    for stamp in ("2099-01-01_0100", "2099-01-01_0200", "2099-01-01_0300"):                # all recent: only the three rules tell them apart
+    for stamp in ("2026-11-01_0100", "2026-11-01_0200", "2026-11-01_0300"):
         core.cmd_auto(type("A", (), {"id": stamp})())
-    (wt / "auto-2099-01-01_0200" / "work.txt").write_text("mine", encoding="utf-8")
-    git("add", "work.txt", cwd=wt / "auto-2099-01-01_0200")
-    git("-c", "user.name=Someone", "-c", "user.email=someone@example.com", "commit", "-q", "-m", "own work", cwd=wt / "auto-2099-01-01_0200")
-    auto.record_path().write_text(json.dumps({"id": "2099-01-01_0300", "started": "2099-01-01T03:00:00Z"}), encoding="utf-8")   # this one is on
+    (wt / "auto-2026-11-01_0200" / "work.txt").write_text("mine", encoding="utf-8")
+    git("add", "work.txt", cwd=wt / "auto-2026-11-01_0200")
+    git("-c", "user.name=Someone", "-c", "user.email=someone@example.com", "commit", "-q", "-m", "own work", cwd=wt / "auto-2026-11-01_0200")
+    auto.record_path().write_text(json.dumps({"id": "2026-11-01_0300", "started": "2026-11-01T03:00:00Z"}), encoding="utf-8")   # this one is on
     found, kept = core.unused_auto_runs(cwd=main)
-    assert [b for _, b in found] == ["auto/2099-01-01_0100"]                                # finished, nothing of its own: removed
-    assert dict(kept) == {"auto/2099-01-01_0200": "it has commits that are not on dev", "auto/2099-01-01_0300": "the run is still on"}
+    assert [b for _, b in found] == ["auto/2026-11-01_0100"]                                # finished, nothing of its own: removed
+    assert dict(kept) == {"auto/2026-11-01_0200": "it has commits that are not on dev", "auto/2026-11-01_0300": "the run is still on"}
     assert core.remove_auto_runs(found, cwd=main) == 1
-    assert not (wt / "auto-2099-01-01_0100").exists()
-    assert (wt / "auto-2099-01-01_0200").is_dir() and (wt / "auto-2099-01-01_0300").is_dir()
+    assert not (wt / "auto-2026-11-01_0100").exists()
+    assert (wt / "auto-2026-11-01_0200").is_dir() and (wt / "auto-2026-11-01_0300").is_dir()
     auto.record_path().unlink()                                                             # the run is off: its folder goes too
-    assert [b for _, b in core.unused_auto_runs(cwd=main)[0]] == ["auto/2099-01-01_0300"]
+    assert [b for _, b in core.unused_auto_runs(cwd=main)[0]] == ["auto/2026-11-01_0300"]
+
+
+def _auto_setup(origin_clone, monkeypatch, *stamps):
+    from saani import config
+    origin, main = origin_clone
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    for stamp in stamps:
+        core.cmd_auto(type("A", (), {"id": stamp})())
+    return main, main.parent / "webshop-wt"
+
+
+def test_an_auto_run_with_an_untracked_file_a_corrupt_record_or_a_young_start_is_kept(origin_clone, monkeypatch):
+    import datetime
+    from saani import auto
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+    main, wt = _auto_setup(origin_clone, monkeypatch, "2026-11-01_0100", "2026-11-01_0200", now)
+    (wt / "auto-2026-11-01_0200" / "notes.txt").write_text("untracked", encoding="utf-8")
+    found, kept = core.unused_auto_runs(cwd=main)
+    assert [b for _, b in found] == ["auto/2026-11-01_0100"]
+    assert dict(kept) == {"auto/2026-11-01_0200": "its folder has uncommitted changes (or its state cannot be read)", f"auto/{now}": "started less than 2 h ago"}
+    for bad in ("{half a record", "[]", "{}", ""):                                          # a record that cannot be read keeps every run
+        auto.record_path().write_text(bad, encoding="utf-8")
+        found, kept = core.unused_auto_runs(cwd=main)
+        assert found == [] and {why for _, why in kept} == {"run record unreadable"} and len(kept) == 3
+
+
+def test_an_auto_run_is_on_by_its_folder_when_its_id_differs_and_an_old_longrun_branch_is_pruned(origin_clone, git, monkeypatch):
+    from saani import auto
+    main, wt = _auto_setup(origin_clone, monkeypatch, "2026-11-01_0100")
+    git("worktree", "add", "--no-track", "-b", "longrun/2026-11-01_0900", str(wt / "longrun-2026-11-01_0900"), "origin/dev", cwd=main)
+    rec = {"id": "other-name", "started": "2026-11-01T01:00:00Z", "folder": str(wt / "auto-2026-11-01_0100").replace("\\", "/").upper() + "/"}
+    auto.record_path().write_text(json.dumps(rec), encoding="utf-8")
+    found, kept = core.unused_auto_runs(cwd=main)
+    assert [b for _, b in found] == ["longrun/2026-11-01_0900"]
+    assert dict(kept) == {"auto/2026-11-01_0100": "the run is still on"}
+
+
+def test_an_auto_run_is_kept_when_origin_cannot_be_compared_and_a_dry_run_removes_nothing(origin_clone, git, monkeypatch, capsys):
+    main, wt = _auto_setup(origin_clone, monkeypatch, "2026-11-01_0100")
+    git("update-ref", "-d", "refs/remotes/origin/dev", cwd=main)
+    found, kept = core.unused_auto_runs(cwd=main)
+    assert found == [] and kept == [("auto/2026-11-01_0100", "cannot compare with origin/dev")]
+    git("fetch", "-q", "origin", cwd=main)
+    capsys.readouterr()
+    assert core.cmd_prune(type("A", (), {"dry_run": True, "local_only": True})()) == 0
+    assert "would remove the auto run auto/2026-11-01_0100" in capsys.readouterr().out
+    assert (wt / "auto-2026-11-01_0100").is_dir()
+    assert core.cmd_prune(type("A", (), {"dry_run": False, "local_only": True})()) == 0
+    assert not (wt / "auto-2026-11-01_0100").exists()
 
 
 def test_an_auto_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):

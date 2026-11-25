@@ -752,10 +752,18 @@ def finished_auto_runs(before=None, cwd=None):
         started = auto_started(branch, path)
         if started is None or started >= cutoff:
             continue
-        if path and git("status", "--porcelain", cwd=path):
+        if path and (not pathlib.Path(path).is_dir() or git("status", "--porcelain", cwd=path)):
             continue
         out.append((path, branch))
     return out
+
+
+AUTO_GRACE_HOURS = 2       # a run younger than this is never pruned as unused: `saani auto` made its folder, `saani auto on` may not have run yet
+
+
+def _same_path_key(p):
+    """A path as a comparison key: normalised, forward slashes, no trailing slash, case-folded on Windows."""
+    return os.path.normcase(os.path.normpath(str(p))).replace("\\", "/").rstrip("/")
 
 
 def unused_auto_runs(cwd=None):
@@ -765,22 +773,52 @@ def unused_auto_runs(cwd=None):
     A run that finished with nothing landed has no pull request, so nothing else would ever remove it."""
     from . import auto
     c = cfg()
+    unreadable, on, on_folder = False, None, None      # fail safe: a record that cannot be read keeps every run
     try:
-        rec = auto.read_record()
+        rpath = auto.record_path()
     except SystemExit:
-        rec = None
-    on = rec["id"] if rec else None
+        rpath = None
+    if rpath is None:
+        unreadable = True
+    elif pathlib.Path(rpath).exists():
+        try:
+            rec = json.loads(pathlib.Path(rpath).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rec = None
+        if isinstance(rec, dict) and rec.get("id"):
+            on = str(rec["id"])
+            on_folder = _same_path_key(rec["folder"]) if rec.get("folder") else None
+        else:
+            unreadable = True
     held = {b: p for p, b in worktrees(cwd) if b}
     branches = git("branch", "--format=%(refname:short)", cwd=cwd).splitlines()
+    cutoff = datetime.datetime.now() - datetime.timedelta(hours=AUTO_GRACE_HOURS)
     found, kept = [], []
     for branch in sorted(b for b in branches if b.startswith(RUN_BRANCHES)):
         path = held.get(branch)
-        if on is not None and branch.split("/", 1)[1] == str(on):
+        if unreadable:
+            kept.append((branch, "run record unreadable"))
+            continue
+        if on is not None and (branch.split("/", 1)[1] == on or (path and on_folder and _same_path_key(path) == on_folder)):
             kept.append((branch, "the run is still on"))
-        elif git("rev-list", "--count", f"origin/{c.integration}..{branch}", cwd=cwd).strip() != "0":
+            continue
+        started = auto_started(branch, path)
+        if started is None:                                    # no timestamp in the id, no folder: the branch's last commit
+            tip = git("log", "-1", "--format=%ct", branch, cwd=cwd, check=False)
+            started = datetime.datetime.fromtimestamp(int(tip.stdout.strip())) if tip.returncode == 0 and tip.stdout.strip().isdigit() else None
+        if started is None or started >= cutoff:
+            kept.append((branch, f"started less than {AUTO_GRACE_HOURS} h ago" if started else "its start is unknown"))
+            continue
+        if path and not pathlib.Path(path).is_dir():
+            kept.append((branch, "its folder is missing (`git worktree prune` clears it)"))
+            continue
+        ahead = git("rev-list", "--count", f"origin/{c.integration}..{branch}", cwd=cwd, check=False)
+        if ahead.returncode != 0:
+            kept.append((branch, f"cannot compare with origin/{c.integration}"))
+        elif ahead.stdout.strip() != "0":
             kept.append((branch, f"it has commits that are not on {c.integration}"))
-        elif path and git("status", "--porcelain", cwd=path):
-            kept.append((branch, "its folder has uncommitted changes"))
+        elif path and (lambda r: r.returncode != 0 or r.stdout.strip())(git("status", "--porcelain", cwd=path, check=False)):
+            kept.append((branch, "its folder has uncommitted changes (or its state cannot be read)"))
         else:
             found.append((path, branch))
     return found, kept
@@ -791,13 +829,16 @@ def remove_auto_runs(found, dry=False, cwd=None):
     number removed."""
     done = 0
     for path, branch in found:
-        print(("would remove" if dry else "removing") + f" the auto run {branch}" + (f" and its folder {path}" if path else ""))
+        what = f"the auto run {branch}" + (f" and its folder {path}" if path else "")
         if dry:
+            print(f"would remove {what}")
+            done += 1
             continue
         if path and git("worktree", "remove", str(path), cwd=cwd, check=False).returncode != 0:
-            print(f"  kept: git would not remove {path}")
+            print(f"kept the auto run {branch}: git would not remove {path}")
             continue
         git("branch", "-D", branch, cwd=cwd, check=False)
+        print(f"removed {what}")
         done += 1
     return done
 
@@ -810,10 +851,9 @@ def cmd_prune(args):
     kept = [(b, why) for b, why in kept if b not in {b2 for _, b2 in runs}]
     for branch, why in kept:
         print(f"kept the auto run {branch}: {why}")
-    if runs:
-        remove_auto_runs(runs, args.dry_run)
+    removed = remove_auto_runs(runs, args.dry_run) if runs else 0
     if not local and (args.local_only or not remote):
-        if not runs:
+        if not removed:
             print("nothing to prune: every merged branch is already gone")
         return 0
     if local:
