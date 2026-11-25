@@ -103,7 +103,8 @@ flowchart TB
 
 ## Landing, in detail
 - **Before the lock**, `land` refuses: a branch that is not a worker's, uncommitted changes, a commit without the trailers (merges
-  excepted), and a change to a frozen file (`[land] frozen`) once its mark is on the integration branch.
+  excepted, and so is every commit already on `origin/<production>`: history there is never rewritten, so a change made on production
+  can come back to the integration branch; the worker's own commits still need them), and a change to a frozen file (`[land] frozen`) once its mark is on the integration branch.
 - **The lock** is a file in the repository's shared git folder (`.git/saani-landing.lock`), made atomically, so every worktree sees it. A
   second landing waits (`--wait`, 60 minutes by default); a lock older than `lock_stale_hours` is taken over.
 - **Conflicts.** A conflict only in a generated file is solved by the landing (the integration copy, rebuilt next). Any other conflict stops
