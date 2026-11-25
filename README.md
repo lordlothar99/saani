@@ -28,8 +28,7 @@ and lands it, while Saani's commands and its guard keep the work safe.
    why, the refusals, the cost. `saani auto status` shows a running run. The run is switched off when it is done: by a small watcher
    when an away session ends, by the skill after the report of a `here` run (`/saani:auto off` in your own session ends it any time).
    Add `--wait`, as in `/saani:auto away --wait`, and the run waits for issues that become eligible while it works (nothing is spent while
-   it waits) until a stop rule or an hour without work ends it the normal way. It needs the guard to allow `saani auto pick --wait`; while `saani/guard.py` does not list it, the call is refused.
-5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
+   it waits) until a stop rule or an hour without work ends it the normal way.5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
    when the merge changes the version, creates the GitHub release `v<version>` with notes written from the issues.
    `/saani:merge --deploy` (or `/saani:deploy` later) then deploys, if the project deploys.
 
