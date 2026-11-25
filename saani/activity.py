@@ -8,8 +8,10 @@ import pathlib
 import re
 import subprocess
 
-IDLE = "everything is idle: nothing runs, nothing is blocked, nothing waits"
+IDLE = ("no machinery activity (landing, tests, auto run): Saani cannot see what a Claude session is thinking or editing, "
+        "nor which role (Architect, coder, tester, reviewer) it has")
 OUTSIDE_NOTE = "queue idle, but tests may run outside it (the process list could not be read)"
+LIST_TIMEOUT = 4          # seconds the process list may take: status must stay quick
 TEST_WORDS = ("pytest", "unittest", "py.test")
 ISSUE_IN_NAME = re.compile(r"^(\d+)-")
 
@@ -37,15 +39,16 @@ def processes():
     """[{pid, ppid, since, cmd}] of the running processes, best effort: PowerShell on Windows, `ps` elsewhere; None when it cannot be read."""
     try:
         if os.name == "nt":
-            script = ("Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, "
-                      "$(if ($_.CreationDate) { $_.CreationDate.ToString('s') }), $_.CommandLine }")
+            script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+                      "Get-CimInstance Win32_Process | ForEach-Object { '{0}|{1}|{2}|{3}' -f $_.ProcessId, $_.ParentProcessId, "
+                      "$(if ($_.CreationDate) { $_.CreationDate.ToString('s') }), ($_.CommandLine -replace '[\\r\\n]+', ' ') }")
             out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], capture_output=True, text=True,
-                                 encoding="utf-8", errors="replace", timeout=20)
+                                 encoding="utf-8", errors="replace", timeout=LIST_TIMEOUT)
             if out.returncode != 0:
                 return None
             return parse_windows(out.stdout)
         out = subprocess.run(["ps", "-eo", "pid=,ppid=,lstart=,args="], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                             timeout=20, env={**os.environ, "LC_ALL": "C"})
+                             timeout=LIST_TIMEOUT, env={**os.environ, "LC_ALL": "C"})
         if out.returncode != 0:
             return None
         return parse_ps(out.stdout)
@@ -76,21 +79,52 @@ def parse_ps(text):
     return rows
 
 
-def is_test_command(cmd, known=()):
-    """True when the command line starts a test run: pytest or unittest (alone or as `python -m ...`), or one of the project's own test
-    commands (`[tests] landing` / `full`). A line that only mentions the word later (an editor, a chat) is not one."""
-    tokens = [t.strip('"\'') for t in cmd.split()]
+def base(token):
+    """A command word as compared: quotes off, `/` slashes, a path cut to its file name when it has a drive or folder (the executable), lower case,
+    `.exe` off."""
+    return pathlib.PurePath(token.strip("\"'").replace("\\", "/")).name.lower().removesuffix(".exe")
+
+
+def words_of(cmd):
+    return [t.strip("\"'").replace("\\", "/") for t in cmd.split()]
+
+
+def matched_word(cmd, known=()):
+    """What makes the command line a test run, or None. Detected: (1) `pytest` or `py.test` as the executable; (2) `python` or `py` with
+    `pytest`, `py.test` or `unittest` as one of its first three arguments (`python -m pytest`); (3) a project test command (`[tests] landing`
+    or `full`, any executable): the line's words start with the command's words, or end with them (its first word compared by file name, so
+    `C:\\Python\\python.exe` is `python`). A line that only mentions a word later (an editor, a chat) is not one."""
+    tokens = words_of(cmd)
     if not tokens:
-        return False
-    first = pathlib.PurePath(tokens[0].replace("\\", "/")).name.lower().removesuffix(".exe")
+        return None
+    first = base(tokens[0])
     if first in ("pytest", "py.test"):
-        return True
+        return first
     if first.startswith("python") or first == "py":
-        head = [pathlib.PurePath(t.replace("\\", "/")).name.lower().removesuffix(".exe") for t in tokens[1:4]]
-        if any(t in TEST_WORDS for t in head):
-            return True
-        return any(k and k in cmd for k in known)
-    return False
+        for t in tokens[1:4]:
+            if base(t) in TEST_WORDS:
+                return base(t)
+    for k in known:
+        w = words_of(k)
+        n = len(w)
+        if not n or n > len(tokens):
+            continue
+        w = [base(w[0])] + w[1:]
+        for window in (tokens[:n], tokens[-n:]):
+            if [base(window[0])] + window[1:] == w:
+                return "[tests] command"
+    return None
+
+
+def is_test_command(cmd, known=()):
+    return matched_word(cmd, known) is not None
+
+
+def describe(cmd, known=()):
+    """What `saani status` prints of a process: its executable's file name and the word that made it a test run, never the command line
+    (its arguments can hold anything)."""
+    tokens = words_of(cmd)
+    return f"{base(tokens[0]) if tokens else '?'} ... {matched_word(cmd, known) or '?'}"
 
 
 def outside_runs(procs, queue_pids, known=(), own=None):
@@ -113,13 +147,14 @@ def outside_runs(procs, queue_pids, known=(), own=None):
                 return True
         return False
 
-    return [p for p in procs if p["pid"] in tests and p["pid"] not in skip and not below(p["pid"], skip) and not below(p["pid"], tests)]
+    return [{**p, "what": describe(p["cmd"], known)} for p in procs
+            if p["pid"] in tests and p["pid"] not in skip and not below(p["pid"], skip) and not below(p["pid"], tests)]
 
 
 def known_commands(c):
     """The project's test commands as text, to recognise them in the process list."""
     out = []
-    for cmd in list(c.landing) + list(c.full):
+    for cmd in list(c.landing or []) + list(c.full or []):
         text = " ".join(str(x) for x in cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
         if text.strip():
             out.append(text.strip())
@@ -138,7 +173,9 @@ def tasks(held, runner, waiting, auto, wt_paths, outside, now=None, job_since=No
     if auto:
         lines.append(f"auto run {auto.get('id')}: running since {when(auto.get('started'), now)}"
                      + (f" ({auto.get('mode')} mode)" if auto.get("mode") else ""))
-    if held:
+    if held == {}:
+        lines.append("landing lock: held (unreadable lock: its holder and start are unknown)")
+    elif held:
         lines.append(f"{issue_of(held.get('branch') or '?')} landing: running since {when(held.get('started'), now)} (holds the landing lock)")
     if runner:
         lines.append(f"{name(runner.get('worktree', '?'))} tests ({runner.get('kind')}): running since {when(job_since(runner), now)} (in the queue)")
@@ -147,8 +184,21 @@ def tasks(held, runner, waiting, auto, wt_paths, outside, now=None, job_since=No
         lines.append(f"{name(job.get('worktree', '?'))} tests ({job.get('kind')}): blocked since {when(job_since(job), now)}, waiting for {on}")
     for p in outside:
         lines.append(f"tests outside the queue: running since {when(p['since'], now) if p.get('since') else 'unknown'} "
-                     f"(pid {p['pid']}: {p['cmd'][:100]}) - the queue does not know it")
+                     f"(pid {p['pid']}: {p.get('what') or describe(p['cmd'])}) - the queue does not know it")
     return lines
+
+
+def job_since(job, folder):
+    """When a queue job started (its job file's last write) or was queued; for the runner without a job file, the runner lock's time; None
+    when nothing says."""
+    if job.get("state") == "waiting" and job.get("created"):
+        return job["created"]
+    for name in (f"job-{job.get('id')}.json", "runner.lock"):
+        try:
+            return datetime.datetime.fromtimestamp((pathlib.Path(folder) / name).stat().st_mtime).isoformat(timespec="seconds")
+        except OSError:
+            continue
+    return job.get("created")
 
 
 def render(lines, open_worktrees, outside_unknown=False):
@@ -160,5 +210,5 @@ def render(lines, open_worktrees, outside_unknown=False):
     quiet = [f"{issue_of(b) if b else pathlib.Path(str(p)).name} ({pathlib.Path(str(p)).name})" for p, b in open_worktrees
              if (issue_of(b) if b else pathlib.Path(str(p)).name) not in busy]
     if quiet:
-        out.append("open worktrees, nothing running in them: " + ", ".join(quiet))
+        out.append("open worktrees, no landing or tests in them: " + ", ".join(quiet))
     return out

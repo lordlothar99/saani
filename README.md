@@ -115,7 +115,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | `saani auto ...` | `/saani:auto [here\|away] [--wait] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
 | `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button (ending with the Saani release or commit that serves the map); "Stale" when Saani does not answer |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers: one map shows them all |
-| `saani status` | `/saani:status` | what runs, what is blocked or waits (or: everything is idle); `--stats`: landings, test queue medians |
+| `saani status` | `/saani:status` | what runs, what is blocked or waits in Saani's machinery (or: no activity); `--stats`: landings, test queue medians |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | a worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land a worktree: lock, merge, rebuild, landing tests, push, clean up |
 | `saani test [--kind landing\|full] [--fresh] -- <cmd>` | `/saani:test`, `/saani:test full` | a test command through the machine-wide queue (a green result for the same tree and command is reused; `--fresh` runs anyway) |

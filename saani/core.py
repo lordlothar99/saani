@@ -17,7 +17,9 @@ only; pure functions first (tests/test_core.py). The settings come from the proj
   saani auto on|off|status|report ...               an auto run's record, stop rules and report (saani/auto.py)
   saani auto [--id ID]                              a throwaway worktree auto-<YYYY-MM-DD_HHMM> on auto/<id> from the integration
                                                     branch, for an auto run to work in (never landed)
-  saani status                                      the landing lock, the worktrees, the conflicts per landing, the test queue
+  saani status [--stats]                            what runs, is blocked or waits in Saani's machinery (landing lock, test queue, auto run,
+                                                    tests started outside the queue), or that it is idle; --stats: the landing counts,
+                                                    the merged branches waiting, the test queue's medians (saani/activity.py)
   saani prune [--dry-run] [--local-only]            delete the merged branches, locally and on GitHub, and the finished auto runs
   saani test [--kind landing|full] [--worktree P] [--fresh] -- <cmd...> run a test command through the test queue (saani/queue.py)
   saani check-msg <file>                            the commit-msg hook: a commit on a worker's branch or the integration branch needs the
@@ -862,25 +864,21 @@ def cmd_status(args):
     warning = worktrees_warning(cfg())
     if warning:
         print(warning)
-    held = read_lock(lock_path())
-    folder = lock_path().parent / queue.QUEUE_DIR
-    jobs = queue.jobs_in(folder) if folder.is_dir() else []
-    busy = queue.read_json(folder / queue.RUNNER) if folder.is_dir() else None
-    waiting = queue.order([j for j in jobs if j.get("state") == "waiting"])
-    wts = [(p, b) for p, b in worktrees() if in_wt_dir(p)]
-
-    def job_since(job):
-        if job.get("state") == "waiting" or not (folder / f"job-{job.get('id')}.json").is_file():
-            return job.get("created")
-        return datetime.datetime.fromtimestamp((folder / f"job-{job['id']}.json").stat().st_mtime).isoformat(timespec="seconds")
-
-    procs = activity.processes()
-    outside = activity.outside_runs(procs, [j.get("pid") for j in jobs] + [(busy or {}).get("pid")],
-                                    activity.known_commands(cfg())) if procs is not None else []
-    from . import auto
-    lines = activity.tasks(held or None, busy, waiting, auto.read_record(), wts, outside, job_since=job_since)
-    print("\n".join(activity.render(lines, wts, outside_unknown=procs is None)))
     if not getattr(args, "stats", False):
+        held = read_lock(lock_path())                      # None: free; {}: there, but unreadable
+        folder = lock_path().parent / queue.QUEUE_DIR
+        jobs = queue.jobs_in(folder) if folder.is_dir() else []
+        busy = queue.read_json(folder / queue.RUNNER) if folder.is_dir() else None
+        if busy and not queue.alive(busy.get("pid")):
+            busy = None                                    # a runner whose process is gone runs nothing
+        waiting = queue.order([j for j in jobs if j.get("state") == "waiting"])
+        wts = [(p, b) for p, b in worktrees() if in_wt_dir(p)]
+        procs = activity.processes()
+        outside = activity.outside_runs(procs, [j.get("pid") for j in jobs] + [(busy or {}).get("pid")],
+                                        activity.known_commands(cfg())) if procs is not None else []
+        from . import auto
+        lines = activity.tasks(held, busy, waiting, auto.read_record(), wts, outside, job_since=lambda j: activity.job_since(j, folder))
+        print("\n".join(activity.render(lines, wts, outside_unknown=procs is None)))
         return 0
     print("statistics:")
     log = main_checkout() / "build" / LANDINGS
@@ -995,7 +993,7 @@ def add_parsers(sub):
     p.set_defaults(run=cmd_land)
     p = sub.add_parser("status", help="what runs, what is blocked, what waits (or: everything is idle); `--stats`: landings and test queue medians; "
                                       "`status sync`: the issues' GitHub statuses")
-    p.add_argument("--stats", action="store_true", help="also print the landing counts, the merged branches waiting and the test queue's medians")
+    p.add_argument("--stats", action="store_true", help="print instead the landing counts, the merged branches waiting and the test queue's medians")
     p.add_argument("action", nargs="?", choices=["sync"],
                    help="sync: give each open issue the GitHub status its state implies (saani/status.py), a dry run without --apply")
     p.add_argument("--apply", action="store_true", help="sync: set the statuses (default: print what would move)")
