@@ -82,7 +82,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    `cd` to a folder outside the worktrees.
 1. **The pipeline, several issues at once.** You are Claude Code, the main session: you brief, decide and land; the coder and the reviewer do the reading
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
-   - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`, at most 2 per project, less the issues this run started: the owner's own worktrees, listed in `owner_running`,
+   - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`: default sized from the machine, at most 2; a fixed number up to 10, a `warning` above 5; less the issues this run started: the owner's own worktrees, listed in `owner_running`,
      take no slot; `note` says "no slot" or "nothing eligible") and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
      files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.

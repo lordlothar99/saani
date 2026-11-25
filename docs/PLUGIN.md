@@ -48,7 +48,7 @@ briefing and a report; below that size it costs more than it saves. **When it de
 read; a failure log to read (Tester); a fresh review (Reviewer, always for a change to the guard, the landing or the CI); a question that
 needs reading many pages (Researcher). Parallel coders each get their own worktree.
 
-**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`, at most 2 per project): Claude Code asks
+**In an auto run** the pipeline runs for several issues at once (`[auto] parallel`: by default sized from the machine, at most 2; up to 10 when set, with a warning above 5): Claude Code asks
 `saani auto pick --json` for the free slots and the next eligible issues, starts each (`saani start`), runs its coder in the background,
 and reviews and lands as each coder finishes. Landings are one at a time (the lock); a slot that frees is filled at once by a new
 `saani auto pick`. Issues whose likely files overlap are not run side by side. At the end: the full run, one integration -> production

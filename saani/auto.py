@@ -16,7 +16,7 @@ import time
 
 from . import config, core, glance, queue, status
 
-MAX_PARALLEL = 2          # never more issues side by side in one project than this, whatever the settings or the machine say
+MACHINE_PARALLEL = 2      # the most a machine-sized run (`[auto] parallel = 0`, the default) keeps in flight; a fixed n goes up to config.MAX_PARALLEL
 GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
 CPUS_PER_ISSUE = 4
 ISSUE_LIMIT = 500         # open issues read
@@ -35,13 +35,21 @@ def cfg():
 def parallel_size(configured, cpus, free_gb, running=0):
     """How many issues an auto run keeps in flight, per project (another project's run has its own slots). `configured` 0: auto-sized,
     min(2, cpus // 4), at least 1, and 1 when the free memory (the `running` issues' own memory given back) cannot hold even one issue
-    (free_gb None: unknown, the cores alone decide); any n >= 1 is fixed, capped at 2. The memory is not divided per issue: other
-    projects' worktrees use it too, and counting it would starve a second project below its own slots."""
+    (free_gb None: unknown, the cores alone decide); any n >= 1 is fixed, up to 10 (the machine is not asked). The memory is not divided per issue:
+    other projects' worktrees use it too, and counting it would starve a second project below its own slots."""
     if configured and configured >= 1:
-        return min(MAX_PARALLEL, int(configured))
+        return min(config.MAX_PARALLEL, int(configured))
     by_cpu = max(1, (cpus or 1) // CPUS_PER_ISSUE)
     short_of_ram = free_gb is not None and free_gb + running * GB_PER_ISSUE < GB_PER_ISSUE
-    return min(MAX_PARALLEL, by_cpu, 1 if short_of_ram else MAX_PARALLEL)
+    return min(MACHINE_PARALLEL, by_cpu, 1 if short_of_ram else MACHINE_PARALLEL)
+
+
+def parallel_warning(parallel):
+    """The warning for a run with more than `config.WARN_PARALLEL` slots (None otherwise): shown where the slots are shown."""
+    if parallel <= config.WARN_PARALLEL:
+        return None
+    return (f"warning: {parallel} slots (more than {config.WARN_PARALLEL}): each slot is a coder, a reviewer and a test run side by side, "
+            "so expect more tokens, more memory and more landing conflicts")
 
 
 def free_ram_gb():
@@ -319,8 +327,12 @@ def pick(today=None, only=None):
     own = sorted(n for n in running if n in mine)
     owner = sorted(n for n in running if n not in mine)
     parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(own))
-    return {"slots": free_slots(parallel, len(own)), "parallel": parallel, "running": own, "owner_running": owner,
-            "eligible": eligible, "skipped": skipped}
+    got = {"slots": free_slots(parallel, len(own)), "parallel": parallel, "running": own, "owner_running": owner,
+           "eligible": eligible, "skipped": skipped}
+    warning = parallel_warning(parallel)
+    if warning:
+        got["warning"] = warning
+    return got
 
 
 WAIT_EVERY_MINUTES = 3    # `pick --wait` looks again this often (GitHub and git are read each time, no model)
@@ -387,6 +399,8 @@ def cmd_pick(args):
         return 0
     running = ", ".join(f"#{n}" for n in got["running"]) or "none"
     print(f"slots: {got['slots']} free of {got['parallel']} (running: {running})")
+    if got.get("warning"):
+        print(got["warning"])
     if got.get("owner_running"):
         owner = ", ".join(f"#{n}" for n in got["owner_running"])
         print(f"the owner's worktrees {owner} are in flight: they take no slot (slots = [auto] parallel less this run's own running issues), "
@@ -666,6 +680,9 @@ def cmd_on(args):
     if token and not here_mode:
         rec["watch"] = token          # the watcher that started this session (#67): only it ends this record; written here and nowhere else
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+    warning = parallel_warning(parallel_size(cfg().parallel, os.cpu_count(), None))
+    if warning:
+        print(warning)                    # before the marker line below, which stays the last line
     if here_mode:
         # The interactive sub-mode (#50): the record (stop rules, journal, report) without the guard's switch. This line is not the
         # marker, so the guard leaves the owner's session in present mode: the owner answers the prompts and the questions.
@@ -1056,6 +1073,9 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
         return 2
     print(f"saani auto: away {run_id} started (watcher process {pid}), in a minimized window" if os.name == "nt" else
           f"saani auto: away {run_id} started (watcher process {pid})")
+    warning = parallel_warning(parallel_size(cfg().parallel, os.cpu_count(), None))
+    if warning:
+        print(f"  {warning}")
     print(f"  log:    {log}")
     print("  follow: saani auto status (once the run is on), the log, or /saani:ui")
     if wait:

@@ -34,7 +34,8 @@ def choose(issues, started=(), running=None, today="2026-11-22"):
     (0, None, 32, 1),
     (0, 12, 16, 2),                                     # the 12-core, 16 GB machine
     (0, 12, 4, 2),                                      # other projects hold the rest: still its 2
-    (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 2), (3, 4, 2, 2),   # fixed, capped at 2, whatever the machine says
+    (2, 2, 1, 2), (1, 64, 64, 1), (5, 64, 64, 5), (3, 4, 2, 3),   # fixed, whatever the machine says
+    (6, 4, 1, 6), (10, 2, 1, 10), (11, 64, 64, 10),             # fixed up to 10 (the config refuses more)
 ])
 def test_the_size_of_the_run(configured, cpus, gb, want):
     assert auto.parallel_size(configured, cpus, gb) == want
@@ -68,10 +69,30 @@ def test_free_ram_is_a_number_or_none():
 def test_parallel_is_a_setting():
     assert config.Config().parallel == 0
     assert config.from_toml({"auto": {"parallel": 2}}, "x").parallel == 2
-    with pytest.raises(SystemExit):
-        config.from_toml({"auto": {"parallel": -1}}, "x")
-    with pytest.raises(SystemExit):
-        config.from_toml({"auto": {"parallel": "many"}}, "x")
+    for ok in (0, 1, 5, 6, 10):
+        assert config.from_toml({"auto": {"parallel": ok}}, "x").parallel == ok
+    for bad in (-1, 11, 2.5, "many", True):
+        with pytest.raises(SystemExit, match="from 0 to 10"):
+            config.from_toml({"auto": {"parallel": bad}}, "x")
+
+
+@pytest.mark.parametrize("configured,slots,warned", [(0, 2, False), (1, 1, False), (2, 2, False), (5, 5, False), (6, 6, True), (10, 10, True)])
+def test_pick_says_the_slots_and_warns_above_five(monkeypatch, capsys, configured, slots, warned):
+    config.use(config.Config(repo="acme/webshop", parallel=configured))
+    fake_world(monkeypatch, [issue(1)], cpus=16, gb=32)
+    got = auto.pick("2026-11-22")
+    assert got["parallel"] == slots and got["slots"] == slots
+    assert ("warning" in got) == warned
+    if warned:
+        assert "coder, a reviewer and a test run" in got["warning"]
+    args = type("A", (), {"wait": None, "only": None, "limit": None, "json": False})()
+    assert auto.cmd_pick(args) == 0
+    assert (f"{slots} slots" in capsys.readouterr().out) == warned
+
+
+def test_the_warning_is_not_printed_by_reading_the_config(capsys):
+    config.from_toml({"auto": {"parallel": 10}}, "x")
+    assert capsys.readouterr().out == ""
 
 
 # ---------------------------------------------------------------- eligibility and order

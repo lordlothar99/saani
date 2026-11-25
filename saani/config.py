@@ -12,6 +12,8 @@ import sys
 import tomllib
 
 FILE = "saani.toml"
+MAX_PARALLEL = 10         # [auto] parallel: the most issues a project may ask an auto run to keep in flight
+WARN_PARALLEL = 5         # above this the slots work, with a warning where they are shown (saani auto pick, the start of a run)
 
 
 @dataclasses.dataclass
@@ -50,7 +52,7 @@ class Config:
     deploy_timeout_minutes: float = 30
     version_file: str = ""                       # the file whose version a merged pull request may change: then `saani merge` creates the GitHub release; empty: never
     board_port: int = 8771
-    parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory; at most 2 per project
+    parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory (at most 2); n up to 10, a warning above 5
     ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
     wait_quiet_minutes: float = 60               # an auto run started with --wait: the quiet time (nothing running, nothing eligible) that ends it
     ci_workflow: str = "ci.yml"
@@ -164,8 +166,8 @@ def from_toml(data, root):
                              + (f" (unknown: {', '.join(sorted(unknown))})" if unknown else ""))
         flat["status_names"] = {**Config().status_names, **names}
     par = flat.get("parallel", 0)
-    if not isinstance(par, int) or isinstance(par, bool) or par < 0:
-        raise SystemExit(f"{FILE}: [auto] parallel must be a whole number, 0 or more")
+    if not isinstance(par, int) or isinstance(par, bool) or not 0 <= par <= MAX_PARALLEL:
+        raise SystemExit(f"{FILE}: [auto] parallel must be a whole number from 0 to {MAX_PARALLEL}")
     att = flat.get("ci_attempts", 3)
     if not isinstance(att, int) or isinstance(att, bool) or att < 1:
         raise SystemExit(f"{FILE}: [auto] ci_attempts must be a whole number, 1 or more")

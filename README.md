@@ -18,7 +18,7 @@ and lands it, while Saani's commands and its guard keep the work safe.
    one at a time, while you are still there. Then it starts the run in a headless Claude Code session in the background, so nothing waits
    for an approval while you are gone. `/saani:auto here` runs the same in your own session and asks you whenever it needs to; plain
    `/saani:auto` asks which.
-2. **The run.** At most 2 issues in flight per project. For each: its own worktree (`saani start`), a coder subagent, a reviewer
+2. **The run.** By default up to 2 issues in flight per project, sized from the machine (`[auto] parallel` sets up to 10; a warning above 5). For each: its own worktree (`saani start`), a coder subagent, a reviewer
    subagent on the diff (a change of a few lines Claude makes itself), then `saani land`: a lock, a merge, the landing tests, a push
    to `dev`. As soon as one issue lands, the next eligible one starts. Stop rules end it early (40 refusals, 10 of the same reason in
    a row, 10 hours).
