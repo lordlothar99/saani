@@ -957,19 +957,19 @@ def command(part, ctx, cwd):
 SAANI_SPEC = {
     ("start",): ({"--slug": True, "--no-assign": False, "--no-comment": False}, [r"\d+"]),
     ("land",): ({"--keep": False, "--wait": True, "--dry-run": False, "--worktree": True, "--no-comment": False}, []),
-    ("status",): ({}, []),
+    ("status",): ({"--stats": False}, []),
     ("comment",): ({"--text": True, "--field": True, "--dry-run": False}, [r"\d+", r"[a-z-]+"]),
     ("kpis",): ({"--since": True, "--until": True, "--baseline": False, "--ref": True, "--json": False}, []),
     ("ui",): ({"--port": True, "--open": False, "--json": False}, []),
     ("progress", "show"): ({}, [r".+"]),
     ("progress", "watch"): ({"--every": True}, [r".+"]),
-    ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+"}, []),
+    ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+", "--wait": True}, []),
     ("auto", "status"): ({"--check": False}, []),
-    ("auto", "report"): ({"--pr": True, "--post": False}, []),
+    ("auto", "report"): ({"--pr": True, "--post": False, "--reason": True}, []),
     ("ci", "status"): ({}, []),
     ("ci", "pr"): ({"--dry-run": False, "--pc": False}, []),
 }
-SAANI_TEXT = {"--slug", "--text", "--field"}
+SAANI_TEXT = {"--slug", "--text", "--field", "--reason"}
 
 
 def checkout_top(ctx, p):
@@ -1587,6 +1587,8 @@ GH_FLAGS = {
     ("run", "view"): "j/job= /log /log-failed v/verbose /exit-status a/attempt= " + GH_OUT,
     ("run", "list"): "b/branch= c/commit= e/event= L/limit= s/status= u/user= w/workflow= /created= a/all " + GH_OUT,
     ("run", "watch"): "i/interval= /exit-status /compact",
+    ("release", "list"): "L/limit= /exclude-drafts /exclude-pre-releases O/order= " + GH_OUT,
+    ("release", "view"): GH_OUT,
     ("issue", "comment"): "b/body= F/body-file= /edit-last",
     ("pr", "comment"): "b/body= F/body-file= /edit-last",
     ("issue", "create"): "t/title= b/body= F/body-file= l/label= a/assignee= m/milestone= p/project= T/template=",
@@ -1598,7 +1600,10 @@ GH_FLAGS = {
     ("api", ""): "p/preview= q/jq= t/template= i/include /paginate /slurp /silent /verbose /cache=",      # no -H: a header can change the method
 }
 GH_HEREDOC = {("issue", "comment"), ("pr", "create"), ("pr", "comment")}
-GH_DENIED = {"release": "gh release", "repo": "gh repo", "secret": "gh secret", "auth": "gh auth"}
+GH_DENIED = {"repo": "gh repo", "secret": "gh secret", "auth": "gh auth"}
+# The read-only release commands may read any repository (a project's own releases or another's, say an upstream's); every other
+# `gh release` subcommand is refused as "gh release".
+GH_ANY_REPO = {("release", "list"), ("release", "view")}
 
 
 def pflags(args, spec):
@@ -1668,6 +1673,8 @@ def gh_command(args, ctx, cwd):
     if group in GH_DENIED:
         return deny(GH_DENIED[group], GH_DENIED[group], "gh", how="the owner does it")
     key = ("api", "") if group == "api" else (group, args[1] if len(args) > 1 else "")
+    if group == "release" and key not in GH_FLAGS:
+        return deny("gh release", "gh release other than list and view", "gh", how="the owner does it")
     if key not in GH_FLAGS:
         return deny("not on the list", f"gh {' '.join(key)}".strip()[:40] + " is not on the guard's list", "gh")
     rest = args[1:] if group == "api" else args[2:]
@@ -1680,7 +1687,12 @@ def gh_command(args, ctx, cwd):
         if names.count(once) > 1:
             return deny("gh option", f"gh with --{once} twice", "gh")
     values = {f[0]: f[1] for f in flags}
-    if "repo" in values and values["repo"].lower() != ctx.repo.lower():
+    if key in GH_ANY_REPO:
+        if len(positional) > (1 if key == ("release", "view") else 0):
+            return deny("gh option", f"gh {' '.join(key)} with other arguments", "gh")
+        if "repo" in values and not re.fullmatch(r"[\w.-]+/[\w.-]+", values["repo"]) or ".." in values.get("repo", ""):
+            return deny("another repository", "gh --repo other than OWNER/REPO", "gh")
+    elif "repo" in values and values["repo"].lower() != ctx.repo.lower():
         return deny("another repository", f"gh on a repository other than {ctx.repo}", "gh")
     text_at = {f[2] for f in flags if f[0] in ("title", "body") and f[2] is not None}
     heredocs = {k for k, w in enumerate(rest) if w.heredoc}

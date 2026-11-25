@@ -62,7 +62,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
    issue numbers as arguments, only those. If the answer lists `owner_running` (the output says "the owner's worktrees #n are in
    flight"), tell the owner before they go away: those worktrees take no slot of the run, but the files they change are not given to
-   another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release`) will be left for them.
+   another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release create`) will be left for them.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then, away: start it (section "The two
    sub-modes"); here: "The run".
 4. **Away only, the headless session's first step: switch it on.** The run's id and folder come from the arguments (`run <id>
@@ -125,7 +125,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 
 ## Wait mode (`--wait`)
-Needs the guard to allow `saani auto pick --wait`: while `saani/guard.py` does not list it, the call is refused; say so in the report.
+The guard allows `saani auto pick --wait`; if a call is refused anyway, say so in the report.
 Only when the owner typed `--wait` (here or away; headless: the `run` arguments carry it). It changes one thing: what the loop does when
 nothing is running and nothing is eligible. Without `--wait` the run goes to "Review and clean" and the End. With it:
 1. Run `saani auto status --check` (exit 3: a stop rule, go to the End). Then run `saani auto pick --wait 8 --json` (add `--only ...`
