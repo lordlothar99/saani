@@ -1157,5 +1157,56 @@ def test_pick_wait_command_prints_the_pick_json(world, monkeypatch, capsys):
         auto.cmd_pick(type("A", (), {"wait": True, "only": None, "limit": None, "json": False})())
 
 
+def test_pick_wait_keeps_waiting_while_no_slot_is_free(world):
+    t = FakeTime()
+    full = {**answer(7), "slots": 0}
+    got = auto.wait_pick(10, pick_fn=lambda only=None: dict(full), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert t.slept == [180, 180, 180, 60] and got["waited_minutes"] == 10.0          # waited out, never returned for a full house
+    answers = [dict(full), answer(7)]
+    t = FakeTime()
+    got = auto.wait_pick(10, pick_fn=lambda only=None: answers.pop(0), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert t.slept == [180] and [e["number"] for e in got["eligible"]] == [7]
+
+
+def test_pick_wait_starts_no_pick_that_could_end_past_the_deadline(world):
+    t, picks = FakeTime(), []
+    def pick_fn(only=None):
+        picks.append(t.now)
+        return answer()
+    auto.wait_pick(10, pick_fn=pick_fn, stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert picks == [1000.0, 1180.0, 1360.0, 1540.0]                              # none at the deadline (1600) itself
+
+
+def test_a_missing_run_record_is_a_stop_rule_while_the_guard_holds_the_run(world):
+    assert auto.stop_rules_hit() == []
+    guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)               # the guard's entry, no record: `auto off` ran
+    assert [k for k, _, _ in auto.stop_rules_hit()] == ["record missing"]
+    got = auto.wait_pick(60, pick_fn=lambda only=None: answer(3), clock=FakeTime().clock, sleep=lambda s: pytest.fail("slept"))
+    assert got["eligible"] == [] and got["stop"][0]["rule"] == "record missing"
+
+
+def test_a_stop_rule_met_in_a_wait_is_journalled(world):
+    record(world, started=auto.utc_now() - datetime.timedelta(hours=11))
+    assert auto.stop_rules_hit()
+    assert "hours reached" in auto.journal_path("r1").read_text(encoding="utf-8")
+
+
+def test_pick_wait_refuses_a_number_that_is_not_finite(world):
+    for bad in (float("inf"), float("nan"), -1.0, 0.0):
+        with pytest.raises(SystemExit, match="needs the minutes"):
+            auto.cmd_pick(type("A", (), {"wait": bad, "only": None, "limit": None, "json": False})())
+
+
+def test_the_command_line_reads_wait_as_minutes_for_pick_and_a_flag_for_away(world):
+    import argparse
+    parser = argparse.ArgumentParser()
+    core.add_parsers(parser.add_subparsers(dest="cmd", required=True))
+    got = parser.parse_args(["auto", "pick", "--wait", "9", "--json"])
+    assert got.wait == 9.0 and got.json is True
+    got = parser.parse_args(["auto", "away", "--wait", "--only", "12"])
+    assert got.wait is True and got.only == [12]
+    assert parser.parse_args(["auto", "away"]).wait is None
+
+
 def test_wait_quiet_minutes_is_a_setting(world):
     assert config.Config().wait_quiet_minutes == 60

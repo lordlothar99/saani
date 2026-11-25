@@ -375,10 +375,13 @@ project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agen
 and nothing else) makes the run wait for new eligible issues (filed, relabelled or answered while it runs) instead of ending when its list
 is empty. The skill's loop calls `saani auto pick --wait <minutes>` only when nothing is running and nothing is eligible. That command
 blocks, in the standard library and with no model (so no tokens are spent while it waits): it runs the same pick as `pick --json` every 3
-minutes, returns as soon as an issue is eligible, or after the minutes with an empty `eligible`, or at once when a stop rule of the run is
-reached (`saani auto status --check`'s rules; the JSON then has `stop`). It prints `pick --json` plus `waited_minutes` and
+minutes, returns as soon as an issue is eligible and a slot is free (eligible issues with no free slot are not news), or after the minutes
+with an empty `eligible` (it starts no pick that could end past the minutes), or at once when a stop rule of the run is reached
+(`saani auto status --check`'s rules, the missing run record included; the JSON then has `stop`, and a reached limit is journalled as a
+`stop` line as `status --check` does; a missing record has no journal to write to). `--wait` must be a finite number above 0. It prints `pick --json` plus `waited_minutes` and
 `wait_quiet_minutes` (`[auto] wait_quiet_minutes`, default 60). The guard allows it like `pick`. A Bash call runs at most 10 minutes, so
-the skill waits in calls of 9 minutes and adds the empty ones up: when the quiet time (nothing running, nothing eligible) reaches
+the skill waits in calls of 8 minutes and adds the empty ones up (a call that fails or times out counts as an empty wait, followed by
+`saani auto status --check`; two failures in a row end the run the normal way): when the quiet time (nothing running, nothing eligible) reaches
 `wait_quiet_minutes`, or a stop rule is reached, the run ends the normal way (the full run, the one pull request, `saani ci pr` rounds, the
 report). Each wait is a Bash call that returns, so the headless session's turn stays open and `claude -p` does not exit (#52). The
 watcher is unchanged: it still switches the run off when the session ends. There is one pull request per run; an issue that lands after

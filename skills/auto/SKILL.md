@@ -119,10 +119,13 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 ## Wait mode (`--wait`)
 Only when the owner typed `--wait` (here or away; headless: the `run` arguments carry it). It changes one thing: what the loop does when
 nothing is running and nothing is eligible. Without `--wait` the run goes to "Review and clean" and the End. With it:
-1. Run `saani auto status --check` (exit 3: a stop rule, go to the End). Then run `saani auto pick --wait 9 --json` (add `--only ...`
-   as before), **alone, as one Bash call with the timeout set to 600000 ms** (a Bash call lasts 10 minutes at most). It blocks, with no
-   model and no tokens, and returns when an issue is eligible, after 9 minutes with an empty `eligible`, or at once with a `stop` list
-   (a stop rule is reached). Call it only when nothing is running and nothing is eligible, never while a coder works.
+1. Run `saani auto status --check` (exit 3: a stop rule, go to the End). Then run `saani auto pick --wait 8 --json` (add `--only ...`
+   as before), **alone, as one Bash call with the timeout set to 600000 ms** (a Bash call lasts 10 minutes at most; 8 leaves room for
+   the reads of GitHub and git). It blocks, with no model and no tokens, and returns when an issue is eligible and a slot is free,
+   after 8 minutes with an empty `eligible`, or at once with a `stop` list (a stop rule is reached, or the run record is missing).
+   Call it only when nothing is running and nothing is eligible, never while a coder works. If the call fails or times out, treat it as
+   an empty wait of 8 minutes (add 8 to the quiet time), run `saani auto status --check`, and carry on; when it fails twice in a row,
+   the run ends the normal way (the End).
 2. `eligible` not empty: back to the loop (take the issues as usual). `stop` present: the End. Empty: add its `waited_minutes` to the
    quiet time you keep (reset to 0 whenever anything ran); at `wait_quiet_minutes` (in the answer, `[auto] wait_quiet_minutes`, default 60)
    of quiet the run is done: do "Review and clean" and the End the normal way (the full run, the one pull request, `saani ci pr`, the

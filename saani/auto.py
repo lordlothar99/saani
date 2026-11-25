@@ -5,6 +5,7 @@ reading of GitHub, git and the machine is in `pick`. Standard library only.
 import ctypes
 import datetime
 import json
+import math
 import os
 import pathlib
 import re
@@ -298,9 +299,17 @@ WAIT_EVERY_MINUTES = 3    # `pick --wait` looks again this often (GitHub and git
 
 
 def stop_rules_hit():
-    """[(rule, value, limit)] reached by the run that is on; none when no run is on (a pick outside a run has no stop rules)."""
+    """[(rule, value, limit)] of `saani auto status --check`'s stop rules for the run that is on, each journalled as a `stop` line like
+    status --check does. When the record is gone while the guard still holds a run of this repository (the owner ran `auto off`): the
+    rule `record missing` (nothing to journal into). None when no run is on (a pick outside a run has no stop rules)."""
     rec = read_record()
-    return reached(rec) if rec else []
+    if not rec:
+        return [("record missing", 0, 0)] if any(guard_live(s) for s, _ in own_entries()) else []
+    hit = reached(rec)
+    for k, value, limit in hit:
+        shown = f"{value:.1f}" if k == "hours" else str(value)
+        journal(None, "stop", note=f"{LIMIT_WORDS[k]} reached ({shown} of {limit})")
+    return hit
 
 
 def wait_pick(minutes, only=None, every=WAIT_EVERY_MINUTES, pick_fn=None, stop_fn=None, clock=None, sleep=None):
@@ -320,9 +329,11 @@ def wait_pick(minutes, only=None, every=WAIT_EVERY_MINUTES, pick_fn=None, stop_f
             break
         got = pick_fn(only=only)
         remaining = deadline - clock()
-        if got["eligible"] or remaining <= 0:
+        if (got["eligible"] and got["slots"] > 0) or remaining <= 0:       # eligible issues with no free slot are no news: keep waiting
             break
         sleep(min(every * 60, remaining))
+        if clock() >= deadline:                 # no pick that could end past the deadline (the caller's Bash call has a timeout)
+            break
     got["waited_minutes"] = round((clock() - start) / 60, 1)
     got["wait_quiet_minutes"] = cfg().wait_quiet_minutes
     return got
@@ -331,8 +342,8 @@ def wait_pick(minutes, only=None, every=WAIT_EVERY_MINUTES, pick_fn=None, stop_f
 def cmd_pick(args):
     wait = getattr(args, "wait", None)
     if wait is not None:
-        if wait is True or wait <= 0:
-            raise SystemExit("saani auto pick: --wait needs the minutes to wait (more than 0), e.g. --wait 9")
+        if wait is True or not math.isfinite(wait) or wait <= 0:
+            raise SystemExit("saani auto pick: --wait needs the minutes to wait (a number more than 0), e.g. --wait 8")
         got = wait_pick(wait, only=args.only)
         args.json = True                      # the same JSON as `pick --json`, plus waited_minutes, wait_quiet_minutes and, at a stop rule, stop
     else:
