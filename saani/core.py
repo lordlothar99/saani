@@ -49,7 +49,7 @@ import subprocess
 import sys
 import time
 
-from . import comments, config, queue, status
+from . import activity, comments, config, queue, status
 
 LOCK_NAME = "saani-landing.lock"
 LANDINGS = "saani-landings.jsonl"
@@ -863,10 +863,26 @@ def cmd_status(args):
     if warning:
         print(warning)
     held = read_lock(lock_path())
-    print("landing lock: " + ("free" if held is None else f"held by {held.get('branch')} since {held.get('started')}"))
-    for path, branch in worktrees():
-        if in_wt_dir(path):
-            print(f"  {branch:45} {path}")
+    folder = lock_path().parent / queue.QUEUE_DIR
+    jobs = queue.jobs_in(folder) if folder.is_dir() else []
+    busy = queue.read_json(folder / queue.RUNNER) if folder.is_dir() else None
+    waiting = queue.order([j for j in jobs if j.get("state") == "waiting"])
+    wts = [(p, b) for p, b in worktrees() if in_wt_dir(p)]
+
+    def job_since(job):
+        if job.get("state") == "waiting" or not (folder / f"job-{job.get('id')}.json").is_file():
+            return job.get("created")
+        return datetime.datetime.fromtimestamp((folder / f"job-{job['id']}.json").stat().st_mtime).isoformat(timespec="seconds")
+
+    procs = activity.processes()
+    outside = activity.outside_runs(procs, [j.get("pid") for j in jobs] + [(busy or {}).get("pid")],
+                                    activity.known_commands(cfg())) if procs is not None else []
+    from . import auto
+    lines = activity.tasks(held or None, busy, waiting, auto.read_record(), wts, outside, job_since=job_since)
+    print("\n".join(activity.render(lines, wts, outside_unknown=procs is None)))
+    if not getattr(args, "stats", False):
+        return 0
+    print("statistics:")
     log = main_checkout() / "build" / LANDINGS
     rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()] if log.is_file() else []
     s = landing_summary(rows)
@@ -879,12 +895,6 @@ def cmd_status(args):
             print(f"merged branches waiting: {len(local)} local, {len(remote)} on GitHub, {len(runs)} finished auto run(s) (saani prune)")
     except SystemExit:                                   # offline: status still prints the rest
         print("merged branches: unknown (git fetch failed)")
-    folder = lock_path().parent / queue.QUEUE_DIR
-    jobs = queue.jobs_in(folder) if folder.is_dir() else []
-    busy = queue.read_json(folder / queue.RUNNER) if folder.is_dir() else None
-    waiting = queue.order([j for j in jobs if j.get("state") == "waiting"])
-    print("test queue: " + (f"{busy.get('kind')} of {pathlib.Path(busy.get('worktree', '')).name} runs" if busy else "idle")
-          + (f"; waiting: {', '.join(j['kind'] + ' of ' + pathlib.Path(j['worktree']).name for j in waiting)}" if waiting else ""))
     for kind, k in queue.summary(queue.rows(main_checkout() / "build" / TESTS_LOG)).items():
         print(f"  {kind:6} {k['jobs']} job(s), median wait {k['wait']} s, median run {k['run']} s")
     return 0
@@ -983,7 +993,9 @@ def add_parsers(sub):
     p.add_argument("--worktree", help="land this worktree instead of the current folder's (an auto run cannot change folder)")
     p.add_argument("--no-comment", action="store_true", help="do not comment the landing on the issue or label it in-dev (print the step instead)")
     p.set_defaults(run=cmd_land)
-    p = sub.add_parser("status", help="the lock, the worktrees, the conflicts per landing, the test queue; `status sync`: the issues' GitHub statuses")
+    p = sub.add_parser("status", help="what runs, what is blocked, what waits (or: everything is idle); `--stats`: landings and test queue medians; "
+                                      "`status sync`: the issues' GitHub statuses")
+    p.add_argument("--stats", action="store_true", help="also print the landing counts, the merged branches waiting and the test queue's medians")
     p.add_argument("action", nargs="?", choices=["sync"],
                    help="sync: give each open issue the GitHub status its state implies (saani/status.py), a dry run without --apply")
     p.add_argument("--apply", action="store_true", help="sync: set the statuses (default: print what would move)")
