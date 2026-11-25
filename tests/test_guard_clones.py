@@ -158,6 +158,19 @@ def test_grep_never_reads_a_git_folder(cctx, inp):
     assert verdict[0] == "deny" and verdict[2] == "secret", (inp, verdict)
 
 
+@pytest.mark.parametrize("glob,verdict", [
+    ("*.py,.env", "secret"), ("*.py .env", "secret"), ("*.py, config", "secret"), ("*.py,*.env", "secret"), ("*.md\t*.env", "secret"),
+    ("*.py,!*.md", "grep option"), ("*.{{py,env}}", "secret"), ("*.py", "allow"), ("*.py,*.md", "allow"), ("*.py *.md", "allow"),
+])
+def test_a_glob_with_spaces_or_commas_is_several_patterns(cctx, glob, verdict):
+    """Claude Code's Grep splits its glob on spaces and commas into several --glob patterns: each is judged."""
+    (pathlib.Path(cctx.places["clone"]) / ".env").write_text("x")
+    (pathlib.Path(cctx.places["work"]) / ".env").write_text("x")
+    for root in ("{clone}",) if "config" in glob else ("{clone}", "{work}"):           # config: the clone's .git/config
+        got = tool(cctx, "Grep", pattern="x", path=root, glob=glob)
+        assert (got[0] if verdict == "allow" else got[2]) == verdict, (root, glob, got)
+
+
 def test_grep_of_a_tree_with_a_git_folder_below_it(cctx):
     vendor = pathlib.Path(cctx.places["work"]) / "vendor" / "dep"
     (vendor / ".git").mkdir(parents=True)

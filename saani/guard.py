@@ -632,11 +632,14 @@ def grep_tool(inp, ctx):
             return deny("unreadable path", f"Grep with a {key} that is not text")
     root = ctx.path(inp.get("path") or ".", tilde=True)
     glob_ = inp.get("glob") or ""
+    # Claude Code's Grep splits its glob on spaces and commas into several --glob patterns: each is judged, a file is searched when any
+    # of them matches it.
+    globs = [g for g in re.split(r"[\s,]+", glob_) if g]
     if inp.get("type"):
         return deny("grep option", "Grep with a type (its file kinds are ripgrep's, the guard does not read them)", how="give a glob, like *.py")
-    if glob_.startswith("!"):
+    if any(g.startswith("!") for g in globs):
         return deny("grep option", "Grep with a negated glob (it searches everything else)", how="give a glob of the files to search")
-    if secret_name(inp.get("path") or "", root) or (glob_ and secret_name(glob_)):
+    if secret_name(inp.get("path") or "", root) or any(secret_name(g) for g in globs):
         return deny("secret", "Grep in secret files", how=SECRETS_HOW)
     if ".git" in git_parts(inp.get("path") or "") or ".git" in git_parts(root):
         return deny("secret", "Grep in a .git folder (its config holds remote URLs with tokens, packed-refs the owner's stash)",
@@ -647,15 +650,16 @@ def grep_tool(inp, ctx):
     if os.path.isdir(root):
         # Every file the search could read is looked at, by its path below the root and its full path (.docker/config.json,
         # .kube/config, .ssh/...): a glob narrows it only when it is a plain name pattern (no /, no **, no braces), which ripgrep matches
-        # against the file's name. A .git folder below the root is walked too, whatever ripgrep would skip: a search that could read
-        # any file in it is refused (an unnarrowed search, or a glob matching a name there: config, packed-refs...).
+        # against the file's name; several patterns narrow it only when each is plain. A .git folder below the root is walked too,
+        # whatever ripgrep would skip: a search that could read any file in it is refused (an unnarrowed search, or a glob matching a
+        # name there: config, packed-refs...).
         import fnmatch
-        plain = bool(glob_) and not re.search(r"[/\\{}]|\*\*", glob_)
+        plain = bool(globs) and not any(re.search(r"[/\\{}]|\*\*", g) for g in globs)
 
         def hit(path, name):
             if os.path.isdir(path):
                 return not plain and git_parts(name) == [".git"]
-            if plain and not fnmatch.fnmatchcase(name, glob_.lower()):
+            if plain and not any(fnmatch.fnmatchcase(name, g.lower()) for g in globs):
                 return False
             rel = os.path.relpath(path, root)
             return ".git" in git_parts(rel)[:-1] or secret_name(rel) or secret_name(path)

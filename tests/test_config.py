@@ -84,6 +84,39 @@ def test_a_missing_reference_clone_is_a_warning_when_a_run_starts_not_a_refusal(
         config.from_toml({**base, "auto": {"reference_clones": ["../webshop-wt/nope"]}}, main)
 
 
+def test_a_clone_git_cannot_read_is_a_warning_with_git_s_reason_not_a_refusal(tmp_path, git, monkeypatch):
+    import subprocess
+    base = {"project": {"repo": "acme/webshop"}, "worktrees": {"folder": "../webshop-wt"}}
+    main, upstream = tmp_path / "webshop", tmp_path / "upstream-lib"
+    main.mkdir()
+    upstream.mkdir()
+    git("init", "-q", cwd=upstream)
+    real = subprocess.run
+
+    def dubious(cmd, *a, **k):
+        if cmd[:1] == ["git"] and "rev-parse" in cmd:
+            return subprocess.CompletedProcess(cmd, 128, "", "fatal: detected dubious ownership in repository at 'x'\n"
+                                               "To add an exception for this directory, call: ...\n")
+        return real(cmd, *a, **k)
+    monkeypatch.setattr(subprocess, "run", dubious)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)        # read, no refusal
+    here, warning = config.present_reference_clones(cfg)
+    assert here == [] and "dubious ownership" in warning and "no remote.origin.url" not in warning
+
+    def slow(cmd, *a, **k):
+        if cmd[:1] == ["git"]:
+            assert k.get("timeout") == config.GIT_READ_SECONDS <= 5
+            raise subprocess.TimeoutExpired(cmd, k["timeout"])
+        return real(cmd, *a, **k)
+    monkeypatch.setattr(subprocess, "run", slow)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)
+    assert config.present_reference_clones(cfg) == ([], f"warning: [auto] reference_clones ../upstream-lib: git did not answer "
+                                                         f"within {config.GIT_READ_SECONDS} s; this run goes without it")
+    monkeypatch.setattr(subprocess, "run", real)                                         # read fine, no origin: still refused
+    with pytest.raises(SystemExit, match="no remote.origin.url"):
+        config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)
+
+
 def test_the_old_wait_quiet_minutes_key_is_refused_as_unknown():
     with pytest.raises(SystemExit):
         config.from_toml({"project": {"repo": "acme/webshop"}, "auto": {"wait_quiet_minutes": 30}}, ".")

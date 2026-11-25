@@ -56,6 +56,7 @@ class Config:
     ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
     keep_on_quiet_minutes: float = 60            # an auto run started with --keep-on: the quiet time (nothing running, nothing eligible) that ends it
     reference_clones: tuple = ()                 # an auto run reads these clones' code at a tag, never changes them (relative to the main checkout)
+    reference_clone_problems: dict = dataclasses.field(default_factory=dict)   # clone -> why git could not read it (set when read)
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
     ci_reserve_minutes: int = 50
@@ -227,22 +228,55 @@ def check_reference_clones(cfg):
             raise SystemExit(f"{where}: its .git cannot be read ({path})")
         if own is not None and theirs == own:
             raise SystemExit(f"{where}: it is the project's own repository (a worktree of it), not an upstream's clone ({path})")
-        try:
-            r = subprocess.run(["git", "-C", str(path), "config", "--get", "remote.origin.url"], capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=20)
-            url = r.stdout.strip() if r.returncode == 0 else ""
-        except (OSError, subprocess.SubprocessError):
-            url = ""
-        if not url:
+        url, problem = origin_url(path)
+        if problem:
+            cfg.reference_clone_problems[raw] = problem      # git cannot read it here: a warning at `saani auto on`, never a refusal
+        elif not url:
             raise SystemExit(f"{where}: it has no remote.origin.url (git fetch --tags origin needs the upstream as origin) ({path})")
 
 
+GIT_READ_SECONDS = 5
+
+
+def origin_url(path):
+    """(the clone's remote.origin.url or "", why git could not read the clone or ""). git must first read the repository (a "dubious
+    ownership", a slow drive, no git: the problem, git's own words, short); then a missing key is "" with no problem."""
+    def run(*args):
+        return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=GIT_READ_SECONDS)
+
+    def short(text):
+        line = " ".join(text.split())
+        return line[:160] + ("..." if len(line) > 160 else "")
+    try:
+        r = run("rev-parse", "--git-dir")
+        if r.returncode != 0:
+            return "", "git cannot read it: " + (short(r.stderr) or f"exit code {r.returncode}")
+        r = run("config", "--get", "remote.origin.url")
+    except subprocess.TimeoutExpired:
+        return "", f"git did not answer within {GIT_READ_SECONDS} s"
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", f"git could not run ({type(e).__name__})"
+    if r.returncode == 0:
+        return r.stdout.strip(), ""
+    if r.returncode == 1 and not r.stderr.strip():
+        return "", ""                                        # read fine, no such key: no origin
+    return "", "git cannot read its remote.origin.url: " + (short(r.stderr) or f"exit code {r.returncode}")
+
+
 def present_reference_clones(cfg):
-    """(the reference clones found on this machine, a warning naming the missing ones or "")."""
-    here = [p for p in cfg.reference_clone_paths if p.is_dir()]
-    missing = [raw for raw, p in zip(cfg.reference_clones, cfg.reference_clone_paths) if not p.is_dir()]
-    warning = (f"warning: [auto] reference_clones {', '.join(missing)}: not found from {cfg.root}; this run goes without "
-               f"{'it' if len(missing) == 1 else 'them'}") if missing else ""
+    """(the reference clones usable on this machine, a warning naming the others and why, or ""): a missing folder, or one git could not
+    read when saani.toml was read (cfg.reference_clone_problems)."""
+    here, notes = [], []
+    for raw, p in zip(cfg.reference_clones, cfg.reference_clone_paths):
+        if not p.is_dir():
+            notes.append(f"{raw}: not found from {cfg.root}")
+        elif raw in cfg.reference_clone_problems:
+            notes.append(f"{raw}: {cfg.reference_clone_problems[raw]}")
+        else:
+            here.append(p)
+    warning = (f"warning: [auto] reference_clones {'; '.join(notes)}; this run goes without "
+               f"{'it' if len(notes) == 1 else 'them'}") if notes else ""
     return here, warning
 
 

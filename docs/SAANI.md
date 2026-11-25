@@ -274,8 +274,8 @@ clone that is, holds or sits in one of the run's places, the main checkout, temp
 dropped (then it is outside, as any folder). A path is in a clone after `..`, `/` and `\`, Git Bash's `/c/...` and links or junctions
 are resolved: a link out of the clone is judged where it leads. What git itself runs in a clone (its hooks, an fsmonitor, diff or
 textconv drivers) comes from the owner's own configuration of that clone, never from the run: the run cannot write there, and `-c`
-and the options that run a program are refused. A clone missing on this machine is not an error: `saani auto on` warns and the run
-goes without it. **Protected**, never
+and the options that run a program are refused. A clone missing on this machine, or one git cannot read here, is not an error:
+`saani auto on` warns with the reason and the run goes without it. **Protected**, never
 written in an auto run, wherever they are: any path through `.git`, `.githooks` or `.claude`, `.mcp.json`, `CLAUDE.md`,
 `CLAUDE.local.md`, `.github/workflows/`, `.github/actions/`, `CODEOWNERS`, `.github/dependabot.yml`, `.gitignore`, `~/.saani/`,
 `saani/guard.py`, `saani.toml`, `hooks/hooks.json` and a checkout's top `hooks/` folder (trailing dots and spaces of a name, and a
@@ -284,7 +284,7 @@ Windows `:stream` suffix, ignored).
 | Tool | Allowed | Refused |
 |---|---|---|
 | Read, Glob, LS | anywhere | secrets |
-| Grep | inside the worktrees folder, the run's folder or a reference clone; a `glob` of plain names (`*.py`) narrows what is looked at | elsewhere (home, the main checkout, temp); a path that is a `.git` or inside one (a folder or a worktree's `.git` file); a tree holding a `.git` folder that the search could read, whatever ripgrep would skip (no glob, or a glob matching a name in it: `config`, `HEAD`, `*`; the guard walks it like any folder); a file judged a secret by its path below the root or its full path; a `type`; a glob starting with `!`; a folder tree in which the search could read a secret file, judged by each file's path below the root (`.docker/config.json`, `.kube/config`, `.ssh/...`), or a tree too big to look through (past 20000 entries) |
+| Grep | inside the worktrees folder, the run's folder or a reference clone; a `glob` of plain names (`*.py`) narrows what is looked at (a glob with spaces or commas is several patterns, as Grep reads it: each is judged, and a file any of them matches is looked at) | elsewhere (home, the main checkout, temp); a path that is a `.git` or inside one (a folder or a worktree's `.git` file); a tree holding a `.git` folder that the search could read, whatever ripgrep would skip (no glob, or a glob matching a name in it: `config`, `HEAD`, `*`; the guard walks it like any folder); a file judged a secret by its path below the root or its full path; a `type`; a glob starting with `!`; a folder tree in which the search could read a secret file, judged by each file's path below the root (`.docker/config.json`, `.kube/config`, `.ssh/...`), or a tree too big to look through (past 20000 entries) |
 | Edit, Write, MultiEdit, NotebookEdit | inside the run's places | the main checkout, a reference clone, home, anywhere else; secrets; protected files |
 | Agent, Task, TodoWrite, ToolSearch, Skill, SendMessage, WebSearch, WebFetch, BashOutput, KillShell, KillBash, TaskOutput, TaskStop, SubagentHandback (a subagent hands its report back) | always | |
 | AskUserQuestion | | always: nobody answers; the question goes in the report |
