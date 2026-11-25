@@ -83,6 +83,7 @@ class FakeGh:
 @pytest.fixture
 def world(monkeypatch, cfg):
     state = types.SimpleNamespace(gh=FakeGh())
+    monkeypatch.delenv(deploy.AUTO_VAR, raising=False)   # the tests run inside an auto run too, which sets it
     monkeypatch.setattr(ci, "Run", lambda dry: state.gh)
     cfg.deploy_command = [PY, "-c", "print('deployed ok')", "{key}"]
     cfg.deploy_key = "/keys/deploy_ed25519"
