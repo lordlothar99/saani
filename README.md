@@ -54,7 +54,7 @@ The full design (principles, landing rules, test tiers, CI placement, the guard,
   [Type](https://docs.github.com/en/issues/tracking-your-work-with-issues/configuring-issues/managing-issue-types-in-an-organization)
   (Task, Feature, Bug), or labels mapped to branch prefixes
 - Optional: GitHub's issue statuses. Saani moves them (In progress, In review; GitHub sets Done when the deploy closes the issue) and
-  `auto` takes only Todo issues: drag a card to Todo on a repository board to let a run take it. Without them, Saani works from its labels
+  `auto` takes every ready issue except those in Backlog: Backlog is your "not now", drag a card out of it to let a run take it. Without them, Saani works from its labels
 
 Developed and used on Windows (PowerShell 5.1). The code has guards for macOS and Linux, but they are not tested there yet.
 
