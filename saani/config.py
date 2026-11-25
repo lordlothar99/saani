@@ -55,6 +55,8 @@ class Config:
     parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory (at most 2); n up to 10, a warning above 5
     ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
     keep_on_quiet_minutes: float = 60            # an auto run started with --keep-on: the quiet time (nothing running, nothing eligible) that ends it
+    reference_clones: tuple = ()                 # an auto run reads these clones' code at a tag, never changes them (relative to the main checkout)
+    reference_clone_problems: dict = dataclasses.field(default_factory=dict)   # clone -> why git could not read it (set when read)
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
     ci_reserve_minutes: int = 50
@@ -77,6 +79,11 @@ class Config:
             p = pathlib.Path(self.worktree_folder)
             return p if p.is_absolute() else (self.root / p).resolve()
         return self.root.parent / f"{self.name}-wt"
+
+    @property
+    def reference_clone_paths(self):
+        """The reference clones ([auto] reference_clones) as absolute, resolved paths."""
+        return [(self.root / p).resolve() for p in self.reference_clones]
 
     @property
     def worker_branch(self):
@@ -123,7 +130,7 @@ def from_toml(data, root):
             ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
-            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "keep_on_quiet_minutes"): "keep_on_quiet_minutes", ("ci", "relabel"): "relabel", ("hints",): "hints"}
+            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "keep_on_quiet_minutes"): "keep_on_quiet_minutes", ("auto", "reference_clones"): "reference_clones", ("ci", "relabel"): "relabel", ("hints",): "hints"}
     for table, values in data.items():
         if table == "hints":
             flat["hints"] = dict(values)
@@ -174,10 +181,103 @@ def from_toml(data, root):
     quiet = flat.get("keep_on_quiet_minutes", 60)
     if not isinstance(quiet, (int, float)) or isinstance(quiet, bool) or quiet <= 0:
         raise SystemExit(f"{FILE}: [auto] keep_on_quiet_minutes must be a number of minutes, more than 0")
+    clones = flat.get("reference_clones", [])
+    if not isinstance(clones, list) or not all(isinstance(c, str) and c.strip() for c in clones):
+        raise SystemExit(f'{FILE}: [auto] reference_clones must be a list of folders, e.g. ["../upstream-lib"]')
+    flat["reference_clones"] = tuple(clones)
     cfg = Config(**flat, root=pathlib.Path(root))
     if "/" not in cfg.repo:
         raise SystemExit(f"{FILE}: [project] repo must be owner/name")
+    check_reference_clones(cfg)
     return cfg
+
+
+def check_reference_clones(cfg):
+    """Each reference clone is relative to the main checkout and outside the project and its worktrees folder (neither holds the other):
+    an auto run only reads it, so it must never be one of the run's own places. When the folder is there, it must be a git clone of
+    another repository than the project's (its git folder, through a worktree's .git file too, is not the project's) with a
+    remote.origin.url (so `git fetch --tags origin` never falls back to a local folder named origin). A folder that is not there (moved,
+    another machine) is no error here: `saani auto on` warns and the run goes without it (present_reference_clones)."""
+    if not cfg.reference_clones:
+        return
+    from .guard import git_dirs
+    root, wt = cfg.root.resolve(), pathlib.Path(cfg.wt_dir).resolve()
+
+    def holds(a, b):
+        return a == b or a in b.parents
+
+    def common(p):
+        try:
+            dirs = git_dirs(p)
+        except (OSError, UnicodeDecodeError):
+            return None
+        return pathlib.Path(dirs[1]).resolve() if dirs else None
+    own = common(root)
+    for raw, path in zip(cfg.reference_clones, cfg.reference_clone_paths):
+        where = f"{FILE}: [auto] reference_clones {raw!r}"
+        if pathlib.Path(raw).is_absolute() or pathlib.PureWindowsPath(raw).drive or raw.startswith(("\\", "/")):
+            raise SystemExit(f"{where}: give it relative to the project's main checkout (like ../upstream-lib)")
+        if holds(path, root) or holds(root, path) or holds(path, wt) or holds(wt, path):
+            raise SystemExit(f"{where}: must be outside the project and its worktrees folder ({path})")
+        if not path.exists():
+            continue                                         # missing here: a warning when a run starts, never a refusal
+        if not path.is_dir() or not (path / ".git").exists():
+            raise SystemExit(f"{where}: not a git clone (no .git in {path})")
+        theirs = common(path)
+        if theirs is None:
+            raise SystemExit(f"{where}: its .git cannot be read ({path})")
+        if own is not None and theirs == own:
+            raise SystemExit(f"{where}: it is the project's own repository (a worktree of it), not an upstream's clone ({path})")
+        url, problem = origin_url(path)
+        if problem:
+            cfg.reference_clone_problems[raw] = problem      # git cannot read it here: a warning at `saani auto on`, never a refusal
+        elif not url:
+            raise SystemExit(f"{where}: it has no remote.origin.url (git fetch --tags origin needs the upstream as origin) ({path})")
+
+
+GIT_READ_SECONDS = 5
+
+
+def origin_url(path):
+    """(the clone's remote.origin.url or "", why git could not read the clone or ""). git must first read the repository (a "dubious
+    ownership", a slow drive, no git: the problem, git's own words, short); then a missing key is "" with no problem."""
+    def run(*args):
+        return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=GIT_READ_SECONDS)
+
+    def short(text):
+        line = " ".join(text.split())
+        return line[:160] + ("..." if len(line) > 160 else "")
+    try:
+        r = run("rev-parse", "--git-dir")
+        if r.returncode != 0:
+            return "", "git cannot read it: " + (short(r.stderr) or f"exit code {r.returncode}")
+        r = run("config", "--get", "remote.origin.url")
+    except subprocess.TimeoutExpired:
+        return "", f"git did not answer within {GIT_READ_SECONDS} s"
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", f"git could not run ({type(e).__name__})"
+    if r.returncode == 0:
+        return r.stdout.strip(), ""
+    if r.returncode == 1 and not r.stderr.strip():
+        return "", ""                                        # read fine, no such key: no origin
+    return "", "git cannot read its remote.origin.url: " + (short(r.stderr) or f"exit code {r.returncode}")
+
+
+def present_reference_clones(cfg):
+    """(the reference clones usable on this machine, a warning naming the others and why, or ""): a missing folder, or one git could not
+    read when saani.toml was read (cfg.reference_clone_problems)."""
+    here, notes = [], []
+    for raw, p in zip(cfg.reference_clones, cfg.reference_clone_paths):
+        if not p.is_dir():
+            notes.append(f"{raw}: not found from {cfg.root}")
+        elif raw in cfg.reference_clone_problems:
+            notes.append(f"{raw}: {cfg.reference_clone_problems[raw]}")
+        else:
+            here.append(p)
+    warning = (f"warning: [auto] reference_clones {'; '.join(notes)}; this run goes without "
+               f"{'it' if len(notes) == 1 else 'them'}") if notes else ""
+    return here, warning
 
 
 def main_checkout(start=None):

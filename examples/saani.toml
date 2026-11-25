@@ -63,6 +63,10 @@ port = 8771
 [auto]
 parallel = 0                      # issues an auto run keeps in flight: 0 = sized from the cores and free RAM, (at most 2), else n from 1 to 10 (a warning above 5)
 ci_attempts = 3                   # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
+# Read-only clones of upstream projects, relative to the main checkout: an auto run fetches their tags and reads their code at a tag
+# (git -C ../upstream-lib show v2.0:src/lib.py), never checks them out. Each is outside the project, a git clone with an origin remote;
+# one missing on this machine is a warning when a run starts.
+# reference_clones = ["../upstream-lib"]
 
 [ci]
 workflow = "ci.yml"              # the GitHub Actions workflow `saani ci pr` starts (workflow_dispatch)

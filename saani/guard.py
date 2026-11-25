@@ -121,8 +121,9 @@ def state(session_id, now=None):
 
 
 def turn_on(session_id, run_id, main, wt_dir, folder=None, deploy=False, started=None, repo="", integration="dev", production="main",
-            tests=(), worker_branch=r"^(bug|feat|task)/(\d+)-[a-z0-9-]+$"):
-    """Registers this session as an auto run (atomically). The settings are copied in, so nothing the run can edit changes the rules."""
+            tests=(), worker_branch=r"^(bug|feat|task)/(\d+)-[a-z0-9-]+$", reference_clones=()):
+    """Registers this session as an auto run (atomically). The settings are copied in, so nothing the run can edit changes the rules
+    (`reference_clones`: the folders of [auto] reference_clones, read only)."""
     import datetime
     path = _entry(session_id)
     if path is None:
@@ -131,7 +132,8 @@ def turn_on(session_id, run_id, main, wt_dir, folder=None, deploy=False, started
         raise ValueError("run id: letters, digits, - and _ only")
     data = {"id": str(run_id), "started": started or datetime.datetime.now().isoformat(timespec="seconds"), "main": str(main),
             "wt_dir": str(wt_dir), "folder": str(folder) if folder else None, "deploy": bool(deploy), "repo": repo,
-            "integration": integration, "production": production, "tests": [list(t) for t in tests if t], "worker_branch": worker_branch}
+            "integration": integration, "production": production, "tests": [list(t) for t in tests if t], "worker_branch": worker_branch,
+            "reference_clones": [str(c) for c in reference_clones]}
     os.makedirs(registry(), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -366,7 +368,7 @@ class Context:
     """What the decision needs: the run's folders (normalized), the branches, the repository and the test commands."""
 
     def __init__(self, cwd, wt_dir=None, folder=None, temp=None, main=None, repo="", integration="dev", production="main",
-                 worker_branch=None, tests=(), home=None, session=None):
+                 worker_branch=None, tests=(), home=None, session=None, clones=()):
         import tempfile
         self.session = session                                # the hook's session_id: its own saved tool outputs are readable
         self.temp = norm(temp or tempfile.gettempdir())
@@ -382,6 +384,17 @@ class Context:
         self.worker_branch = re.compile(worker_branch) if isinstance(worker_branch, str) else (
             worker_branch or re.compile(r"^(bug|feat|task)/(\d+)-[a-z0-9-]+$"))
         self.tests = [list(t) for t in tests if t]
+        # The reference clones ([auto] reference_clones): read only. One that is, holds or sits in one of the run's places, the main
+        # checkout, temp, ~/.saani or the home folder is dropped (saani.toml's check refuses it already; this is the guard's own).
+        places = [x for x in (self.wt_dir, self.folder, self.main, self.temp, self.saani_home) if x]
+        self.clones = []
+        for c in clones:
+            if not isinstance(c, str) or not c or network(c) or not os.path.isabs(c):
+                continue
+            c = norm(c)
+            if inside(self.home, c) or any(inside(c, x) or inside(x, c) for x in places):
+                continue
+            self.clones.append(c)
         self.deadline = None                                  # set by decide(): one deadline for the whole decision
 
     def in_time(self):
@@ -408,6 +421,11 @@ class Context:
     def writable(self, p):
         return self.in_run(p) or inside(p, self.temp)
 
+    def clone_of(self, p):
+        """The reference clone `p` is in (the clone's folder or below it, after links are resolved), or None. Read only: never a place
+        the run writes, cds into or runs tests from."""
+        return next((c for c in self.clones if inside(p, c)), None)
+
     def checkout_rel(self, p):
         """The parts of `p` inside its checkout (a worktree or the main checkout), or None."""
         for base, skip in ((self.wt_dir, 1), (self.main, 0)):
@@ -419,7 +437,8 @@ class Context:
 def context(cwd, st, session=None):
     return Context(cwd, wt_dir=st.get("wt_dir"), folder=st.get("folder"), main=st.get("main"), repo=st.get("repo", ""),
                    integration=st.get("integration", "dev"), production=st.get("production", "main"),
-                   worker_branch=st.get("worker_branch"), tests=st.get("tests") or (), session=session)
+                   worker_branch=st.get("worker_branch"), tests=st.get("tests") or (), session=session,
+                   clones=st.get("reference_clones") or ())
 
 
 # ---------------------------------------------------------------- secrets and protected files
@@ -478,6 +497,8 @@ def secret_name(raw, resolved=None, strict=True, session=None):
             return True
         clean = [x.split(":")[0].rstrip(". ") for x in parts]          # Windows: `.git./config`, `packed-refs::$DATA` are the files
         if clean[-2:] == [".git", "config"] or any(clean[-len(t):] == t for t in STRONG_TAILS):
+            return True
+        if ".git" in clean[:-1] and clean[-1] in ("config", "config.worktree"):     # a submodule's or a worktree's (.git/modules/x/config)
             return True
         name = parts[-1].split(":")[0].rstrip(". ") or parts[-1]       # Windows: `.env::$DATA` and `.env.` are `.env`
         if name == ".env" or name.startswith((".env.",) + STRONG_PREFIXES) or name in STRONG_NAMES or "credentials" in name:
@@ -604,35 +625,53 @@ def decide_tool(event, ctx):
 
 
 def grep_tool(inp, ctx):
-    """Grep reads contents: only inside the worktrees or the run's folder, never a folder holding a secret unless a glob narrows it."""
+    """Grep reads contents: only inside the worktrees, the run's folder or a reference clone, never a folder holding a secret unless a glob
+    narrows it."""
     for key in ("path", "glob", "type"):
         if inp.get(key) is not None and not isinstance(inp.get(key), str):
             return deny("unreadable path", f"Grep with a {key} that is not text")
     root = ctx.path(inp.get("path") or ".", tilde=True)
     glob_ = inp.get("glob") or ""
+    # Claude Code's Grep splits its glob on spaces and commas into several --glob patterns: each is judged, a file is searched when any
+    # of them matches it.
+    globs = [g for g in re.split(r"[\s,]+", glob_) if g]
     if inp.get("type"):
         return deny("grep option", "Grep with a type (its file kinds are ripgrep's, the guard does not read them)", how="give a glob, like *.py")
-    if glob_.startswith("!"):
+    if any(g.startswith("!") for g in globs):
         return deny("grep option", "Grep with a negated glob (it searches everything else)", how="give a glob of the files to search")
-    if secret_name(inp.get("path") or "", root) or (glob_ and secret_name(glob_)):
+    if secret_name(inp.get("path") or "", root) or any(secret_name(g) for g in globs):
         return deny("secret", "Grep in secret files", how=SECRETS_HOW)
-    if root == ctx.home or not ctx.in_run(root):
-        return deny("grep outside the worktrees", "Grep outside the worktrees folder and the run's folder",
+    if ".git" in git_parts(inp.get("path") or "") or ".git" in git_parts(root):
+        return deny("secret", "Grep in a .git folder (its config holds remote URLs with tokens, packed-refs the owner's stash)",
+                    how="search the checkout's files, outside .git")
+    if root == ctx.home or not (ctx.in_run(root) or ctx.clone_of(root)):
+        return deny("grep outside the worktrees", "Grep outside the worktrees folder, the run's folder and the reference clones",
                     how="search inside a worktree, or Read the file")
     if os.path.isdir(root):
-        # Every file the search could read is looked at, by its path below the root (.docker/config.json, .kube/config, .ssh/...): a
-        # glob narrows it only when it is a plain name pattern (no /, no **, no braces), which ripgrep matches against the file's name.
+        # Every file the search could read is looked at, by its path below the root and its full path (.docker/config.json,
+        # .kube/config, .ssh/...): a glob narrows it only when it is a plain name pattern (no /, no **, no braces), which ripgrep matches
+        # against the file's name; several patterns narrow it only when each is plain. A .git folder below the root is walked too,
+        # whatever ripgrep would skip: a search that could read any file in it is refused (an unnarrowed search, or a glob matching a
+        # name there: config, packed-refs...).
         import fnmatch
-        plain = bool(glob_) and not re.search(r"[/\\{}]|\*\*", glob_)
+        plain = bool(globs) and not any(re.search(r"[/\\{}]|\*\*", g) for g in globs)
 
         def hit(path, name):
-            if os.path.isdir(path) or (plain and not fnmatch.fnmatchcase(name, glob_.lower())):
+            if os.path.isdir(path):
+                return not plain and git_parts(name) == [".git"]
+            if plain and not any(fnmatch.fnmatchcase(name, g.lower()) for g in globs):
                 return False
-            return secret_name(os.path.relpath(path, root))
-        if tree_has(root, hit, ctx, skip=(".git",)):
-            return deny("secret", "Grep in a folder tree that holds a secret file the search could read (or too big to look through)",
-                        how="give Grep a glob of plain names that leaves the secret out (*.py), or a deeper path")
+            rel = os.path.relpath(path, root)
+            return ".git" in git_parts(rel)[:-1] or secret_name(rel) or secret_name(path)
+        if tree_has(root, hit, ctx):
+            return deny("secret", "Grep in a folder tree that holds a secret file or a .git folder the search could read (or too big to "
+                        "look through)", how="give Grep a glob of plain names that leaves the secret and .git out (*.py), or a deeper path")
     return allow("Grep inside the run's folders")
+
+
+def git_parts(p):
+    """The parts of a path, lower case, a part's Windows `:stream` and trailing dots and spaces dropped (`.git.` is `.git`)."""
+    return [x.split(":")[0].rstrip(". ") or x for x in re.split(r"[\\/]+", str(p).lower()) if x]
 
 
 def tree_has(root, test, ctx, skip=()):
@@ -1169,8 +1208,8 @@ def git_command(part, ctx, cwd):
     while args and args[0].startswith("-"):
         if args[0] == "-C" and len(args) > 1:
             gcwd = ctx.path(args[1], gcwd)               # git reads a relative -C from the previous -C
-            if not ctx.cd_ok(gcwd):
-                return deny("cd outside the worktrees", "git -C outside a worktree and the run's folder", "git")
+            if not (ctx.cd_ok(gcwd) or ctx.clone_of(gcwd)):
+                return deny("cd outside the worktrees", "git -C outside a worktree, the run's folder and the reference clones", "git")
             args = args[2:]
         elif args[0] == "--no-pager":
             args = args[1:]
@@ -1189,6 +1228,11 @@ def git_command(part, ctx, cwd):
     if any(w.heredoc for k, w in enumerate(rest) if k not in text) or (sub != "commit" and any(w.heredoc for w in rest)):
         return deny("here-document", "a $(cat <<'EOF' ...) other than the value of git commit -m", "git")
     words = [w for k, w in enumerate(rest) if k not in text]
+    clone = ctx.clone_of(gcwd)
+    if clone and sub not in CLONE_GIT:
+        return deny("git in a reference clone", f"git {safe_word(sub) or '?'} in a reference clone (it is read only: "
+                    f"{', '.join(sorted(CLONE_GIT))}; never a checkout or any change to its files)", "git",
+                    how="read the code at a tag: git -C <clone> show <tag>:<path>, git -C <clone> diff <tag> <tag>")
     if sub == "push":
         return deny("git push", "git push (only saani land pushes, as its own process)", "git", how="land with saani land")
     if sub == "reset" and "--hard" in words:
@@ -1212,11 +1256,14 @@ def git_command(part, ctx, cwd):
     verdict = owner_stash(sub, words)
     if verdict:
         return verdict
-    if sub not in GIT_READ_ANYWHERE and not ctx.cd_ok(gcwd):
-        return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main checkout)",
-                    "git", how="cd <worktree> && git ...")
-    verdict = commit_takes_paths(rest) if sub == "commit" else None
-    verdict = verdict or git_sub(sub, words, ctx, gcwd, part)
+    if clone:
+        verdict = clone_sub(sub, words, ctx, gcwd, clone, part)
+    else:
+        if sub not in GIT_READ_ANYWHERE and not ctx.cd_ok(gcwd):
+            return deny("git write outside the worktrees", f"git {sub} outside a worktree and the run's folder (never in the main "
+                        "checkout)", "git", how="cd <worktree> && git ...")
+        verdict = commit_takes_paths(rest) if sub == "commit" else None
+        verdict = verdict or git_sub(sub, words, ctx, gcwd, part)
     if verdict:
         return verdict
     # A :/<text> search runs over every ref (the owner's stash included): refused anywhere in a word, but a drive's C:/ (from ~ too).
@@ -1224,7 +1271,7 @@ def git_command(part, ctx, cwd):
     if any(re.search(r"(?<![A-Za-z]):/|(?<=[A-Za-z]{2}):/", w) for w in words):
         return deny("every ref", f"git {sub} with :/ (a search over every ref, the owner's stash included)", "git",
                     how="name HEAD, origin/<branch> or a worker branch")
-    verdict = revisions(sub, words, ctx, gcwd)
+    verdict = revisions(sub, words, ctx, gcwd, clone_rev if clone else allowed_rev)
     if verdict:
         return verdict
     if scan(ctx, rest, gcwd, text):
@@ -1317,14 +1364,18 @@ def flag_cluster(w, letter):
     return len(w) > 1 and w[0] == "-" and w[1:].isascii() and w[1:].isalpha() and letter in w[1:]
 
 
-def revisions(sub, words, ctx, gcwd):
-    """A refusal when a git command names a revision off the allowlist (allowed_rev), as a word or as the value of a revision option
-    (--ancestry-path=, branch --merged/--contains/--points-at, commit -C/-c/--fixup/--squash...); ls-files --with-tree outright. A word
-    of diff or log that is not an allowed revision must be an existing path (git refuses a word that is both)."""
+def revisions(sub, words, ctx, gcwd, ok=allowed_rev):
+    """A refusal when a git command names a revision off the allowlist (`ok`: allowed_rev, or clone_rev in a reference clone), as a word
+    or as the value of a revision option (--ancestry-path=, branch --merged/--contains/--points-at, commit -C/-c/--fixup/--squash...);
+    ls-files --with-tree outright. A word of diff or log that is not an allowed revision must be an existing path (git refuses a word that
+    is both)."""
     if sub not in REV_SUBS:
         return None
 
     def no(what):
+        if ok is clone_rev:
+            return deny("revision", f"git {sub} with {what[:40]} (in a reference clone: tags, commit ids, branch names, HEAD and ranges of "
+                        "these; no reflog @{{n}}, no stash, no :/ search)", "git", how="name a tag or a commit id")
         return deny("revision", f"git {sub} with {what[:40]} (only HEAD, HEAD~n, origin/{ctx.integration}, origin/{ctx.production}, worker "
                     "branches and ranges of these; no commit id)", "git", how="name HEAD, origin/<branch> or a worker branch")
     # git takes the FIRST literal -- (even one that looks like an option's value) as the end of the revisions: with one, every word
@@ -1341,7 +1392,7 @@ def revisions(sub, words, ctx, gcwd):
             name, eq, value = w[2:].partition("=")
             if sub == "ls-files" and name and "with-tree".startswith(name):
                 return no("--with-tree")
-            if eq and name and "ancestry-path".startswith(name) and not allowed_rev(value, ctx):
+            if eq and name and "ancestry-path".startswith(name) and not ok(value, ctx):
                 return no(w)
             if sub == "commit" and name and any(x.startswith(name) for x in COMMIT_REV):
                 if not allowed_rev(value if eq else nxt, ctx, write=True):
@@ -1352,7 +1403,7 @@ def revisions(sub, words, ctx, gcwd):
                     return no(w)
                 k += 1
             elif sub == "rev-parse" and name in ("default", "prefix"):     # their value is read as a revision: judged as one
-                if not allowed_rev(value if eq else nxt, ctx):
+                if not ok(value if eq else nxt, ctx):
                     return no(w)
                 k += 0 if eq else 1
             elif not eq and takes_text(sub, w):
@@ -1373,9 +1424,9 @@ def revisions(sub, words, ctx, gcwd):
         elif sub in ("ls-files", "commit", "branch"):
             pass                                         # paths (ls-files), refused paths (commit), patterns (branch)
         elif sub == "show" and ":" in w:
-            if not allowed_rev(w.split(":", 1)[0], ctx):
+            if not ok(w.split(":", 1)[0], ctx):
                 return no(w)
-        elif not allowed_rev(w, ctx) and not (sub in ("diff", "log") and dashdash is None and os.path.lexists(ctx.path(w, gcwd))):
+        elif not ok(w, ctx) and not (sub in ("diff", "log") and dashdash is None and os.path.lexists(ctx.path(w, gcwd))):
             return no(w)
         k += 1
     return None
@@ -1437,6 +1488,127 @@ def own_source(rev, ctx):
     return bool(re.fullmatch(r"HEAD(~\d*|\^\d?)*", rev)) or rev == f"origin/{ctx.integration}"
 
 
+def rev_path(sub, w):
+    """A refusal for <rev>:<path> naming a secret or a path outside the repository (a leading /, a `..`), else None."""
+    path = w.split(":", 1)[1]
+    parts = [x for x in re.split(r"[\\/]+", path) if x]
+    if path.startswith(("/", "\\")) or ".." in parts or (path and secret_name(path, strict=False)):
+        return deny("secret", f"git {sub} <rev>:<path> of a secret or of a path outside the repository", "git", how=SECRETS_HOW)
+    return None
+
+
+def show_log(sub, words):
+    """git show and git log: no stash, no <rev>:<path> of a secret or outside the repository (show)."""
+    for w in words:
+        if w.startswith("-"):
+            continue
+        if re.match(r"(refs/)?stash($|@|\^|~)", w) or "stash@" in w:
+            return deny("git stash", f"git {sub} of a stash (it can hold untracked files)", "git")
+        if sub == "show" and ":" in w:
+            verdict = rev_path(sub, w)
+            if verdict:
+                return verdict
+    return None
+
+
+# ---------------------------------------------------------------- reference clones ([auto] reference_clones): read only
+
+CLONE_GIT = {"fetch", "log", "show", "diff", "status", "rev-parse", "tag", "ls-tree"}
+CLONE_REF = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._+/-]*")
+LS_TREE_FLAGS = {"-r", "-t", "-d", "-l", "-z", "--long", "--name-only", "--name-status", "--object-only", "--full-name", "--full-tree",
+                 "--abbrev"}
+TAG_LIST = {"-l", "--list"}
+
+
+def clone_rev(w, ctx, write=False):
+    """True for a revision a run may name in a reference clone: a tag, a commit id, a branch name, HEAD (with ~n/^n), and a range (a..b,
+    a...b, a side empty) of those. Never a reflog (@{n}), a :/ search, a <rev>:<path> (judged apart), an option or a stash (the owner's;
+    owner_stash refuses it first). Nothing is ever written there (`write` is never asked)."""
+    if write:
+        return False
+    for sep in ("...", ".."):
+        if sep in w:
+            a, _, b = w.partition(sep)
+            return bool(a or b) and all(not x or (".." not in x and clone_rev(x, ctx)) for x in (a, b))
+    m = re.fullmatch(r"([^~^]*)((?:[~^]\d*)*)", w)
+    if not m:
+        return False
+    base = m.group(1)
+    return (bool(CLONE_REF.fullmatch(base)) and "//" not in base and not base.endswith(("/", ".", ".lock"))
+            and not STASH_REV.search(base))
+
+
+def clone_paths(sub, words, ctx, gcwd, clone):
+    """A refusal when a word that names a path (every word after `--`, or an existing path before it) is outside the clone `clone`, links
+    and junctions resolved (ctx.path)."""
+    after = words.index("--") if "--" in words else len(words)
+    for k, w in enumerate(words):
+        if k == after or (k < after and (w.startswith("-") or not os.path.lexists(ctx.path(w, gcwd)))):
+            continue
+        if not inside(ctx.path(w, gcwd), clone):
+            return deny("read outside the worktrees", f"git {sub} of a path outside the reference clone", "git")
+    return None
+
+
+def clone_sub(sub, words, ctx, gcwd, clone, part):
+    """git in a reference clone (CLONE_GIT): reads only, and `fetch --tags origin`; never a change to its working tree, index or branches.
+    The shared rules (options that run a program or write a file, force flags, the owner's stash, every ref, :/ searches, secrets) are
+    applied by git_command around it; the revisions are clone_rev's."""
+    if part.stdin:
+        return deny("here-document", "a here-document in a reference clone", "git")
+    if sub == "fetch":
+        # refs only: origin's tags (and its branches, as git fetch origin brings them), no other remote, no refspec, no prune, no force
+        options = [w for w in words if w.startswith("-")]
+        positional = [w for w in words if not w.startswith("-")]
+        if positional != ["origin"] or "--tags" not in options or any(w not in ("--tags", "-q", "--quiet") for w in options):
+            return deny("not on the list", "git fetch in a reference clone other than git fetch --tags origin (no other remote, no "
+                        "refspec, no --prune, no force)", "git", how="git -C <clone> fetch --tags origin")
+        return None
+    if sub == "tag":
+        # a listing only: with -l/--list a word is a pattern; without, a word would create a tag
+        listing = any(w in TAG_LIST for w in words)
+        for w in words:
+            if w in TAG_LIST or w.startswith(("--sort=", "--format=")) or re.fullmatch(r"-n\d*", w):
+                continue
+            if listing and not w.startswith("-"):
+                continue
+            return deny("not on the list", "git tag in a reference clone other than a listing (-l/--list [<pattern>], --sort=, "
+                        "--format=, -n)", "git", how="git -C <clone> tag -l 'v1.*'")
+        return None
+    if sub == "ls-tree":
+        positional = []
+        for w in words:
+            if w.startswith("-"):
+                if w not in LS_TREE_FLAGS and not re.fullmatch(r"--abbrev=\d+", w) and w != "--":
+                    return deny("not on the list", f"the git ls-tree option {w[:30]}", "git")
+                continue
+            positional.append(w)
+        if not positional:
+            return deny("not on the list", "git ls-tree without a tree (a tag or a commit id)", "git")
+        tree = positional[0]
+        if ":" in tree:
+            verdict = rev_path(sub, tree)
+            if verdict:
+                return verdict
+        if not clone_rev(tree.split(":", 1)[0], ctx):
+            return deny("revision", f"git ls-tree of {tree[:40]} (in a reference clone: a tag, a commit id, a branch name or HEAD)",
+                        "git", how="name a tag or a commit id")
+        for p in positional[1:]:
+            parts = [x for x in re.split(r"[\\/]+", p) if x]
+            if p.startswith(("/", "\\")) or ".." in parts or re.match(r"^[A-Za-z]:", p):
+                return deny("read outside the worktrees", "git ls-tree of a path outside the reference clone", "git")
+        return None
+    if sub == "diff" and any(w.startswith("--no-i") for w in words):
+        return deny("git option", "git diff --no-index reads files outside the repository", "git")
+    if sub in ("show", "log"):
+        verdict = show_log(sub, words)
+        if verdict:
+            return verdict
+    if sub in ("diff", "log", "status"):
+        return clone_paths(sub, words, ctx, gcwd, clone)
+    return None                                          # rev-parse, show: their revisions are judged by clone_rev
+
+
 def git_sub(sub, words, ctx, gcwd, part):
     no = deny("not on the list", f"git {sub} {' '.join(words[:1])[:30]}".strip() + " is not on the guard's list", "git")
     if part.stdin and sub != "commit":
@@ -1452,18 +1624,7 @@ def git_sub(sub, words, ctx, gcwd, part):
                 return deny("read outside the worktrees", "git diff of a path outside the run's places", "git")
         return None
     if sub == "show" or sub == "log":
-        for w in words:
-            if w.startswith("-"):
-                continue
-            if re.match(r"(refs/)?stash($|@|\^|~)", w) or "stash@" in w:
-                return deny("git stash", f"git {sub} of a stash (it can hold untracked files)", "git")
-            if sub == "show" and ":" in w:
-                path = w.split(":", 1)[1]
-                parts = [x for x in re.split(r"[\\/]+", path) if x]
-                if path.startswith(("/", "\\")) or ".." in parts or (path and secret_name(path, strict=False)):
-                    return deny("secret", "git show <rev>:<path> of a secret or of a path outside the repository", "git",
-                                how=SECRETS_HOW)
-        return None
+        return show_log(sub, words)
     if sub in GIT_READ:
         return None
     if sub == "add":
@@ -1857,7 +2018,8 @@ def register(session_id, options, cwd, run_id, folder):
     if not (inside(folder, wt) and folder != wt):
         return None
     return turn_on(session_id, run_id, main, wt, folder, deploy=opts["deploy"], repo=cfg.repo, integration=cfg.integration,
-                   production=cfg.production, tests=[cfg.landing, cfg.full, cfg.check], worker_branch=cfg.worker_branch.pattern)
+                   production=cfg.production, tests=[cfg.landing, cfg.full, cfg.check], worker_branch=cfg.worker_branch.pattern,
+                   reference_clones=config.present_reference_clones(cfg)[0])
 
 
 def post_tool_use(event):

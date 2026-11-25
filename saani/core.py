@@ -547,8 +547,18 @@ def cmd_land(args):
     hotfix = is_hotfix(branch)
     git("fetch", "-q", "origin", c.production if hotfix else c.integration, cwd=cwd)
     base = f"origin/{c.production if hotfix else c.integration}"
+    # Commits already on production are exempt: history there is never rewritten, so a change made on it (no trailers) must be able
+    # to come back to the integration branch. A hotfix is based on production, so there its range already leaves them out.
+    prod = f"origin/{c.production}"
+    if not hotfix and git("fetch", "-q", "origin", c.production, cwd=cwd, check=False).returncode == 0:
+        own = git("rev-list", "--no-merges", f"{base}..HEAD", "--not", prod, cwd=cwd).split()
+    else:
+        if not hotfix:
+            print(f"warning: could not fetch origin/{c.production}: every commit not on {c.integration} needs the trailers, a commit "
+                  f"that came from {c.production} included")
+        own = git("rev-list", "--no-merges", f"{base}..HEAD", cwd=cwd).split()
     bad = []
-    for sha in git("rev-list", "--no-merges", f"{base}..HEAD", cwd=cwd).split():
+    for sha in own:
         missing = missing_trailers(git("log", "-1", "--format=%B", sha, cwd=cwd))
         if missing:
             bad.append(f"{sha[:8]} {git('log', '-1', '--format=%s', sha, cwd=cwd)[:70]} (no {', '.join(missing)})")

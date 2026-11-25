@@ -369,3 +369,57 @@ def test_clean_tree_is_the_trees_id_only_for_a_clean_checkout(repo_with_worktree
     assert tree2 and tree2 != tree                                               # another commit, another tree
     (wt / "a.txt").write_text("changed\n", encoding="utf-8")
     assert core.clean_tree(wt) is None                                           # modified
+
+
+def _land_world(origin_clone, git, tmp_path, monkeypatch, branch, base):
+    """A worktree on `branch` made from origin/<base>, and a production commit without trailers (an edit made on main, as in GitHub)."""
+    from saani import config
+    origin, main = origin_clone
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    ident = ("-c", "user.name=Someone", "-c", "user.email=someone@example.com")
+    git("checkout", "-q", "main", cwd=main)
+    (main / "TEMPLATE.md").write_text("fix\n", encoding="utf-8")
+    git("add", ".", cwd=main)
+    git(*ident, "commit", "-q", "-m", "Edit the template in the editor", cwd=main)
+    git("push", "-q", "origin", "main", cwd=main)
+    git("checkout", "-q", "dev", cwd=main)
+    git("fetch", "-q", "origin", cwd=main)
+    wt = tmp_path / "webshop-wt" / branch.split("/")[1]
+    git("worktree", "add", "-q", "-b", branch, str(wt), f"origin/{base}", cwd=main)
+    return main, wt, ident
+
+
+def _commit(git, wt, ident, name, message):
+    (wt / name).write_text(name, encoding="utf-8")
+    git("add", name, cwd=wt)
+    git(*ident, "commit", "-q", "-m", message, cwd=wt)
+
+
+def _land(wt, dry_run=True):
+    return core.cmd_land(type("A", (), {"worktree": str(wt), "keep": True, "dry_run": dry_run, "wait": 1, "no_comment": True})())
+
+
+def test_land_ignores_commits_already_on_production_and_still_asks_the_workers_own_for_trailers(origin_clone, git, tmp_path, monkeypatch, capsys):
+    main, wt, ident = _land_world(origin_clone, git, tmp_path, monkeypatch, "task/95-back", "dev")
+    git(*ident, "merge", "-q", "--no-edit", "origin/main", cwd=wt)                    # production's commit has no trailers
+    _commit(git, wt, ident, "a.txt", "Own work (refs #95)\n\nWhy: x\nUndo: y")
+    assert _land(wt) == 0                                                            # accepted
+    _commit(git, wt, ident, "b.txt", "Own work without trailers (refs #95)")
+    with pytest.raises(SystemExit) as e:
+        _land(wt)
+    assert "Own work without trailers" in str(e.value) and "Edit the template" not in str(e.value)
+
+
+def test_land_of_a_plain_worker_branch_still_refuses_a_commit_without_trailers(origin_clone, git, tmp_path, monkeypatch):
+    main, wt, ident = _land_world(origin_clone, git, tmp_path, monkeypatch, "task/95-plain", "dev")
+    _commit(git, wt, ident, "a.txt", "No trailers (refs #95)")
+    with pytest.raises(SystemExit, match="commits without the trailers"):
+        _land(wt)
+
+
+def test_land_of_a_hotfix_still_refuses_its_own_commit_without_trailers(origin_clone, git, tmp_path, monkeypatch):
+    main, wt, ident = _land_world(origin_clone, git, tmp_path, monkeypatch, "bug/95-hotfix-x", "main")
+    _commit(git, wt, ident, "a.txt", "Hotfix without trailers (refs #95)")
+    with pytest.raises(SystemExit) as e:
+        _land(wt)
+    assert "Hotfix without trailers" in str(e.value) and "Edit the template" not in str(e.value)

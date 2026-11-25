@@ -44,6 +44,79 @@ def test_auto_keep_on_quiet_minutes_is_read_and_validated():
             config.from_toml({**base, "auto": {"keep_on_quiet_minutes": bad}}, ".")
 
 
+def test_auto_reference_clones_are_read_and_validated(tmp_path, git):
+    base = {"project": {"repo": "acme/webshop"}, "worktrees": {"folder": "../webshop-wt"}}
+    main, upstream = tmp_path / "webshop", tmp_path / "upstream-lib"
+    for d in (main, upstream, tmp_path / "no-origin", tmp_path / "webshop-wt" / "lib" / ".git", tmp_path / "plain"):
+        d.mkdir(parents=True)
+    for d in (main, upstream, tmp_path / "no-origin"):
+        git("init", "-q", cwd=d)
+    git("remote", "add", "origin", "https://example.com/upstream-lib.git", cwd=upstream)
+    git("remote", "add", "origin", "https://example.com/webshop.git", cwd=main)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)
+    assert cfg.reference_clones == ("../upstream-lib",) and cfg.reference_clone_paths == [upstream.resolve()]
+    assert config.from_toml(base, main).reference_clones == ()
+    # A worktree of the project itself, beside it: its .git file leads to the project's own repository.
+    git("-c", "user.name=x", "-c", "user.email=x@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "start", cwd=main)
+    git("worktree", "add", "-q", "--detach", str(tmp_path / "own-wt"), cwd=main)
+    for bad, why in ((["../plain"], "not a git clone"), (["vendor/lib"], "outside the project"),
+                     (["../webshop-wt/lib"], "outside the project"), ([".."], "outside the project"), ([str(upstream)], "relative"),
+                     (["C:/upstream-lib"], "relative"), (["/upstream-lib"], "relative"), ("../upstream-lib", "a list of folders"),
+                     ([""], "a list of folders"), ([5], "a list of folders"), (["../no-origin"], "no remote.origin.url"),
+                     (["../own-wt"], "the project's own repository"), (["../upstream-lib", "../own-wt"], "the project's own repository")):
+        with pytest.raises(SystemExit, match=why):
+            config.from_toml({**base, "auto": {"reference_clones": bad}}, main)
+
+
+def test_a_missing_reference_clone_is_a_warning_when_a_run_starts_not_a_refusal(tmp_path, git):
+    base = {"project": {"repo": "acme/webshop"}, "worktrees": {"folder": "../webshop-wt"}}
+    main, upstream = tmp_path / "webshop", tmp_path / "upstream-lib"
+    main.mkdir()
+    upstream.mkdir()
+    git("init", "-q", cwd=upstream)
+    git("remote", "add", "origin", "https://example.com/upstream-lib.git", cwd=upstream)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib", "../moved-lib"]}}, main)   # read, no refusal
+    here, warning = config.present_reference_clones(cfg)
+    assert here == [upstream.resolve()]
+    assert "../moved-lib" in warning and "../upstream-lib" not in warning and "goes without it" in warning
+    assert config.present_reference_clones(config.from_toml(base, main)) == ([], "")
+    with pytest.raises(SystemExit, match="outside the project"):                         # structural errors stay refusals, even missing
+        config.from_toml({**base, "auto": {"reference_clones": ["../webshop-wt/nope"]}}, main)
+
+
+def test_a_clone_git_cannot_read_is_a_warning_with_git_s_reason_not_a_refusal(tmp_path, git, monkeypatch):
+    import subprocess
+    base = {"project": {"repo": "acme/webshop"}, "worktrees": {"folder": "../webshop-wt"}}
+    main, upstream = tmp_path / "webshop", tmp_path / "upstream-lib"
+    main.mkdir()
+    upstream.mkdir()
+    git("init", "-q", cwd=upstream)
+    real = subprocess.run
+
+    def dubious(cmd, *a, **k):
+        if cmd[:1] == ["git"] and "rev-parse" in cmd:
+            return subprocess.CompletedProcess(cmd, 128, "", "fatal: detected dubious ownership in repository at 'x'\n"
+                                               "To add an exception for this directory, call: ...\n")
+        return real(cmd, *a, **k)
+    monkeypatch.setattr(subprocess, "run", dubious)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)        # read, no refusal
+    here, warning = config.present_reference_clones(cfg)
+    assert here == [] and "dubious ownership" in warning and "no remote.origin.url" not in warning
+
+    def slow(cmd, *a, **k):
+        if cmd[:1] == ["git"]:
+            assert k.get("timeout") == config.GIT_READ_SECONDS <= 5
+            raise subprocess.TimeoutExpired(cmd, k["timeout"])
+        return real(cmd, *a, **k)
+    monkeypatch.setattr(subprocess, "run", slow)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)
+    assert config.present_reference_clones(cfg) == ([], f"warning: [auto] reference_clones ../upstream-lib: git did not answer "
+                                                         f"within {config.GIT_READ_SECONDS} s; this run goes without it")
+    monkeypatch.setattr(subprocess, "run", real)                                         # read fine, no origin: still refused
+    with pytest.raises(SystemExit, match="no remote.origin.url"):
+        config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)
+
+
 def test_the_old_wait_quiet_minutes_key_is_refused_as_unknown():
     with pytest.raises(SystemExit):
         config.from_toml({"project": {"repo": "acme/webshop"}, "auto": {"wait_quiet_minutes": 30}}, ".")
