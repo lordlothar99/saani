@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from saani import ci, config, deploy
+from saani import ci, config, deploy, merge
 
 SHA = "c" * 40
 PY = sys.executable
@@ -33,6 +33,8 @@ class FakeGh:
         self.heads = []                           # successive answers for origin/main after the first (a moving production)
         self.calls = []
         self.fail_push = False
+        self.annotations = {}                     # check run id -> its annotations
+        self.jobs = {}                            # Actions job id (= check run id) -> the job
 
     def read(self, *cmd, check=True):
         self.calls.append(cmd)
@@ -56,6 +58,10 @@ class FakeGh:
 
     def json(self, *cmd):
         self.calls.append(cmd)
+        if cmd[:2] == ("gh", "api") and cmd[2].endswith("/annotations"):
+            return self.annotations.get(int(cmd[2].split("/check-runs/")[1].split("/")[0]), [])
+        if cmd[:2] == ("gh", "api") and "/actions/jobs/" in cmd[2]:
+            return self.jobs[int(cmd[2].rsplit("/", 1)[1])]
         if cmd[:2] == ("gh", "api"):
             sha = cmd[2].split("/commits/")[1].split("/")[0]
             status, checks = self.by_sha.get(sha, (self.status, self.checks) if sha == SHA else ({"statuses": []}, CHECKS))
@@ -85,8 +91,8 @@ def world(monkeypatch, cfg):
     return state
 
 
-def args(dry=False):
-    return argparse.Namespace(dry_run=dry)
+def args(dry=False, skip_ci=None):
+    return argparse.Namespace(dry_run=dry, skip_ci=skip_ci)
 
 
 def test_an_empty_command_is_refused(world, cfg, capsys):
@@ -378,3 +384,185 @@ def test_a_timeout_keeps_stderr_and_the_output_is_shown_and_logged_as_it_comes(w
     assert "  | out" in out and "  | err" in out
     log = next((cfg.root / "build").glob("saani-deploy-*.log")).read_text(encoding="utf-8")
     assert "out" in log and "err" in log and "# exit: timed out" in log
+
+
+# ---------------------------------------------------------------- check runs GitHub never started, and --skip-ci
+
+BILLING = ("The job was not started because recent account payments have failed or your spending limit needs to be increased. "
+           "Please check the 'Billing & plans' section of your settings")
+BUILD_ID, SCAN_ID = 101, 102
+
+
+def refused_runs(world):
+    """Two Actions check runs that GitHub refused to start (billing), each with its one annotation."""
+    runs = [{"id": i, "name": n, "status": "completed", "conclusion": "failure", "app": {"slug": "github-actions"},
+             "output": {"annotations_count": 1}} for i, n in ((BUILD_ID, "Images build"), (SCAN_ID, "Repo checks"))]
+    world.gh.annotations = {BUILD_ID: [{"message": BILLING}], SCAN_ID: [{"message": BILLING}]}
+    return {"check_runs": runs}
+
+
+def test_a_merge_commit_whose_only_runs_were_refused_falls_back_to_its_green_parent(world, capsys):
+    merge_commit_head(world)
+    world.gh.checks = refused_runs(world)
+    assert deploy.run(args()) == 0
+    out = capsys.readouterr().out
+    assert "not run on ccccccc (Images build, Repo checks)" in out
+    assert "merge commit with the tree of 2222222" in out and world.gh.wrote("git", "tag")
+
+
+def test_refused_runs_do_not_pass_a_head_that_has_no_green_parent(world, capsys):
+    merge_commit_head(world, same_tree=False)
+    world.gh.checks = refused_runs(world)
+    assert deploy.run(args()) == 1
+    assert "not a merge of a green commit with the same content" in capsys.readouterr().out
+    assert not world.gh.wrote("git", "tag")
+
+
+def test_a_refused_run_beside_a_real_failure_still_refuses(world, capsys):
+    world.gh.checks = refused_runs(world)
+    world.gh.checks["check_runs"].append({"id": 103, "name": "lint", "status": "completed", "conclusion": "failure"})
+    assert deploy.run(args()) == 1
+    assert "a check run did not pass on ccccccc (lint)" in capsys.readouterr().out
+    assert not world.gh.wrote("git", "tag")
+
+
+@pytest.mark.parametrize("conclusion, annotations, job, refused", [
+    ("failure", [{"message": BILLING}], None, False),                                       # the billing words
+    ("failure", [{"message": "Process completed with exit code 1."}], None, True),         # a real failure's annotation
+    ("failure", [], {"steps": []}, True),                                                   # a failure without the words is a failure
+    ("startup_failure", [], {"steps": []}, False),                                          # never started
+    ("cancelled", [], {"steps": []}, False),
+    ("cancelled", [], {"steps": [{"name": "Set up job", "conclusion": "success"}]}, True),  # cancelled while running
+    ("startup_failure", [], {}, True),                                                      # the steps unknown
+    ("timed_out", [{"message": BILLING}], None, True),                                      # not a conclusion of a refused job
+])
+def test_only_a_run_github_never_started_is_not_run(world, conclusion, annotations, job, refused):
+    run = {"id": 7, "name": "build", "status": "completed", "conclusion": conclusion, "app": {"slug": "github-actions"},
+           "output": {"annotations_count": len(annotations)}}
+    world.gh.checks = {"check_runs": [run]}
+    world.gh.annotations = {7: annotations}
+    if job is not None:
+        world.gh.jobs = {7: job}
+    assert (deploy.run(args()) == 1) is refused
+    assert bool(world.gh.wrote("git", "tag")) is not refused
+
+
+def test_a_failed_read_of_the_annotations_leaves_the_run_failed(world, capsys):
+    world.gh.checks = refused_runs(world)
+    real = world.gh.json
+
+    def json(*cmd):
+        if cmd[2].endswith("/annotations"):
+            raise SystemExit("failed: gh api ... 502")
+        return real(*cmd)
+    world.gh.json = json
+    assert deploy.run(args()) == 1
+    assert "a check run did not pass" in capsys.readouterr().out
+
+
+def test_never_started_is_a_pure_rule():
+    run = {"status": "completed", "conclusion": "failure"}
+    assert merge.never_started(run, [{"message": BILLING}])
+    assert not merge.never_started(run, [{"message": "error"}])
+    assert not merge.never_started({**run, "conclusion": "success"}, [{"message": BILLING}])
+    assert not merge.never_started({"status": "in_progress"}, [{"message": BILLING}])
+    assert merge.never_started({**run, "conclusion": "startup_failure"}, steps=[])
+    assert not merge.never_started({**run, "conclusion": "startup_failure"}, steps=None)
+    assert merge.check_runs_problem({"check_runs": [{"id": 1, **run}]}, "abc", {1}) is None
+    assert "did not pass" in merge.check_runs_problem({"check_runs": [{"id": 1, **run}]}, "abc", set())
+
+
+def red_head(world):
+    world.gh.status = {"statuses": [{"context": "saani/ci", "state": "failure"}]}
+
+
+def test_skip_ci_skips_only_the_gate_and_writes_the_reason_into_the_log(world, cfg, capsys):
+    red_head(world)
+    cfg.deploy_checks = [[PY, "-c", "print('checked')"]]
+    cfg.deploy_dry_run = [PY, "-c", "print('dry ok')"]
+    assert deploy.run(args(skip_ci="GitHub   refuses jobs: spending limit")) == 0
+    out = capsys.readouterr().out
+    assert "1. CI gate SKIPPED (--skip-ci): GitHub refuses jobs: spending limit" in out
+    assert "the gate said: saani/ci is failure on ccccccc" in out
+    assert "3. check 1 ok" in out and "3. dry run ok" in out and "deploy ok" in out
+    assert "deployed ccccccc without the CI gate" in out
+    log = next((cfg.root / "build").glob("saani-deploy-*.log")).read_text(encoding="utf-8")
+    assert "# CI gate skipped (--skip-ci, the owner's): GitHub refuses jobs: spending limit" in log
+    assert "# the gate said: saani/ci is failure on ccccccc" in log
+    assert ("git", "tag", "-f", "prod", SHA) in world.gh.calls
+    assert [c[3] for c in world.gh.wrote("gh", "issue", "close")] == ["1", "2"]
+
+
+def test_skip_ci_still_refuses_an_issue_that_says_not_to_deploy(world, capsys):
+    red_head(world)
+    world.gh.issues[2]["body"] = BODY_NO
+    assert deploy.run(args(skip_ci="no minutes")) == 1
+    assert "say not to deploy" in capsys.readouterr().out
+    assert not world.gh.wrote("git", "tag")
+
+
+def test_skip_ci_still_stops_on_a_failed_check_or_dry_run(world, cfg, capsys):
+    red_head(world)
+    cfg.deploy_checks = [[PY, "-c", "raise SystemExit(4)"]]
+    assert deploy.run(args(skip_ci="no minutes")) == 1
+    assert "check 1 failed" in capsys.readouterr().out
+    cfg.deploy_checks = []
+    cfg.deploy_dry_run = [PY, "-c", "raise SystemExit(1)"]
+    assert deploy.run(args(skip_ci="no minutes")) == 1
+    assert "the dry run failed" in capsys.readouterr().out
+    assert not world.gh.wrote("git", "tag")
+
+
+def test_skip_ci_still_stops_when_production_moves(world, capsys):
+    red_head(world)
+    world.gh.heads = ["d" * 40]
+    assert deploy.run(args(skip_ci="no minutes")) == 1
+    assert "moved from ccccccc to ddddddd" in capsys.readouterr().out
+    assert not world.gh.wrote("git", "tag")
+
+
+def test_skip_ci_with_a_dry_run_says_so_and_deploys_nothing(world, cfg, capsys, tmp_path):
+    red_head(world)
+    marker = tmp_path / "ran"
+    cfg.deploy_command = [PY, "-c", f"open({str(marker)!r}, 'w')"]
+    assert deploy.run(args(dry=True, skip_ci="no minutes")) == 0
+    assert "(CI gate skipped: --skip-ci)" in capsys.readouterr().out
+    assert not marker.exists() and not world.gh.wrote("git", "tag")
+
+
+def test_skip_ci_on_a_green_head_skips_nothing(world, cfg, capsys):
+    assert deploy.run(args(skip_ci="just in case")) == 0
+    out = capsys.readouterr().out
+    assert "--skip-ci not needed" in out and "SKIPPED" not in out and "without the CI gate" not in out
+    assert "skipped" not in next((cfg.root / "build").glob("saani-deploy-*.log")).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("why", ["", "   "])
+def test_skip_ci_needs_a_reason(world, capsys, why):
+    assert deploy.run(args(skip_ci=why)) == 1
+    assert "--skip-ci needs the reason" in capsys.readouterr().out
+    assert world.gh.calls == []
+
+
+def test_skip_ci_is_refused_in_an_auto_run(world, monkeypatch, capsys):
+    from saani import auto
+    assert deploy.AUTO_VAR == auto.WATCH_VAR
+    monkeypatch.setenv(deploy.AUTO_VAR, "token")
+    red_head(world)
+    assert deploy.run(args(skip_ci="no minutes")) == 1
+    assert "--skip-ci in an auto run" in capsys.readouterr().out
+    assert world.gh.calls == []
+
+
+def test_without_skip_ci_the_red_gate_still_refuses_and_writes_no_log(world, cfg, capsys):
+    red_head(world)
+    assert deploy.run(args()) == 1
+    assert "is failure" in capsys.readouterr().out
+    assert not list((cfg.root / "build").glob("saani-deploy-*.log"))
+
+
+def test_the_deploy_command_line_takes_skip_ci():
+    parser = argparse.ArgumentParser()
+    deploy.add_parsers(parser.add_subparsers())
+    assert parser.parse_args(["deploy", "--skip-ci", "no minutes"]).skip_ci == "no minutes"
+    assert parser.parse_args(["deploy"]).skip_ci is None

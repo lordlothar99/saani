@@ -211,6 +211,8 @@ DENIED = [
     ("python -c 'print(1)'", "python"), ("python x.py", "python"), ("python saani.py status", "python"),
     ("python -I saani.py status", "python"), ("python -I {work}/saani.py status", "python"), ("./bin/saani status", "not on the list"),
     ("saani merge", "saani command"), ("saani prune", "saani command"), ("saani deploy", "saani command"),
+    ("saani deploy --skip-ci 'no minutes'", "saani command"), ("saani merge --deploy --skip-ci x", "saani command"),
+    ("saani deploy --dry-run --skip-ci x", "saani command"),
     ("saani projects add x", "saani command"), ("saani ci merged 3", "saani command"), ("saani ci sync", "saani command"),
     ("saani check-msg x", "saani command"), ("saani auto prune", "saani command"),
     ("saani auto watch --id x --folder y", "saani command"), ("saani auto away --keep-on", "saani command"),

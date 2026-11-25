@@ -1,8 +1,9 @@
-"""saani deploy [--dry-run]: the deployer (docs/SAANI.md, "Deploy"). Standard library only.
+"""saani deploy [--dry-run] [--skip-ci WHY]: the deployer (docs/SAANI.md, "Deploy"). Standard library only.
 
 Steps, each printed, the first failure stops with what to do next:
   1. the production branch's head has the `[ci] status_context` status `success` and no failed or pending check run; a merge commit
-     (what `saani merge` leaves) without a status of its own counts when its tree equals a parent's that has them;
+     (what `saani merge` leaves) without a status of its own counts when its tree equals a parent's that has them; a check run GitHub
+     never started (merge.never_started) is not run: named, neither passed nor failed;
   2. no issue in production since the prod tag has an At a glance "Deploy" row that says not to deploy;
   3. the `[deploy] checks`, then the `[deploy] dry_run` command;
   4. production fetched again (it must still be the commit checked), then the `[deploy] command` with a timeout, its output shown as it
@@ -10,11 +11,14 @@ Steps, each printed, the first failure stops with what to do next:
      regex in the output;
   5. the prod tag moved to the deployed commit and pushed (the one force push Saani does: the moving tag, nothing else), `### ✔ Deployed`
      on each issue in the range that carries the in_main label, and those issues closed.
+`--skip-ci "<why>"` (the owner's, typed by hand; never an auto run's) skips step 1 only, when GitHub will not run the CI: it prints what the
+gate said and the reason, writes both into the deploy log, and every other step runs as usual.
 `--dry-run` stops after step 3 and prints the deploy command. The key's path is only passed through: it is printed as `<key>`, the key's
 content is never read. `saani merge --deploy` calls `run(args)` after the merge.
 """
 import datetime
 import json
+import os
 import re
 import subprocess
 import sys
@@ -25,6 +29,13 @@ from . import ci, comments, config, glance, kpis, merge
 
 class Stop(Exception):
     """A step failed: the message says what and what to do next."""
+
+
+class CiRefused(Stop):
+    """Step 1 refused: the only refusal --skip-ci skips."""
+
+
+AUTO_VAR = "SAANI_AUTO_WATCH"        # auto.WATCH_VAR: in the environment of a headless auto run, where --skip-ci is refused
 
 
 def cfg():
@@ -110,24 +121,33 @@ def tree_of(gh, rev):
 
 
 def green_on_itself(gh, sha):
-    """(state, problem) of a commit: its `[ci] status_context` state (None: no status) and what its check runs forbid (None: nothing)."""
+    """(state, problem, note) of a commit: its `[ci] status_context` state (None: no status), what its check runs forbid (None: nothing) and
+    the line naming those GitHub never started (None: none). A run never started is "not run": it neither passes nor fails."""
     c = cfg()
     status = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/status")
     checks = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/check-runs?per_page=100", "--paginate")
-    return merge.ci_state(status), merge.check_runs_problem(checks, sha[:7])
+    skipped = merge.not_run(gh, checks)
+    return merge.ci_state(status), merge.check_runs_problem(checks, sha[:7], skipped), merge.not_run_note(checks, skipped, sha[:7])
 
 
-def step_ci(gh):
-    """Step 1: the production head and its CI. Returns the head's sha."""
+def production_head(gh):
+    """Production and the prod tag fetched; the production head's sha."""
     c = cfg()
     gh.read("git", "fetch", "-q", "origin", c.production)
     gh.read("git", "fetch", "-q", "--force", "origin", f"refs/tags/{c.prod_tag}:refs/tags/{c.prod_tag}", check=False)
-    sha = gh.read("git", "rev-parse", f"origin/{c.production}")
-    state, problem = green_on_itself(gh, sha)
+    return gh.read("git", "rev-parse", f"origin/{c.production}")
+
+
+def step_ci(gh, sha):
+    """Step 1: the CI of the production head `sha`. Raises CiRefused when it is not green."""
+    c = cfg()
+    state, problem, note = green_on_itself(gh, sha)
+    if note:
+        print("1. " + note)
     if state not in (None, "success"):
-        raise Stop(f"{c.ci_status_context} is {state} on {sha[:7]}, the head of {c.production}: wait for it or fix it, then saani deploy again")
+        raise CiRefused(f"{c.ci_status_context} is {state} on {sha[:7]}, the head of {c.production}: wait for it or fix it, then saani deploy again")
     if problem:          # the head's own check runs (e.g. workflows on the push to production) count, status or not
-        raise Stop(problem + " (then saani deploy again)")
+        raise CiRefused(problem + " (then saani deploy again)")
     if state == "success":
         print(f"1. CI: {c.ci_status_context} is success on {sha[:7]} (origin/{c.production})")
         return sha
@@ -136,12 +156,14 @@ def step_ci(gh):
     if len(parents) == 2:
         tree = tree_of(gh, sha)
         for parent in same_tree_parents(parents, tree, {p: tree_of(gh, p) for p in parents}):
-            pstate, pproblem = green_on_itself(gh, parent)
+            pstate, pproblem, pnote = green_on_itself(gh, parent)
             if pstate == "success" and not pproblem:
+                if pnote:
+                    print("1. " + pnote)
                 print(f"1. CI: {sha[:7]} is a merge commit with the tree of {parent[:7]}, where {c.ci_status_context} is success "
                       f"and no check run failed or is pending")
                 return sha
-    raise Stop(f"no {c.ci_status_context} status on {sha[:7]}, the head of {c.production}, and it is not a merge of a green commit with the "
+    raise CiRefused(f"no {c.ci_status_context} status on {sha[:7]}, the head of {c.production}, and it is not a merge of a green commit with the "
                f"same content: production holds something CI has not seen. Open a new {c.integration} -> {c.production} pull request "
                f"(saani ci pr), merge it (saani merge), then saani deploy again")
 
@@ -197,8 +219,9 @@ def step_checks(sha):
     print(f"3. dry run ok: {shown}")
 
 
-def step_deploy(gh, sha):
-    """Step 4: production fetched again, then the deploy; its output into the log as it comes. Returns the log's file name."""
+def step_deploy(gh, sha, skipped=None):
+    """Step 4: production fetched again, then the deploy; its output into the log as it comes. Returns the log's file name. `skipped`:
+    (the owner's reason, what the CI gate said) when --skip-ci skipped it, written at the top of the log."""
     c = cfg()
     gh.read("git", "fetch", "-q", "origin", c.production)
     now = gh.read("git", "rev-parse", f"origin/{c.production}")
@@ -213,6 +236,9 @@ def step_deploy(gh, sha):
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("w", encoding="utf-8") as sink:
         sink.write(f"# saani deploy {sha}\n# {shown}\n")
+        if skipped:
+            why, said = (" ".join(str(x).split()) for x in skipped)
+            sink.write(f"# CI gate skipped (--skip-ci, the owner's): {why}\n# the gate said: {said}\n")
         code, out = execute(expand(c.deploy_command, sha=sha), c.deploy_timeout_minutes * 60, sink=sink)
         sink.write(f"# exit: {outcome(code)}\n")
     if code is None:
@@ -263,16 +289,39 @@ def run(args):
     except re.error as e:
         print(f"refused: [deploy] log_ok is not a valid regex ({e}): fix saani.toml")
         return 1
+    why = getattr(args, "skip_ci", None)
+    if why is not None:
+        why = " ".join(why.split())
+        if not why:
+            print('refused: --skip-ci needs the reason, in words: saani deploy --skip-ci "<why the CI gate cannot pass>"')
+            return 1
+        if os.environ.get(AUTO_VAR):
+            print("refused: --skip-ci in an auto run: only the owner skips the CI gate, from their own terminal or session")
+            return 1
     gh = ci.Run(False)
     try:
-        sha = step_ci(gh)
+        sha = production_head(gh)
+        skipped = None
+        try:
+            step_ci(gh, sha)
+            if why is not None:
+                print("1. --skip-ci not needed: the CI gate passed, nothing was skipped")
+        except CiRefused as e:
+            if why is None:
+                raise
+            skipped = (why, str(e))
+            print(f"1. CI gate SKIPPED (--skip-ci): {why}\n   the gate said: {e}\n   the issues, the checks, the dry run and the deploy still run")
         found = step_issues(gh, sha)
         step_checks(sha)
         if getattr(args, "dry_run", False):
-            print("dry-run: would deploy with: " + " ".join(expand(c.deploy_command, True, sha)))
+            print("dry-run: would deploy with: " + " ".join(expand(c.deploy_command, True, sha))
+                  + (" (CI gate skipped: --skip-ci)" if skipped else ""))
             return 0
-        log_name = step_deploy(gh, sha)
-        return step_after(gh, sha, found, log_name)
+        log_name = step_deploy(gh, sha, skipped)
+        code = step_after(gh, sha, found, log_name)
+        if skipped:
+            print(f"deployed {sha[:7]} without the CI gate (--skip-ci: {why}); the reason is in {log_name}")
+        return code
     except json.JSONDecodeError as e:
         print(f"stopped: gh gave an answer that is not JSON ({e}): nothing was deployed; try again")
         return 1
@@ -284,4 +333,6 @@ def run(args):
 def add_parsers(sub):
     p = sub.add_parser("deploy", help="deploy production: CI green, no issue says do not deploy, checks, dry run, deploy, log, prod tag, close issues")
     p.add_argument("--dry-run", action="store_true", help="steps 1 to 3 only, then print the deploy command (the key shown as <key>)")
+    p.add_argument("--skip-ci", metavar="WHY", help="skip step 1, the CI gate, for this reason (printed and written into the deploy log); "
+                   "the owner's, never an auto run's")
     p.set_defaults(run=run)
