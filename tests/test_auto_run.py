@@ -70,6 +70,21 @@ def test_on_writes_the_record_in_the_shared_git_folder(world, capsys):
     assert out == f"saani auto: on 2026-11-22_0800 folder={guard.norm(world.run)}\n"      # one line, the guard's cue
 
 
+def test_on_warns_above_five_slots_and_the_marker_stays_the_last_line(world, capsys):
+    config.use(config.Config(repo="acme/webshop", owner="someone", root=world.root, landing=["{python}", "-c", "pass"], parallel=6))
+    assert auto.cmd_on(args()) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.startswith("warning: 6 slots") and "coder, a reviewer and a test run" in line for line in lines)
+    assert lines[-1] == f"saani auto: on 2026-11-22_0800 folder={guard.norm(world.run)}"      # the guard registers the run from this line
+
+
+def test_away_warns_above_five_slots(world, capsys):
+    config.use(config.Config(repo="acme/webshop", owner="someone", root=world.root, landing=["{python}", "-c", "pass"], parallel=6))
+    popen = lambda argv, **kw: type("P", (), {"pid": 4242})()
+    assert auto.cmd_away(args(only=None), which=lambda name: "/bin/claude", popen=popen) == 0
+    assert "warning: 6 slots" in capsys.readouterr().out
+
+
 def test_on_with_id_folder_and_deploy(world, capsys, tmp_path):
     other = worktree(world.root, world.wt / "auto-other")
     os.chdir(tmp_path)
