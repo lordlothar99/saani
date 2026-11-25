@@ -60,7 +60,9 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    present mode: once the run is on, the guard refuses plain `saani auto`.
 2. **Questions while a question can still be answered.** List the open issues without the in-dev label (`[labels] in_dev` in saani.toml), in the run's order (`saani auto pick`). For
    each one the run would take but cannot do without the owner's answer, ask it now: one question at a time, with a recommendation. With
-   issue numbers as arguments, only those.
+   issue numbers as arguments, only those. If the answer lists `owner_running` (the output says "the owner's worktrees #n are in
+   flight"), tell the owner before they go away: those worktrees take no slot of the run, but the files they change are not given to
+   another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release`) will be left for them.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then, away: start it (section "The two
    sub-modes"); here: "The run".
 4. **Away only, the headless session's first step: switch it on.** The run's id and folder come from the arguments (`run <id>
@@ -74,10 +76,14 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
-   project's protected files, no deploy unless the owner started the run for that.
+   project's protected files, no deploy unless the owner started the run for that. **Never write a wait loop** (`until`, `while`,
+   `sleep`): the guard refuses them. Wait only with `saani auto pick --wait <minutes>` (nothing running, nothing eligible), `saani land
+   --wait` (the landing lock) or `saani auto status --check`; run git as `git -C <worktree> <command>` and `saani` with `--worktree`, never
+   `cd` to a folder outside the worktrees.
 1. **The pipeline, several issues at once.** You are Claude Code, the main session: you brief, decide and land; the coder and the reviewer do the reading
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
-   - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`, at most 2 per project, less those in worktrees) and the `eligible`
+   - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`, at most 2 per project, less the issues this run started: the owner's own worktrees, listed in `owner_running`,
+     take no slot; `note` says "no slot" or "nothing eligible") and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
      files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
@@ -107,7 +113,9 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 4. **End** (also after a stop rule). The full run (`[tests] full`); open the ONE integration -> production pull request (milestone set, `refs #n` for every
    in-dev issue); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
    most `[auto] ci_attempts` attempts (default 3), then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
-5. **Report, then stop.** `saani auto report --pr <N> --post` writes `build/saani-auto-<id>.md` in the main checkout and comments it on the
+5. **Report, then stop.** Always, also when the run did nothing (no slot, nothing eligible, a stop rule): the reason comes from the
+   journal (`saani auto pick` writes why it gave nothing, `status --check` the stop rule), and `saani auto report` prints the path of the
+   file it writes. (If the session ends without one, the watcher writes it.) `saani auto report --pr <N> --post` writes `build/saani-auto-<id>.md` in the main checkout and comments it on the
    pull request; with nothing landed there is no pull request: `saani auto report` alone writes the file, and you say so in the chat.
    It holds the start, end, duration, why the run stopped (a limit, or "finished the list"), the id and the folder's name, the issues landed, the issues left with a question or blocked, the
    refusals by reason, the cost, the timeline and the next step. Add to the chat (headless: your last message, which the owner's

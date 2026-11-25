@@ -276,11 +276,33 @@ def pick_statuses():
         raise SystemExit(f"saani auto pick: {e}")
 
 
+def run_started_issues():
+    """The issues `saani start` started inside the run that is on (the journal's `started` lines of its id). Empty when no run is on: then
+    every worktree is the owner's own."""
+    try:
+        rec = read_record()
+    except SystemExit:
+        rec = None
+    return {int(r["issue"]) for r in read_journal(rec["id"]) if r.get("kind") == "started" and r.get("issue") is not None} if rec else set()
+
+
+def pick_note(got):
+    """One sentence for why a pick gives nothing to start (no slot, or nothing eligible), else None."""
+    if got.get("eligible") and got["slots"] > 0:
+        return None
+    if got["slots"] <= 0:
+        mine = ", ".join(f"#{n}" for n in got["running"])
+        return f"no slot: this run's issues {mine} are in flight ({got['parallel']} allowed)"
+    return f"nothing eligible ({len(got['skipped'])} issues skipped)"
+
+
 def pick(today=None, only=None):
-    """The whole answer of `saani auto pick` as a dict: slots, parallel, running, eligible, skipped."""
+    """The whole answer of `saani auto pick` as a dict: slots, parallel, running (this run's issues), owner_running (the owner's own
+    worktrees: they never take a slot of the run), eligible, skipped."""
     c = cfg()
     fetch()
     running = running_issues()
+    mine = run_started_issues()
     folders = [p.name for p in c.wt_dir.iterdir()] if c.wt_dir.is_dir() else []
     branches = core.git("branch", "-a", "--format=%(refname:short)", check=False).stdout.splitlines()
     issues = read_issues()
@@ -290,8 +312,13 @@ def pick(today=None, only=None):
     started, branched = started_issues(folders, branches)
     eligible, skipped = choose(issues, started, running, today or datetime.date.today().isoformat(), only=set(only) if only else None,
                                branched=branched, statuses=pick_statuses())
-    parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(running))
-    return {"slots": free_slots(parallel, len(running)), "parallel": parallel, "running": sorted(running),
+    # The owner's worktrees stay in `running` for the overlap rule above (their files still count) but not for the slots: the run's slots
+    # are [auto] parallel less the issues this run started. The memory check reads the machine's free memory, which already shows
+    # the owner's work, so the machine is not overloaded by this choice.
+    own = sorted(n for n in running if n in mine)
+    owner = sorted(n for n in running if n not in mine)
+    parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(own))
+    return {"slots": free_slots(parallel, len(own)), "parallel": parallel, "running": own, "owner_running": owner,
             "eligible": eligible, "skipped": skipped}
 
 
@@ -348,6 +375,10 @@ def cmd_pick(args):
         args.json = True                      # the same JSON as `pick --json`, plus waited_minutes, wait_quiet_minutes and, at a stop rule, stop
     else:
         got = pick(only=args.only)
+    note = None if got.get("stop") else pick_note(got)
+    if note:
+        got["note"] = note
+        journal_pick(note)                    # inside a run only: the report says why a run that did nothing stopped
     if args.limit is not None:
         got["eligible"] = got["eligible"][:max(0, args.limit)]
     if args.json:
@@ -355,6 +386,12 @@ def cmd_pick(args):
         return 0
     running = ", ".join(f"#{n}" for n in got["running"]) or "none"
     print(f"slots: {got['slots']} free of {got['parallel']} (running: {running})")
+    if got.get("owner_running"):
+        owner = ", ".join(f"#{n}" for n in got["owner_running"])
+        print(f"the owner's worktrees {owner} are in flight: they take no slot (slots = [auto] parallel less this run's own running issues), "
+              "but a file they change is not given to another issue")
+    if note:
+        print(note)
     print(f"eligible ({len(got['eligible'])}), in the run's order:")
     for e in got["eligible"]:
         extra = [e["type"] or "no Type", e["milestone"] or "no milestone"] + e["flags"]
@@ -428,6 +465,18 @@ def journal(issue, kind, now=None, note=None):
                 row["note"] = str(note)
             with open(journal_path(rec["id"]), "a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
+    except (Exception, SystemExit):
+        pass
+
+
+def journal_pick(note):
+    """A `pick` journal line with the reason a pick gave nothing to start; not again while it is the same as the last such line."""
+    try:
+        rec = read_record()
+        if rec:
+            last = [r for r in read_journal(rec["id"]) if r["kind"] == "pick"]
+            if not last or last[-1].get("note") != note:
+                journal(None, "pick", note=note)
     except (Exception, SystemExit):
         pass
 
@@ -802,7 +851,16 @@ def cost_text(rec, now):
         return f"cost not read: {type(e).__name__}"
 
 
-def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None, stopped=None):
+def idle_reason(journal_rows):
+    """Why a run that did nothing stopped, from its journal: the last `pick` line's note (no slot, nothing eligible), when the run
+    started no issue at all; else None."""
+    if any(r.get("kind") == "started" for r in journal_rows):
+        return None
+    notes = [r.get("note") for r in journal_rows if r.get("kind") == "pick" and r.get("note")]
+    return notes[-1] if notes else None
+
+
+def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None, stopped=None, reason=None):
     """The report's Markdown from what was read (pure). `landed`: [(number, title, commit subject)]; `left`: {number: (kind, title)};
     `stopped`: the stop rules reached ([(rule, value, limit)]), none: the run finished the list. The folder is its name only: a report on
     a pull request holds no path of the owner's machine."""
@@ -810,7 +868,12 @@ def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None
     esc = lambda s: str(s).replace("|", "\\|").replace("\n", " ")  # noqa: E731
     folder = os.path.basename(str(rec.get("folder") or "").replace("\\", "/").rstrip("/"))
     why = "; ".join(f"{LIMIT_WORDS[k]} ({v:.1f} of {lim})" if k == "hours" else f"{LIMIT_WORDS[k]} ({v} of {lim})"
-                    for k, v, lim in (stopped or [])) or "finished the list"
+                    for k, v, lim in (stopped or []))
+    if reason:
+        why = f"{why}; {reason}" if why else str(reason)
+    elif not why:
+        why = (idle_reason(journal_rows) if not landed else None) or "finished the list"
+    why = esc(why)
     out = [f"# Auto run {rec['id']}", "", "| | |", "|---|---|", f"| Start | {rec['started']} |", f"| End | {stamp(now)} |",
            f"| Duration | {duration((now - started).total_seconds())} |", f"| Stopped by | {why} |", f"| Id | {rec['id']} |",
            f"| Folder | {esc(folder)} |", f"| Deploy | {'the owner started the run so' if rec.get('deploy') else 'no'} |", "",
@@ -848,9 +911,12 @@ def cmd_report(args):
         raise SystemExit("saani auto report --post: name the pull request with --pr N")
     now = utc_now()
     rows = read_journal(rec["id"])
+    reason = (getattr(args, "reason", None) or "").strip() or None
+    if reason:
+        journal(None, "stop", note=reason)
     landed = [(n, issue_title(n), subject) for n, subject in landed_issues(rec)]
     text = render_report(rec, now, landed, left_issues(rec, rows, [n for n, _, _ in landed]), refusals_by_reason(rec["id"]), rows,
-                         cost_text(rec, now), args.pr, reached(rec, now))
+                         cost_text(rec, now), args.pr, reached(rec, now), reason=reason)
     path = build_dir() / f"saani-auto-{rec['id']}.md"
     path.write_text(text, encoding="utf-8")
     print(text)
@@ -1012,6 +1078,25 @@ def watch_note(text):
     print(f"saani auto watch {stamp(utc_now())}: {text}", flush=True)
 
 
+def fallback_report(rec, what):
+    """The watcher's safety net: a session that ended without writing its report (it died, was stopped, or never got a slot) still leaves
+    one for the owner, in build/saani-auto-<id>.md, with why (the stop rules, else the last pick's reason, else how the session ended).
+    It reads git and the journal only (no gh). Never replaces a report that exists; never raises."""
+    try:
+        path = build_dir() / f"saani-auto-{rec['id']}.md"
+        if path.exists():
+            return
+        now = utc_now()
+        rows = read_journal(rec["id"])
+        landed = [(n, "", subject) for n, subject in landed_issues(rec)]
+        text = render_report(rec, now, landed, {}, refusals_by_reason(rec["id"]), rows, cost_text(rec, now), None, reached(rec, now),
+                             reason=None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})")
+        path.write_text(text, encoding="utf-8")
+        watch_note(f"no report was written by the session: written for it, {path}")
+    except (Exception, SystemExit) as e:
+        watch_note(f"the report could not be written ({e})")
+
+
 def cmd_watch(args, which=None, popen=subprocess.Popen):
     """The away run's watcher (started by `saani auto away`, never typed): runs the headless session with the log as its output, writes the
     session's process id for `away_gone`, waits for it, and then switches the run off in-process (what the owner would do from a
@@ -1052,6 +1137,7 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
                    f"`/saani:auto off` ends it")
         return 0
     watch_note("token matched")
+    fallback_report(rec, what)
     try:
         cmd_off(type("Args", (), {"run_id": run_id})())
     except SystemExit as e:
