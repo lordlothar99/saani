@@ -368,7 +368,13 @@ def test_pick_says_nothing_eligible_and_journals_it(monkeypatch, capsys):
     fake_world(monkeypatch, [issue(1, text=body("⛔ No"))])
     assert run_saani(monkeypatch, ["auto", "pick", "--json"]) == 0
     got = json.loads(capsys.readouterr().out)
-    assert got["note"] == "nothing eligible (1 issues skipped)" and notes == [got["note"]]
+    assert got["note"] == "nothing eligible (1 issue skipped)" and notes == [got["note"]]
+
+
+def test_the_nothing_eligible_note_has_the_right_plural():
+    base = {"slots": 1, "parallel": 1, "running": [], "eligible": []}
+    assert auto.pick_note({**base, "skipped": [{}, {}]}) == "nothing eligible (2 issues skipped)"
+    assert auto.pick_note({**base, "skipped": []}) == "nothing eligible (0 issues skipped)"
 
 
 def test_a_pick_with_something_to_start_writes_no_note(monkeypatch, capsys):

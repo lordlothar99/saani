@@ -293,7 +293,8 @@ def pick_note(got):
     if got["slots"] <= 0:
         mine = ", ".join(f"#{n}" for n in got["running"])
         return f"no slot: this run's issues {mine} are in flight ({got['parallel']} allowed)"
-    return f"nothing eligible ({len(got['skipped'])} issues skipped)"
+    n = len(got["skipped"])
+    return f"nothing eligible ({n} {'issue' if n == 1 else 'issues'} skipped)"
 
 
 def pick(today=None, only=None):

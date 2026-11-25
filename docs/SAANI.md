@@ -346,7 +346,8 @@ parallel` less the run's own running issues. The sizing reads the machine's free
 machine is not overloaded. `pick` still lists the owner's worktrees (`owner_running`, "the owner's worktrees #12, #15 are in flight"),
 keeps their changed files out of other issues, and says "no slot: ..." or "nothing eligible" (`note`, also journaled as a `pick` line when
 a run is on, once per change). The skill tells the owner about their worktrees before the run starts. Outside a run (no record) every
-worktree is the owner's. `saani kpis` gives the cost per issue, role and model.
+worktree is the owner's. The record and the journal are per repository, so an owner's own `saani start` while a run is on counts as the
+run's and takes one of the run's slots. `saani kpis` gives the cost per issue, role and model.
 
 **Two sub-modes: interactive and away** (#50). `/saani:auto here` runs in the owner's session: the questions any time, `saani auto on
 --here` writes the run's record (stop rules, journal, report) without the guard's switch, so the session stays in present mode and the owner

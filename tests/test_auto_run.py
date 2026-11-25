@@ -1234,8 +1234,9 @@ def test_a_pick_note_is_journaled_once_while_it_stays_the_same(world):
 
 
 def test_no_pick_note_without_a_run(world):
+    (world.root / "build").mkdir(exist_ok=True)
     auto.journal_pick("no slot: a")
-    assert not (world.root / "build").exists() or not list((world.root / "build").glob("*.jsonl"))
+    assert list((world.root / "build").glob("*.jsonl")) == []
 
 
 def test_a_run_that_started_nothing_reports_the_last_pick_s_reason(world, monkeypatch):
