@@ -553,6 +553,9 @@ def cmd_land(args):
     if not hotfix and git("fetch", "-q", "origin", c.production, cwd=cwd, check=False).returncode == 0:
         own = git("rev-list", "--no-merges", f"{base}..HEAD", "--not", prod, cwd=cwd).split()
     else:
+        if not hotfix:
+            print(f"warning: could not fetch origin/{c.production}: every commit not on {c.integration} needs the trailers, a commit "
+                  f"that came from {c.production} included")
         own = git("rev-list", "--no-merges", f"{base}..HEAD", cwd=cwd).split()
     bad = []
     for sha in own:
