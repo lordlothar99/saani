@@ -44,6 +44,25 @@ def test_auto_keep_on_quiet_minutes_is_read_and_validated():
             config.from_toml({**base, "auto": {"keep_on_quiet_minutes": bad}}, ".")
 
 
+def test_auto_reference_clones_are_read_and_validated(tmp_path):
+    base = {"project": {"repo": "acme/webshop"}, "worktrees": {"folder": "../webshop-wt"}}
+    main, upstream = tmp_path / "webshop", tmp_path / "upstream-lib"
+    for d in (main / "vendor" / "lib" / ".git", upstream / ".git", tmp_path / "webshop-wt" / "lib" / ".git", tmp_path / "plain"):
+        d.mkdir(parents=True)
+    cfg = config.from_toml({**base, "auto": {"reference_clones": ["../upstream-lib"]}}, main)
+    assert cfg.reference_clones == ("../upstream-lib",) and cfg.reference_clone_paths == [upstream.resolve()]
+    assert config.from_toml(base, main).reference_clones == ()
+    for bad, why in ((["../nope"], "no such folder"), (["../plain"], "not a git clone"), (["vendor/lib"], "outside the project"),
+                     (["../webshop-wt/lib"], "outside the project"), ([".."], "not a git clone"), ([str(upstream)], "relative"),
+                     (["C:/upstream-lib"], "relative"), (["/upstream-lib"], "relative"), ("../upstream-lib", "a list of folders"),
+                     ([""], "a list of folders"), ([5], "a list of folders")):
+        with pytest.raises(SystemExit, match=why):
+            config.from_toml({**base, "auto": {"reference_clones": bad}}, main)
+    (tmp_path / ".git").mkdir()                                                          # a clone holding the project
+    with pytest.raises(SystemExit, match="outside the project"):
+        config.from_toml({**base, "auto": {"reference_clones": [".."]}}, main)
+
+
 def test_the_old_wait_quiet_minutes_key_is_refused_as_unknown():
     with pytest.raises(SystemExit):
         config.from_toml({"project": {"repo": "acme/webshop"}, "auto": {"wait_quiet_minutes": 30}}, ".")
