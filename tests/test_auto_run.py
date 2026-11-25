@@ -785,7 +785,7 @@ def test_away_starts_the_headless_session_detached_from_the_main_checkout_with_i
     assert auto.cmd_away(args(only=[12]), which=lambda name: "/bin/claude", popen=popen) == 0
     argv, kw = seen[0]
     assert argv[0] == sys.executable and argv[1] == "-I" and pathlib.Path(argv[2]).name == "saani.py"      # the watcher, not the session
-    assert argv[3:7] == ["auto", "watch", "--id", "2026-11-22_0800"] and argv[7] == "--folder" and "--wait" not in argv
+    assert argv[3:7] == ["auto", "watch", "--id", "2026-11-22_0800"] and argv[7] == "--folder" and "--keep-on" not in argv
     assert argv[-2:] == ["--only", "12"]
     assert pathlib.Path(kw["cwd"]).resolve() == world.root.resolve()          # the main folder: the committed relative settings apply
     assert kw["stdin"] is subprocess.DEVNULL and kw["stderr"] is subprocess.STDOUT
@@ -952,7 +952,7 @@ def session_on(world, run="r1", session="sess"):
 
 
 def watch_args(**kw):
-    return args(**{"id": "r1", "folder": "/w/auto-r1", "only": None, "wait": False, **kw})
+    return args(**{"id": "r1", "folder": "/w/auto-r1", "only": None, "keep_on": False, **kw})
 
 
 def test_the_watcher_switches_the_run_off_when_the_session_ends_and_logs_it(world, tmp_path, capsys):
@@ -987,14 +987,14 @@ def test_the_watcher_runs_the_same_session_command_and_env(world, tmp_path):
     assert kw["env"][auto.WAIT_VAR] == "0" and pathlib.Path(kw["cwd"]).resolve() == world.root.resolve()
 
 
-def test_wait_runs_the_session_with_wait_and_the_watcher_still_switches_the_run_off(world, tmp_path, capsys):
+def test_keep_on_runs_the_session_with_keep_on_and_the_watcher_still_switches_the_run_off(world, tmp_path, capsys):
     seen = []
     real = fake_popen(tmp_path, during=session_on(world))
     def popen(argv, **kw):
         seen.append(argv)
         return real(argv, **kw)
-    assert auto.cmd_watch(watch_args(wait=True), which=lambda n: "claude", popen=popen) == 0
-    assert seen[0][2] == "/saani:auto run r1 --folder /w/auto-r1 --wait"
+    assert auto.cmd_watch(watch_args(keep_on=True), which=lambda n: "claude", popen=popen) == 0
+    assert seen[0][2] == "/saani:auto run r1 --folder /w/auto-r1 --keep-on"
     assert auto.read_record() is None and "session ended with code 0; run switched off" in capsys.readouterr().out
 
 
@@ -1075,23 +1075,24 @@ def test_away_refuses_while_a_run_is_on_and_leaves_the_pid_file_alone(world):
 def test_the_watcher_is_for_away_and_asks_for_an_id_and_a_folder(world):
     with pytest.raises(SystemExit, match="--id"):
         auto.cmd_watch(args(only=None, folder=None))
-    with pytest.raises(SystemExit, match="--wait belongs to `saani auto pick` and `saani auto away` and `saani auto watch`"):
-        core.cmd_auto(type("A", (), {"action": "off", "wait": True, "id": None, "folder": None, "deploy": False, "run_id": None})())
+    with pytest.raises(SystemExit, match="--keep-on belongs to `saani auto away` and `saani auto watch`"):
+        core.cmd_auto(type("A", (), {"action": "off", "keep_on": True, "id": None, "folder": None, "deploy": False, "run_id": None})())
 
 
-def test_away_passes_wait_to_the_watcher(world):
+def test_away_passes_keep_on_to_the_watcher(world):
     seen = []
     def popen(argv, **kw):
         seen.append(argv)
         return type("P", (), {"pid": 5})()
-    assert auto.cmd_away(args(only=None, wait=True), which=lambda n: "claude", popen=popen) == 0
-    assert "--wait" in seen[0] and "--only" not in seen[0]
-    assert auto.watch_command("r1", "/f", wait=True)[-1] == "--wait"
+    assert auto.cmd_away(args(only=None, keep_on=True), which=lambda n: "claude", popen=popen) == 0
+    assert "--keep-on" in seen[0] and "--only" not in seen[0]
+    assert auto.watch_command("r1", "/f", keep_on=True)[-1] == "--keep-on"
 
 
-def test_away_wait_takes_no_number(world):
-    with pytest.raises(SystemExit, match="--wait takes no number"):
-        core.cmd_auto(type("A", (), {"action": "away", "wait": 5.0, "id": None, "folder": None, "deploy": False, "run_id": None})())
+def test_away_and_watch_refuse_wait(world):
+    for action in ("away", "watch"):
+        with pytest.raises(SystemExit, match="--wait belongs to `saani auto pick`"):
+            core.cmd_auto(type("A", (), {"action": action, "wait": 5.0, "id": None, "folder": None, "deploy": False, "run_id": None})())
 
 
 def test_on_here_writes_the_record_but_never_the_guard_s_marker(world, capsys):
@@ -1131,7 +1132,7 @@ def test_pick_wait_returns_as_soon_as_an_issue_is_eligible(world):
     t, answers = FakeTime(), [answer(), answer(), answer(7)]
     got = auto.wait_pick(60, pick_fn=lambda only=None: answers.pop(0), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
     assert [e["number"] for e in got["eligible"]] == [7] and not answers
-    assert t.slept == [180, 180] and got["waited_minutes"] == 6.0 and got["wait_quiet_minutes"] == 60
+    assert t.slept == [180, 180] and got["waited_minutes"] == 6.0 and got["keep_on_quiet_minutes"] == 60
 
 
 def test_pick_wait_times_out_with_an_empty_list(world):
@@ -1212,19 +1213,26 @@ def test_pick_wait_refuses_a_number_that_is_not_finite(world):
             auto.cmd_pick(type("A", (), {"wait": bad, "only": None, "limit": None, "json": False})())
 
 
-def test_the_command_line_reads_wait_as_minutes_for_pick_and_a_flag_for_away(world):
+def test_the_command_line_reads_wait_as_minutes_for_pick_and_keep_on_as_a_flag_for_away(world):
     import argparse
     parser = argparse.ArgumentParser()
     core.add_parsers(parser.add_subparsers(dest="cmd", required=True))
     got = parser.parse_args(["auto", "pick", "--wait", "9", "--json"])
     assert got.wait == 9.0 and got.json is True
-    got = parser.parse_args(["auto", "away", "--wait", "--only", "12"])
-    assert got.wait is True and got.only == [12]
-    assert parser.parse_args(["auto", "away"]).wait is None
+    got = parser.parse_args(["auto", "away", "--keep-on", "--only", "12"])
+    assert got.keep_on is True and got.only == [12] and got.wait is None
+    assert parser.parse_args(["auto", "away"]).keep_on is False
+    with pytest.raises(SystemExit):                                   # --wait never was the run's mode: no alias
+        parser.parse_args(["auto", "away", "--wait", "--only", "12"])
 
 
-def test_wait_quiet_minutes_is_a_setting(world):
-    assert config.Config().wait_quiet_minutes == 60
+def test_saani_auto_away_wait_is_refused_by_the_command(world):
+    with pytest.raises(SystemExit, match="--wait belongs to `saani auto pick`"):
+        core.cmd_auto(type("A", (), {"action": "away", "wait": 8.0, "id": None, "folder": None, "deploy": False, "run_id": None})())
+
+
+def test_keep_on_quiet_minutes_is_a_setting(world):
+    assert config.Config().keep_on_quiet_minutes == 60
 
 
 # ---------------------------------------------------------------- the run's own issues, and a run that did nothing (#56)

@@ -54,7 +54,7 @@ class Config:
     board_port: int = 8771
     parallel: int = 0                            # issues an auto run keeps in flight: 0 = sized from the cores and free memory (at most 2); n up to 10, a warning above 5
     ci_attempts: int = 3                         # an auto run: the most `saani ci pr` rounds (fix, land, again) before it leaves the pull request open
-    wait_quiet_minutes: float = 60               # an auto run started with --wait: the quiet time (nothing running, nothing eligible) that ends it
+    keep_on_quiet_minutes: float = 60            # an auto run started with --keep-on: the quiet time (nothing running, nothing eligible) that ends it
     ci_workflow: str = "ci.yml"
     ci_free_minutes: int = 2000
     ci_reserve_minutes: int = 50
@@ -123,7 +123,7 @@ def from_toml(data, root):
             ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
-            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "wait_quiet_minutes"): "wait_quiet_minutes", ("ci", "relabel"): "relabel", ("hints",): "hints"}
+            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "keep_on_quiet_minutes"): "keep_on_quiet_minutes", ("ci", "relabel"): "relabel", ("hints",): "hints"}
     for table, values in data.items():
         if table == "hints":
             flat["hints"] = dict(values)
@@ -171,9 +171,9 @@ def from_toml(data, root):
     att = flat.get("ci_attempts", 3)
     if not isinstance(att, int) or isinstance(att, bool) or att < 1:
         raise SystemExit(f"{FILE}: [auto] ci_attempts must be a whole number, 1 or more")
-    quiet = flat.get("wait_quiet_minutes", 60)
+    quiet = flat.get("keep_on_quiet_minutes", 60)
     if not isinstance(quiet, (int, float)) or isinstance(quiet, bool) or quiet <= 0:
-        raise SystemExit(f"{FILE}: [auto] wait_quiet_minutes must be a number of minutes, more than 0")
+        raise SystemExit(f"{FILE}: [auto] keep_on_quiet_minutes must be a number of minutes, more than 0")
     cfg = Config(**flat, root=pathlib.Path(root))
     if "/" not in cfg.repo:
         raise SystemExit(f"{FILE}: [project] repo must be owner/name")

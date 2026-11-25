@@ -375,7 +375,7 @@ def wait_pick(minutes, only=None, every=WAIT_EVERY_MINUTES, pick_fn=None, stop_f
         if clock() >= deadline:                 # no pick that could end past the deadline (the caller's Bash call has a timeout)
             break
     got["waited_minutes"] = round((clock() - start) / 60, 1)
-    got["wait_quiet_minutes"] = cfg().wait_quiet_minutes
+    got["keep_on_quiet_minutes"] = cfg().keep_on_quiet_minutes
     return got
 
 
@@ -385,7 +385,7 @@ def cmd_pick(args):
         if wait is True or not math.isfinite(wait) or wait <= 0:
             raise SystemExit("saani auto pick: --wait needs the minutes to wait (a number more than 0), e.g. --wait 8")
         got = wait_pick(wait, only=args.only)
-        args.json = True                      # the same JSON as `pick --json`, plus waited_minutes, wait_quiet_minutes and, at a stop rule, stop
+        args.json = True                      # the same JSON as `pick --json`, plus waited_minutes, keep_on_quiet_minutes and, at a stop rule, stop
     else:
         got = pick(only=args.only)
     note = None if got.get("stop") else pick_note(got)
@@ -947,11 +947,11 @@ def cmd_report(args):
 
 # ---- away: the run in a headless Claude Code session, started from the owner's session (#50)
 
-def away_command(run_id, folder, only=(), deploy=False, claude="claude", wait=False):
+def away_command(run_id, folder, only=(), deploy=False, claude="claude", keep_on=False):
     """The headless session of an away run: it runs the skill's away part (`/saani:auto run ...`), which switches the run on in that
     session (so the guard registers it, never the owner's session) and does the run. Every permission prompt becomes a refusal Claude
     reads (`--permission-prompts none`); Claude Code's classifier decides what the guard does not (`--permission-mode auto`)."""
-    prompt = f"/saani:auto run {run_id} --folder {folder}" + (" --deploy" if deploy else "") + (" --wait" if wait else "") + "".join(f" {n}" for n in only)
+    prompt = f"/saani:auto run {run_id} --folder {folder}" + (" --deploy" if deploy else "") + (" --keep-on" if keep_on else "") + "".join(f" {n}" for n in only)
     return [claude, "-p", prompt, "--permission-mode", "auto", "--permission-prompts", "none"]
 
 
@@ -1050,8 +1050,8 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
         raise SystemExit(f"saani auto away: run {old['id']} is on (since {old['started']}): `saani auto off` first (nothing was started)")
     main = pathlib.Path(cfg().root)                     # the main folder: the project's committed relative settings resolve from it
     log = main / "build" / f"saani-auto-{run_id}.log"
-    wait = bool(getattr(args, "wait", False))
-    argv = away_command(run_id, folder, args.only or (), bool(args.deploy), wait=wait)
+    keep_on = bool(getattr(args, "keep_on", False))
+    argv = away_command(run_id, folder, args.only or (), bool(args.deploy), keep_on=keep_on)
     exe = (which or shutil.which)("claude")
     if exe is None:
         print("saani auto away: `claude` is not on the PATH, so the run cannot start by itself. Start it by hand, in a terminal, from "
@@ -1066,7 +1066,7 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
     except OSError:
         pass
     try:
-        pid = start_detached(watch_command(run_id, folder, args.only or (), bool(args.deploy), wait), main, log, popen)
+        pid = start_detached(watch_command(run_id, folder, args.only or (), bool(args.deploy), keep_on), main, log, popen)
     except OSError as e:
         print(f"saani auto away: the headless session could not start ({e}). Start it by hand, in a terminal, from {main}:\n  {by_hand(argv)}\n"
               + BY_HAND_END.format(id=run_id))
@@ -1078,8 +1078,8 @@ def cmd_away(args, which=None, popen=subprocess.Popen):
         print(f"  {warning}")
     print(f"  log:    {log}")
     print("  follow: saani auto status (once the run is on), the log, or /saani:ui")
-    if wait:
-        print(f"  wait:   --wait: the run waits for new eligible issues, until a stop rule or {cfg().wait_quiet_minutes:g} quiet minutes end it the normal way")
+    if keep_on:
+        print(f"  keep-on: --keep-on: the run stays on and takes newly eligible issues, until a stop rule or {cfg().keep_on_quiet_minutes:g} quiet minutes end it the normal way")
     print(f"  end:    the run is switched off by itself when the session ends (saani auto off --run {run_id} ends it earlier, from a terminal)")
     return 0
 
@@ -1088,11 +1088,11 @@ BY_HAND_END = ("  Started by hand there is no watcher: when the session ends, en
                "(or `saani auto off --run {id}` from a terminal).")
 
 
-def watch_command(run_id, folder, only=(), deploy=False, wait=False, python=None):
+def watch_command(run_id, folder, only=(), deploy=False, keep_on=False, python=None):
     """What `saani auto away` starts detached: this saani's `auto watch`, which runs the session and then switches the run off."""
     saani_py = pathlib.Path(__file__).resolve().parent.parent / "saani.py"
     return ([python or sys.executable, "-I", str(saani_py), "auto", "watch", "--id", run_id, "--folder", str(folder)]
-            + (["--deploy"] if deploy else []) + (["--wait"] if wait else []) + (["--only"] + [str(n) for n in only] if only else []))
+            + (["--deploy"] if deploy else []) + (["--keep-on"] if keep_on else []) + (["--only"] + [str(n) for n in only] if only else []))
 
 
 def watch_note(text):
@@ -1121,12 +1121,12 @@ def fallback_report(rec, what):
 def cmd_watch(args, which=None, popen=subprocess.Popen):
     """The away run's watcher (started by `saani auto away`, never typed): runs the headless session with the log as its output, writes the
     session's process id for `away_gone`, waits for it, and then switches the run off in-process (what the owner would do from a
-    terminal). --wait only changes the session's prompt (the run waits for new issues inside the session); the watcher's end is the same. A session that cannot start is logged and the run is switched off the same way. Exits 0 whatever the session did."""
+    terminal). --keep-on only changes the session's prompt (the run stays on and takes new issues inside the session); the watcher's end is the same. A session that cannot start is logged and the run is switched off the same way. Exits 0 whatever the session did."""
     import shutil
     run_id = args.id
     if not run_id or not valid_id(run_id) or not args.folder:
         raise SystemExit("saani auto watch: --id (letters, digits, - and _ only) and --folder are needed; `saani auto away` starts it")
-    argv = away_command(run_id, args.folder, args.only or (), bool(args.deploy), wait=bool(getattr(args, "wait", False)))
+    argv = away_command(run_id, args.folder, args.only or (), bool(args.deploy), keep_on=bool(getattr(args, "keep_on", False)))
     exe = (which or shutil.which)("claude")
     code = None
     token = secrets.token_hex(16)           # the session's `saani auto on` writes it in the record: only a record with it is this one's to end

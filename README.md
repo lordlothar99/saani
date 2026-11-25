@@ -27,8 +27,9 @@ and lands it, while Saani's commands and its guard keep the work safe.
 4. **The end.** One `dev` -> `main` pull request, its CI run (`saani ci`), and a report on it: what landed, what waits for you and
    why, the refusals, the cost. `saani auto status` shows a running run. The run is switched off when it is done: by a small watcher
    when an away session ends, by the skill after the report of a `here` run (`/saani:auto off` in your own session ends it any time).
-   Add `--wait`, as in `/saani:auto away --wait`, and the run waits for issues that become eligible while it works (nothing is spent while
-   it waits) until a stop rule or an hour without work ends it the normal way.
+   Add `--keep-on`, as in `/saani:auto away --keep-on`, and the run stays on and keeps taking issues that become eligible while it works
+   (nothing is spent while it waits) until a stop rule or an hour without work ends it the normal way. (In v1.1.0, `--keep-on` only meant that
+   the watcher did not switch the run off when the session ended; since #70 it is this.)
 5. **Your word.** `/saani:merge` merges the pull request once its CI is green, relabels the issues, removes the run's folder and,
    when the merge changes the version, creates the GitHub release `v<version>` with notes written from the issues.
    `/saani:merge --deploy` (or `/saani:deploy` later) then deploys, if the project deploys.
@@ -112,7 +113,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 
 | Terminal | Claude Code | What it does |
 |---|---|---|
-| `saani auto ...` | `/saani:auto [here\|away] [--wait] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
+| `saani auto ...` | `/saani:auto [here\|away] [--keep-on] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
 | `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button (ending with the Saani release or commit that serves the map); "Stale" when Saani does not answer |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers: one map shows them all |
 | `saani status` | `/saani:status` | what runs, what is blocked or waits in Saani's machinery (or: no activity); `--stats`: landings, test queue medians |
