@@ -65,7 +65,7 @@ ALLOWED = [
     "saani comment 12 progress --text 'half done, the token is not here' --field Step=2", "saani kpis", "saani kpis --since 2026-01-01 --json",
     "saani progress show build/run.txt", "saani progress watch build/run.txt --every 60", "saani ui", "saani ui --port 8772", "saani map",
     "saani ci status", "saani ci pr", "saani ci pr --pc", "saani auto pick", "saani auto pick --json --only 3 4 --limit 2", "saani auto status", "saani auto status --check",
-    "saani auto report", "saani auto report --pr 3 --post", "saani auto report --reason 'no slot, nothing eligible'",
+    "saani auto end", "saani auto end --json", "saani auto report", "saani auto report --pr 3 --post", "saani auto report --reason 'no slot, nothing eligible'",
     "saani auto pick --wait 30", "saani auto pick --json --wait=30", "saani status --stats",
     "gh release list", "gh release list --repo acme/other --limit 5", "gh release list -R acme/other -L5 --exclude-drafts --exclude-pre-releases",
     "gh release list --order asc --json tagName --jq '.[0].tagName'", "gh release view", "gh release view v1.2.0 --repo acme/other --json tagName",

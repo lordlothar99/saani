@@ -104,19 +104,23 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
      on. Exit 3: a stop rule is reached (40 refusals in total, 10 refusals for the same reason in a row, 10 hours, or the run record is
      missing; the output says which). A stopped run ends the normal way: start no new issue; let the running ones finish, or park them
      (`saani comment <n> blocked` with where they stand); then End, step 4 (the full run, the one pull request if anything landed, the
-     `saani ci pr` rounds) and step 5 (the report).
+     `saani ci pr` rounds, when the branch is ahead) and step 5 (the report).
    If the change alters what a document describes, the coder updates that document in the same commit (`refs #n`, the trailers).
 2. **Cost.** Keep your own context small: briefs and verdicts, not file dumps; the routine roles run on the cheaper models; read a
    result's summary, not its transcript. `saani kpis` at the end gives the cost per issue, role and model.
 3. **Review and clean** once the list is exhausted: tests, then code, then docs, in small commits, each landed. The documentation review is
    never skipped.
-4. **End** (also after a stop rule). The full run (`[tests] full`); open the ONE integration -> production pull request (milestone set, `refs #n` for every
-   in-dev issue); `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
-   most `[auto] ci_attempts` attempts (default 3), then leave the pull request open and say what fails. A run never merges, and never runs `saani merge`: that is the owner's word.
+4. **End** (also after a stop rule, and also when the run landed nothing). Run `saani auto end --json`: it says whether the integration branch is ahead of
+   production (`ahead`), whether a release pull request is open (`pr`) and what to do (`action`: `open`, `update` or `none`). `none`: no pull request; the report says so.
+   Otherwise the full run (`[tests] full`); open the ONE integration -> production pull request (milestone set, `refs #n` for every
+   in-dev issue) or, with `update`, update the one already open (its description too). Write the description to a file and pass it with `--body-file` to both `gh pr create` and `gh pr edit` (the guard refuses a here-document or an inline body on `gh pr edit`). `saani auto end` fetches origin first and its JSON `landed_count` is the number of issues the run landed. Then `saani ci pr`. If it is red, read why, fix it (never weaken a test to turn it green), land, run `saani ci pr` again; at
+   most `[auto] ci_attempts` attempts (default 3), then leave the pull request open and say what fails. When `note` is not null (the pull request does not change the version in `[release] version_file`,
+   or none is set), put it in the pull request's description and the chat: "no version bump: merging creates no release; bump it or merge as is". The run never bumps the version itself: the owner decides at merge time
+   whether it is a release. A run never merges, and never runs `saani merge`: that is the owner's word.
 5. **Report, then stop.** Always, also when the run did nothing (no slot, nothing eligible, a stop rule): the reason comes from the
    journal (`saani auto pick` writes why it gave nothing, `status --check` the stop rule), and `saani auto report` prints the path of the
    file it writes. (If the session ends without one, the watcher writes it.) `saani auto report --pr <N> --post` writes `build/saani-auto-<id>.md` in the main checkout and comments it on the
-   pull request; with nothing landed there is no pull request: `saani auto report` alone writes the file, and you say so in the chat.
+   pull request; when the branch was not ahead there is no pull request: `saani auto report` alone writes the file, and you say so in the chat. The report's "Release pull request" section says why there is one even though the run landed nothing ("the integration branch was ahead: N commits").
    It holds the start, end, duration, why the run stopped (a limit, or "finished the list"), the id and the folder's name, the issues landed, the issues left with a question or blocked, the
    refusals by reason, the cost, the timeline and the next step. Add to the chat (headless: your last message, which the owner's
    terminal prints) what only you know: a table of what is pending (issue |
