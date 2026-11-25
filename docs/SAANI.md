@@ -184,8 +184,18 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
 ## The map and the kanban page
 `saani ui` (aliases `saani map`, `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed
 every 5 s, read-only.
-- **`/kanban`, the kanban page:** one card per issue (Waiting for you, Ready, Building, Testing, Merged, To deploy, Deployed), each with
-  what it needs and a "Copy prompt" to paste to Claude Code; the open pull request with its CI in three colours; the Claude Code sessions of
+- **`/kanban`, the kanban page:** one card per issue, each with what it needs and a "Copy prompt" to paste to Claude Code. On a repo with
+  GitHub issue statuses the columns are the statuses: **Backlog** (status Backlog or none), **Todo**, **In progress**, **In review** and
+  **Done** (closed in the last 7 days, folded by default; Not planned and Duplicate in a closed section of it). The GitHub status decides,
+  never below where the work is on this PC (a worktree is at least In progress; dev and production at least In review). Inside **In
+  review** a section says where the code is: on its branch, on dev, in the release pull request (it keeps its card with the CI in three
+  colours), on production to deploy, on production to close (the status stays In review until the issue is closed: `saani deploy` sets Done
+  itself later, #84). **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
+  status; it also stays in its own column. Testing and landing are badges on the card, with an agent working; a Backlog or Todo card shows
+  why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
+  map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
+  Merged, To deploy, To close, Deployed). `/api/state` carries both: `board` (the map's columns, unchanged) and `kanban` (`columns` with
+  `sections`, `pinned`; `null` without statuses); the open pull request with its CI in three colours; the Claude Code sessions of
   the project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in);
   the PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above.

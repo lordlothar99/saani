@@ -436,6 +436,107 @@ def queue_for(issue, statuses_on):
     return "todo" if issue.get("milestone") else "backlog"
 
 
+# ---------------------------------------------------------------- the kanban page: columns are GitHub's statuses (#103)
+
+KANBAN_COLUMNS = [
+    ("backlog", "Backlog", "Filed, not released: status Backlog or none. `saani auto pick` skips it: move an issue to Todo when a run may take it."),
+    ("todo", "Todo", "Released: an auto run takes it when it is ready. A badge says why it would not be picked (Auto no, blocked, needs you)."),
+    ("started", "In progress", "Started: an agent works on it in its own folder (a worktree)."),
+    ("review", "In review", "Built and being checked, or merged and waiting to go live: on its branch, on dev, in the release pull request, on production."),
+    ("done", "Done", f"Last {LIVE_DAYS} days: closed. Folded by default."),
+]
+KANBAN_SECTIONS = {
+    "review": [("branch", "On its branch", "Committed in its worktree, tests or review running: not on dev yet."),
+               ("dev", "On dev", "Merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
+               ("pr", "In the release PR", "Carried by the open integration -> production pull request."),
+               ("main", "On production: to deploy", "Merged into production: goes live with the next deploy. Command: /saani:ci merged <pr>."),
+               ("close", "On production: to close", "Merged into production, nothing of it to deploy: close it. Command: /saani:ci merged <pr>."),
+               ("elsewhere", "Not found here", "In review on GitHub, but no worktree or label of it on this PC.")],
+    "done": [("deployed", "Closed", "Deployed or closed after the merge."),
+             ("notplanned", "Not planned and duplicates", "Closed as not planned or as a duplicate.")],
+}
+KANBAN_FLOOR = {"building": "started", "testing": "started", "dev": "review", "main": "review", "close": "review"}   # a card's place on this PC
+KANBAN_STEPS = ("backlog", "todo", "started", "review")
+KANBAN_SECTION_OF = {"building": "branch", "testing": "branch", "main": "main", "close": "close"}
+
+
+def kanban_place(card, col, carried=()):
+    """(kanban column, section or None) of a card that sits in board column `col`. The GitHub status decides, but never below where the card
+    is on this PC (a worktree is at least In progress, dev and production at least In review); a closed issue is Done unless it was closed
+    as not planned or a duplicate. A card without a place on this PC (Ready, Waiting for you) is In progress or In review by its status, In
+    progress with a worktree, else Backlog or Todo by its `queue` (an open issue marked Done is not taken by a run: Backlog)."""
+    step = issue_status.step_of(card.get("status"))
+    if col == "live":
+        return "done", "notplanned" if step == "closed" else "deployed"
+    if col in ("ready", "you"):
+        if step not in ("started", "review"):
+            step = "started" if card.get("worktree") else card.get("queue") or "backlog"
+        return step, ("branch" if card.get("worktree") else "elsewhere") if step == "review" else None
+    floor = KANBAN_FLOOR[col]
+    step = max((x for x in (step, floor) if x in KANBAN_STEPS), key=issue_status.rank)
+    if step != "review":
+        return step, None
+    return "review", ("pr" if card["number"] in carried else "dev") if col == "dev" else KANBAN_SECTION_OF[col]
+
+
+def kanban_why(card):
+    """[{text, kind}] for a Backlog or Todo card: what `saani auto pick` would say about it (Auto no or partly, blocked, needs the owner,
+    no Type), so the owner sees why a released issue is not taken."""
+    out = []
+    fit = (card.get("auto") or {}).get("fit")
+    if fit in ("no", "partly"):
+        out.append({"text": f"Auto: {fit}", "kind": "warn"})
+    if card.get("blocked"):
+        by = ", ".join(f"#{n}" for n in card.get("blocked_by") or [])
+        out.append({"text": f"blocked by {by}" if by else "blocked", "kind": "warn"})
+    if card.get("need") or ((card.get("glance") or {}).get("needs_owner") or {}).get("kind") in ("answer", "act"):
+        out.append({"text": "needs the owner", "kind": "warn"})
+    if not card.get("type"):
+        out.append({"text": "no Type", "kind": "warn"})
+    return out
+
+
+def build_kanban(board, statuses_on, landing=None):
+    """The kanban page's columns when the repo has statuses (else None: the page draws `board` as before): Backlog, Todo, In progress, In
+    review (sections: where the code is), Done (closed in the last days; not planned apart), and `pinned`: every open card that waits for the
+    owner, at any status (it also stays in its own column). `landing`: the issue number joining dev now. Each card is the board's, plus `section`
+    and `badges` (testing, landing, and for Backlog and Todo the reasons a run would not take it)."""
+    if not statuses_on:
+        return None
+    pr = next((c.get("pr") for c in board if c["id"] == "dev"), None)
+    carried = set((pr or {}).get("inside") or [])
+    cols, pinned = {key: [] for key, _, _ in KANBAN_COLUMNS}, {}
+    for column in board:
+        for card in column["cards"]:
+            col, section = kanban_place(card, column["id"], carried)
+            badges = kanban_why(card) if col in ("backlog", "todo") else []
+            if column["id"] == "testing":
+                badges.append({"text": "testing", "kind": "info"})
+            if landing is not None and card["number"] == landing:
+                badges.append({"text": "landing", "kind": "info"})
+            if col == "backlog" and not card.get("need"):                # not released: the prompt is to get it ready, not to start it
+                card = {**card, "prompt": f"Get #{card['number']} ready for a run: set its Type and milestone, rewrite it in the issue template, "
+                                          f"say what blocks it, then tell me whether it may move to Todo."}
+            cols[col].append({**card, "section": section, "badges": badges})
+            if card.get("need") and card.get("state", "OPEN") == "OPEN":          # a closed issue with a leftover label waits for nobody
+                pinned.setdefault(card["number"], card)
+    order = lambda c: (milestone_key(c.get("milestone")), c["number"])
+    out = []
+    for key, title, hint in KANBAN_COLUMNS:
+        cards = sorted(cols[key], key=order)
+        sections = []
+        for sid, stitle, shint in KANBAN_SECTIONS.get(key, []):
+            numbers = [c["number"] for c in cards if c["section"] == sid]
+            if not numbers and not (sid == "pr" and pr):
+                continue
+            sections.append({"id": sid, "title": stitle, "hint": shint, "count": len(numbers),
+                             "pr": pr if sid == "pr" else None,
+                             "prompt": column_prompt("dev", numbers, pr) if sid == "pr" else
+                             column_prompt(sid, numbers, None) if sid in ("dev", "main", "close") else None})
+        out.append({"id": key, "title": title, "hint": hint, "cards": cards, "sections": sections})
+    return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
+
+
 def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
     """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
     by_number = {}
@@ -461,7 +562,7 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=())
             continue
         need = need_of(issue.get("labels"))
         columns[col].append({**issue, **lifecycle(issue, open_numbers), "worktree": w, "agents": crew.get(n, []), "need": need,
-                             **({"queue": queue_for(issue, statuses_on)} if col == "ready" else {}),
+                             **({"queue": queue_for(issue, statuses_on)} if col in ("ready", "you") else {}),
                              "prompt": prompt_for(n, col, need),
                              "runs": [r for r in runs if w and r.get("checkout") == w["folder"]]})
     order = lambda c: (milestone_key(c.get("milestone")), c["number"])
@@ -891,11 +992,12 @@ def state():
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
+    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing)
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],
             "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
-            "board": build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing),
+            "board": board, "kanban": safe(lambda: build_kanban(board, has_statuses(iss.get("board", [])), int(m.group(2)) if m else None), default=False),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci)),
             "saani": safe(lambda: cached("saani", 300, saani_version), default={})}
