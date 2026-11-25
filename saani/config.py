@@ -192,24 +192,58 @@ def from_toml(data, root):
 
 
 def check_reference_clones(cfg):
-    """Each reference clone is relative to the main checkout, an existing git clone, and outside the project and its worktrees folder
-    (neither holds the other): an auto run only reads it, so it must never be one of the run's own places."""
+    """Each reference clone is relative to the main checkout and outside the project and its worktrees folder (neither holds the other):
+    an auto run only reads it, so it must never be one of the run's own places. When the folder is there, it must be a git clone of
+    another repository than the project's (its git folder, through a worktree's .git file too, is not the project's) with a
+    remote.origin.url (so `git fetch --tags origin` never falls back to a local folder named origin). A folder that is not there (moved,
+    another machine) is no error here: `saani auto on` warns and the run goes without it (present_reference_clones)."""
     if not cfg.reference_clones:
         return
+    from .guard import git_dirs
     root, wt = cfg.root.resolve(), pathlib.Path(cfg.wt_dir).resolve()
 
     def holds(a, b):
         return a == b or a in b.parents
+
+    def common(p):
+        try:
+            dirs = git_dirs(p)
+        except (OSError, UnicodeDecodeError):
+            return None
+        return pathlib.Path(dirs[1]).resolve() if dirs else None
+    own = common(root)
     for raw, path in zip(cfg.reference_clones, cfg.reference_clone_paths):
         where = f"{FILE}: [auto] reference_clones {raw!r}"
         if pathlib.Path(raw).is_absolute() or pathlib.PureWindowsPath(raw).drive or raw.startswith(("\\", "/")):
             raise SystemExit(f"{where}: give it relative to the project's main checkout (like ../upstream-lib)")
-        if not path.is_dir():
-            raise SystemExit(f"{where}: no such folder ({path})")
-        if not (path / ".git").exists():
-            raise SystemExit(f"{where}: not a git clone (no .git in {path})")
         if holds(path, root) or holds(root, path) or holds(path, wt) or holds(wt, path):
             raise SystemExit(f"{where}: must be outside the project and its worktrees folder ({path})")
+        if not path.exists():
+            continue                                         # missing here: a warning when a run starts, never a refusal
+        if not path.is_dir() or not (path / ".git").exists():
+            raise SystemExit(f"{where}: not a git clone (no .git in {path})")
+        theirs = common(path)
+        if theirs is None:
+            raise SystemExit(f"{where}: its .git cannot be read ({path})")
+        if own is not None and theirs == own:
+            raise SystemExit(f"{where}: it is the project's own repository (a worktree of it), not an upstream's clone ({path})")
+        try:
+            r = subprocess.run(["git", "-C", str(path), "config", "--get", "remote.origin.url"], capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=20)
+            url = r.stdout.strip() if r.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            url = ""
+        if not url:
+            raise SystemExit(f"{where}: it has no remote.origin.url (git fetch --tags origin needs the upstream as origin) ({path})")
+
+
+def present_reference_clones(cfg):
+    """(the reference clones found on this machine, a warning naming the missing ones or "")."""
+    here = [p for p in cfg.reference_clone_paths if p.is_dir()]
+    missing = [raw for raw, p in zip(cfg.reference_clones, cfg.reference_clone_paths) if not p.is_dir()]
+    warning = (f"warning: [auto] reference_clones {', '.join(missing)}: not found from {cfg.root}; this run goes without "
+               f"{'it' if len(missing) == 1 else 'them'}") if missing else ""
+    return here, warning
 
 
 def main_checkout(start=None):

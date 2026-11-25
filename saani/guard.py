@@ -498,6 +498,8 @@ def secret_name(raw, resolved=None, strict=True, session=None):
         clean = [x.split(":")[0].rstrip(". ") for x in parts]          # Windows: `.git./config`, `packed-refs::$DATA` are the files
         if clean[-2:] == [".git", "config"] or any(clean[-len(t):] == t for t in STRONG_TAILS):
             return True
+        if ".git" in clean[:-1] and clean[-1] in ("config", "config.worktree"):     # a submodule's or a worktree's (.git/modules/x/config)
+            return True
         name = parts[-1].split(":")[0].rstrip(". ") or parts[-1]       # Windows: `.env::$DATA` and `.env.` are `.env`
         if name == ".env" or name.startswith((".env.",) + STRONG_PREFIXES) or name in STRONG_NAMES or "credentials" in name:
             return True
@@ -636,23 +638,36 @@ def grep_tool(inp, ctx):
         return deny("grep option", "Grep with a negated glob (it searches everything else)", how="give a glob of the files to search")
     if secret_name(inp.get("path") or "", root) or (glob_ and secret_name(glob_)):
         return deny("secret", "Grep in secret files", how=SECRETS_HOW)
+    if ".git" in git_parts(inp.get("path") or "") or ".git" in git_parts(root):
+        return deny("secret", "Grep in a .git folder (its config holds remote URLs with tokens, packed-refs the owner's stash)",
+                    how="search the checkout's files, outside .git")
     if root == ctx.home or not (ctx.in_run(root) or ctx.clone_of(root)):
         return deny("grep outside the worktrees", "Grep outside the worktrees folder, the run's folder and the reference clones",
                     how="search inside a worktree, or Read the file")
     if os.path.isdir(root):
-        # Every file the search could read is looked at, by its path below the root (.docker/config.json, .kube/config, .ssh/...): a
-        # glob narrows it only when it is a plain name pattern (no /, no **, no braces), which ripgrep matches against the file's name.
+        # Every file the search could read is looked at, by its path below the root and its full path (.docker/config.json,
+        # .kube/config, .ssh/...): a glob narrows it only when it is a plain name pattern (no /, no **, no braces), which ripgrep matches
+        # against the file's name. A .git folder below the root is walked too, whatever ripgrep would skip: a search that could read
+        # any file in it is refused (an unnarrowed search, or a glob matching a name there: config, packed-refs...).
         import fnmatch
         plain = bool(glob_) and not re.search(r"[/\\{}]|\*\*", glob_)
 
         def hit(path, name):
-            if os.path.isdir(path) or (plain and not fnmatch.fnmatchcase(name, glob_.lower())):
+            if os.path.isdir(path):
+                return not plain and git_parts(name) == [".git"]
+            if plain and not fnmatch.fnmatchcase(name, glob_.lower()):
                 return False
-            return secret_name(os.path.relpath(path, root))
-        if tree_has(root, hit, ctx, skip=(".git",)):
-            return deny("secret", "Grep in a folder tree that holds a secret file the search could read (or too big to look through)",
-                        how="give Grep a glob of plain names that leaves the secret out (*.py), or a deeper path")
+            rel = os.path.relpath(path, root)
+            return ".git" in git_parts(rel)[:-1] or secret_name(rel) or secret_name(path)
+        if tree_has(root, hit, ctx):
+            return deny("secret", "Grep in a folder tree that holds a secret file or a .git folder the search could read (or too big to "
+                        "look through)", how="give Grep a glob of plain names that leaves the secret and .git out (*.py), or a deeper path")
     return allow("Grep inside the run's folders")
+
+
+def git_parts(p):
+    """The parts of a path, lower case, a part's Windows `:stream` and trailing dots and spaces dropped (`.git.` is `.git`)."""
+    return [x.split(":")[0].rstrip(". ") or x for x in re.split(r"[\\/]+", str(p).lower()) if x]
 
 
 def tree_has(root, test, ctx, skip=()):
@@ -1999,7 +2014,7 @@ def register(session_id, options, cwd, run_id, folder):
         return None
     return turn_on(session_id, run_id, main, wt, folder, deploy=opts["deploy"], repo=cfg.repo, integration=cfg.integration,
                    production=cfg.production, tests=[cfg.landing, cfg.full, cfg.check], worker_branch=cfg.worker_branch.pattern,
-                   reference_clones=cfg.reference_clone_paths)
+                   reference_clones=config.present_reference_clones(cfg)[0])
 
 
 def post_tool_use(event):

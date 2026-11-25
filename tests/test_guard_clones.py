@@ -14,7 +14,10 @@ pytestmark = pytest.mark.usefixtures("home")                                    
 
 def make_clone(path):
     """An invented upstream's clone (a .git folder and a few files; no git needed: the guard never runs it)."""
-    (path / ".git").mkdir(parents=True)
+    (path / ".git" / "refs" / "tags").mkdir(parents=True)
+    (path / ".git" / "config").write_text('[remote "origin"]\n\turl = https://x-access-token:abc@example.com/upstream-lib.git\n')
+    (path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (path / ".git" / "packed-refs").write_text("")
     (path / "src").mkdir()
     (path / "src" / "lib.py").write_text("x")
     (path / "README.md").write_text("x")
@@ -54,7 +57,8 @@ def test_a_reference_clone_is_read_at_a_tag(cctx, command):
 def test_a_clone_s_path_forms_and_tools(cctx):
     assert tool(cctx, "Read", file_path="{clone}/src/lib.py")[0] == "allow"
     assert tool(cctx, "Glob", pattern="**/*.py", path="{clone}")[0] == "allow"
-    assert tool(cctx, "Grep", pattern="def", path="{clone}")[0] == "allow"
+    assert tool(cctx, "Grep", pattern="def", path="{clone}", glob="*.py")[0] == "allow"
+    assert tool(cctx, "Grep", pattern="def", path="{clone}/src")[0] == "allow"
     assert tool(cctx, "Grep", pattern="def", path="{clone}/src", glob="*.py")[0] == "allow"
     assert tool(cctx, "Grep", pattern="def", path="{clone}/../webshop")[2] == "grep outside the worktrees"
     if os.name == "nt":
@@ -130,9 +134,40 @@ def test_no_write_tool_in_a_clone_and_its_secrets_stay_refused(cctx):
     assert tool(cctx, "Read", file_path="{clone}/deploy.pem")[2] == "secret"
     assert tool(cctx, "Read", file_path="{clone}/.git/config")[2] == "secret"
     assert tool(cctx, "Glob", pattern="**/.env", path="{clone}")[2] == "secret"
-    assert tool(cctx, "Grep", pattern="def", path="{clone}")[2] == "secret"                # the tree holds a key
+    assert tool(cctx, "Grep", pattern="def", path="{clone}/src")[0] == "allow"
+    (clone / "src" / "deploy.pem").write_text("x")
+    assert tool(cctx, "Grep", pattern="def", path="{clone}/src")[2] == "secret"            # the tree holds a key
     assert tool(cctx, "Grep", pattern="def", path="{clone}", glob="*.py")[0] == "allow"
     assert sh(cctx, "git -C {clone} show v2.0:deploy.pem")[2] == "secret"
+
+
+@pytest.mark.parametrize("inp", [
+    {"path": "{clone}/.git"}, {"path": "{clone}/.git/"}, {"path": "{clone}/.git/refs"}, {"path": "{clone}/.git/config"},
+    {"path": "{clone}/.git."}, {"path": "{clone}/.GIT"}, {"path": "{clone}/src/../.git"}, {"path": "{clone}/.git", "glob": "*.py"},
+    {"path": "{work}/.git"},                                                             # a worktree's .git file too
+    {"path": "{clone}"},                                                                 # unnarrowed: it could read .git/config
+    {"path": "{clone}", "glob": "config"}, {"path": "{clone}", "glob": "HEAD"}, {"path": "{clone}", "glob": "*"},
+    {"path": "{clone}", "glob": "packed-*"}, {"path": "{clone}", "glob": "**/*.py"}, {"path": "{clone}", "glob": "src/*.py"},
+])
+def test_grep_never_reads_a_git_folder(cctx, inp):
+    """ripgrep's own skipping of hidden folders is not relied on: a .git folder below the root is walked like any folder, and a search
+    that could read a file in it is refused (an unnarrowed one, or a glob matching a name there)."""
+    if os.name != "nt" and inp["path"].endswith(("/.GIT", "/.git.")):
+        pytest.skip("case and trailing dots are Windows'")
+    verdict = tool(cctx, "Grep", pattern="https://.*@", **inp)
+    assert verdict[0] == "deny" and verdict[2] == "secret", (inp, verdict)
+
+
+def test_grep_of_a_tree_with_a_git_folder_below_it(cctx):
+    vendor = pathlib.Path(cctx.places["work"]) / "vendor" / "dep"
+    (vendor / ".git").mkdir(parents=True)
+    (vendor / ".git" / "config").write_text("x")
+    (vendor / "dep.py").write_text("x")
+    assert tool(cctx, "Grep", pattern="x", path="{work}")[2] == "secret"
+    assert tool(cctx, "Grep", pattern="x", path="{work}", glob="config")[2] == "secret"
+    assert tool(cctx, "Grep", pattern="x", path="{work}", glob="*.py")[0] == "allow"
+    assert tool(cctx, "Read", file_path="{clone}/.git/modules/dep/config")[2] == "secret"
+    assert tool(cctx, "Read", file_path="{clone}/.git/worktrees/x/config.worktree")[2] == "secret"
 
 
 def link(src, target):
@@ -184,18 +219,26 @@ def test_a_clone_overlapping_the_run_s_places_is_dropped(ctx, tmp_path):
     assert c.clones == [guard.norm(tmp_path / "upstream-lib")]
 
 
-def test_the_clones_are_learned_from_saani_toml_when_the_run_starts(tmp_path, home, monkeypatch):
+def real_clone(git, path):
+    """An upstream's clone git can read: a repository with an origin remote (never fetched: no network)."""
+    path.mkdir()
+    git("init", "-q", cwd=path)
+    git("remote", "add", "origin", "https://example.com/upstream-lib.git", cwd=path)
+    return path
+
+
+def test_the_clones_are_learned_from_saani_toml_when_the_run_starts(tmp_path, home, monkeypatch, git):
     import tempfile
     (tmp_path / "temp").mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "temp"))                     # pytest's tmp_path is inside the real temp
-    clone = make_clone(tmp_path / "upstream-lib")
+    clone = real_clone(git, tmp_path / "upstream-lib")
     main, work = fake_repo(tmp_path, toml='[project]\nrepo = "acme/webshop"\n\n[worktrees]\nfolder = "../webshop-wt"\n\n'
                                           '[tests]\nlanding = ["{python}", "-m", "pytest", "-q"]\n\n'
-                                          '[auto]\nreference_clones = ["../upstream-lib"]\n')
+                                          '[auto]\nreference_clones = ["../upstream-lib", "../moved-lib"]\n')
     run = run_folder(tmp_path, main)
     post(home, run, AUTO_ON, ran(marker("run-1", run)))
     st = guard.state("s-1")
-    assert [guard.norm(c) for c in st["reference_clones"]] == [guard.norm(clone)]
+    assert [guard.norm(c) for c in st["reference_clones"]] == [guard.norm(clone)]           # the missing one is dropped
     out = hook(home, work, "Bash", command=f"git -C {fwd(clone)} show v2.0:src/lib.py")
     assert out["permissionDecision"] == "allow"
     out = hook(home, work, "Bash", command=f"git -C {fwd(clone)} checkout v1.0")

@@ -683,6 +683,9 @@ def cmd_on(args):
     warning = parallel_warning(parallel_size(cfg().parallel, os.cpu_count(), None))
     if warning:
         print(warning)                    # before the marker line below, which stays the last line
+    clones_warning = config.present_reference_clones(cfg())[1]
+    if clones_warning:
+        print(clones_warning)             # a missing clone: the guard registers the run without it
     if here_mode:
         # The interactive sub-mode (#50): the record (stop rules, journal, report) without the guard's switch. This line is not the
         # marker, so the guard leaves the owner's session in present mode: the owner answers the prompts and the questions.
