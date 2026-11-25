@@ -149,7 +149,18 @@ whole PC.
 | full | before a release, and the PC's CI | everything | `[tests] full` (after `[tests] check`) |
 
 A project that cannot tell which tests a change affects sets `landing` to its whole suite; a faster one is the project's own script. The
-old key `[tests] tier1` is still read as `landing`, with a message to rename it.
+old key `[tests] tier1` is still read as `landing`, with a message to rename it. Saani's own `landing` and `full` are both `python -m pytest -q`
+(no paths), so a test file added or moved under `tests/` is in both tiers.
+
+### Where Saani's own tests go
+- One file per module or feature: `tests/test_<module>.py` for `saani/<module>.py` (`test_core.py`, `test_queue.py`, `test_status.py`...).
+  A module with many tests is split by area, `tests/test_<module>_<area>.py`: the guard's are `test_guard.py` (Bash commands),
+  `test_guard_sensitive.py` (secret files), `test_guard_paths.py`, `test_guard_deadline.py`, `test_guard_registry.py`, `test_guard_plugin.py`.
+- Test names say the behaviour (`test_a_<thing>_is_<what>`). Cases that differ only by data are one `@pytest.mark.parametrize` test.
+- Shared setup is a fixture in `tests/conftest.py` (`cfg`, `home`, `ctx`, and the git ones: `git`, `repo_copy`, `origin_clone`); helpers that
+  are not fixtures go in a `tests/<area>_helpers.py` (`guard_helpers.py`). A helper two files need is moved there, not copied.
+- A test never touches the machine's real home, queue, clock or network: use the `home` fixture, `tmp_path`, injected clocks and fakes. Git
+  repositories are copied from the fixtures, not built command by command; a subprocess only where the test is about the command itself.
 
 ## CI within the free minutes
 `saani ci`. The minutes used this month come from GitHub's billing API (every repository of the account: the free minutes are one pool).
