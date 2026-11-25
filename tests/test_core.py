@@ -125,18 +125,10 @@ def test_saani_start_warns_about_an_issue_without_a_milestone_unless_it_is_an_id
     assert core.milestone_warning({}, 8).startswith("WARNING: issue #8")
 
 
-def test_saani_auto_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path, monkeypatch, capsys):
+def test_saani_auto_makes_a_throwaway_worktree_named_with_the_run_id(origin_clone, tmp_path, monkeypatch, capsys):
     """auto-<id> beside the other worktrees, on the branch auto/<id> from the integration branch (prune keeps it); an id twice is refused."""
-    import subprocess
     from saani import config
-
-    def sh(*cmd, cwd):
-        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
-    origin, main = tmp_path / "origin.git", tmp_path / "webshop"
-    sh("git", "init", "-q", "--bare", "-b", "dev", str(origin), cwd=tmp_path)
-    sh("git", "clone", "-q", str(origin), str(main), cwd=tmp_path)
-    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
-    sh("git", "push", "-q", "origin", "HEAD:dev", cwd=main)
+    origin, main = origin_clone
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
     core.cmd_auto(type("A", (), {"id": "2026-11-22_1500"})())
     wt = tmp_path / "webshop-wt" / "auto-2026-11-22_1500"
@@ -150,26 +142,17 @@ def test_saani_auto_makes_a_throwaway_worktree_named_with_the_run_id(tmp_path, m
         core.cmd_auto(type("A", (), {"id": "a b"})())
 
 
-def test_finished_auto_runs_and_old_longrun_ones_are_removed_but_never_a_dirty_or_a_recent_one(tmp_path, monkeypatch):
+def test_finished_auto_runs_and_old_longrun_ones_are_removed_but_never_a_dirty_or_a_recent_one(origin_clone, git, tmp_path, monkeypatch):
     """An auto run's folder holds no commits, so a finished run is told by its age: older than `before` (or 12 hours), clean and merged (#28)."""
     import datetime
-    import subprocess
-    import time
     from saani import config
-
-    def sh(*cmd, cwd):
-        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
-    origin, main = tmp_path / "origin.git", tmp_path / "webshop"
-    sh("git", "init", "-q", "--bare", "-b", "dev", str(origin), cwd=tmp_path)
-    sh("git", "clone", "-q", str(origin), str(main), cwd=tmp_path)
-    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
-    sh("git", "push", "-q", "origin", "HEAD:dev", "HEAD:main", cwd=main)
+    origin, main = origin_clone
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
-    now = time.strftime("%Y-%m-%d_%H%M")
+    now = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")                                  # a run of this minute is recent, on any clock
     for stamp in ("2026-11-01_1000", "2026-11-01_1100", now):
         core.cmd_auto(type("A", (), {"id": stamp})())
     wt = tmp_path / "webshop-wt"
-    sh("git", "worktree", "add", "--no-track", "-b", "longrun/2026-11-01_0900", str(wt / "longrun-2026-11-01_0900"), "origin/dev", cwd=main)   # made before the rename
+    git("worktree", "add", "--no-track", "-b", "longrun/2026-11-01_0900", str(wt / "longrun-2026-11-01_0900"), "origin/dev", cwd=main)   # made before the rename
     (wt / "auto-2026-11-01_1100" / "notes.txt").write_text("not committed", encoding="utf-8")        # a dirty one
     found = core.finished_auto_runs(cwd=main)
     assert [b for _, b in found] == ["auto/2026-11-01_1000", "longrun/2026-11-01_0900"]                                       # not the dirty one, not today's
@@ -270,16 +253,10 @@ def test_saani_test_kind_is_landing_or_full_tier1_points_to_landing_and_land_is_
 # ---------------------------------------------------------------- naming a worktree instead of entering it (#46)
 
 @pytest.fixture
-def repo_with_worktree(tmp_path, monkeypatch):
-    import subprocess
+def repo_with_worktree(repo_copy, git, tmp_path, monkeypatch):
     from saani import config
-    def sh(*cmd, cwd):
-        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True)
-    main, wt = tmp_path / "webshop", tmp_path / "webshop-wt" / "12-cart"
-    main.mkdir()
-    sh("git", "init", "-q", "-b", "dev", cwd=main)
-    sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first", cwd=main)
-    sh("git", "worktree", "add", "-q", "-b", "feat/12-cart", str(wt), cwd=main)
+    main, wt = repo_copy, tmp_path / "webshop-wt" / "12-cart"
+    git("worktree", "add", "-q", "-b", "feat/12-cart", str(wt), cwd=main)
     monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
     monkeypatch.chdir(main)
     return main, wt

@@ -372,7 +372,7 @@ def test_an_issue_already_commented_for_this_commit_is_only_closed(world):
 
 def test_a_timeout_keeps_stderr_and_the_output_is_shown_and_logged_as_it_comes(world, cfg, capsys):
     cfg.deploy_command = [PY, "-c", "import sys, time; print('out', flush=True); print('err', file=sys.stderr, flush=True); time.sleep(30)"]
-    cfg.deploy_timeout_minutes = 0.05
+    cfg.deploy_timeout_minutes = 0.02                                                    # 1.2 s: the child has printed by then
     assert deploy.run(args()) == 1
     out = capsys.readouterr().out
     assert "  | out" in out and "  | err" in out
