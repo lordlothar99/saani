@@ -966,6 +966,7 @@ SAANI_SPEC = {
     ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+", "--wait": True}, []),
     ("auto", "status"): ({"--check": False}, []),
     ("auto", "report"): ({"--pr": True, "--post": False, "--reason": True}, []),
+    ("auto", "end"): ({"--json": False}, []),
     ("ci", "status"): ({}, []),
     ("ci", "pr"): ({"--dry-run": False, "--pc": False}, []),
 }

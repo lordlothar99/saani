@@ -328,10 +328,10 @@ def cmd_auto(args):
             raise SystemExit(f"saani auto: --{name.removesuffix('_id').replace('_', '-')} belongs to "
                              + " and ".join(f"`saani auto {o}`" for o in only)
                              + (" (the run's mode is --keep-on; [auto] keep_on_quiet_minutes sets its quiet time)" if name == "wait" else ""))
-    if action in ("on", "off", "status", "report", "away", "watch"):
+    if action in ("on", "off", "status", "report", "end", "away", "watch"):
         if action not in ("on", "away", "watch") and getattr(args, "id", None):
             raise SystemExit(f"saani auto {action}: --id belongs to `saani auto`, `saani auto on` and `saani auto away`" + ("; `off` takes --run" if action == "off" else ""))
-        if getattr(args, "json", False) or getattr(args, "limit", None) is not None or (getattr(args, "only", None) and action not in ("away", "watch")):
+        if (getattr(args, "json", False) and action != "end") or getattr(args, "limit", None) is not None or (getattr(args, "only", None) and action not in ("away", "watch")):
             raise SystemExit("saani auto: --json and --limit belong to `saani auto pick`, --only to `pick` and `away`")
         from . import auto
         return auto.cmd_run(args)
@@ -1035,8 +1035,8 @@ def add_parsers(sub):
     p.add_argument("--no-comment", action="store_true", help="do not post the Started comment on the issue")
     p.set_defaults(run=cmd_start)
     p = sub.add_parser("auto", help="a throwaway worktree (auto-<timestamp>) for an auto run to work in; `auto pick`: the issues to take now")
-    p.add_argument("action", nargs="?", choices=["pick", "on", "off", "status", "report", "away", "watch"],
-                   help="pick: the eligible issues in the run's order, the free slots, why the others are left; on, off, status, report: the run; "
+    p.add_argument("action", nargs="?", choices=["pick", "on", "off", "status", "report", "end", "away", "watch"],
+                   help="pick: the eligible issues in the run's order, the free slots, why the others are left; on, off, status, report: the run; end: whether the End opens or updates the release pull request; "
                         "away: start the run in a headless Claude Code session, in the background (saani/auto.py); "
                         "watch: what `away` starts (the session, then the run's off), never typed by hand")
     p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM); with `on`, the id of the run")

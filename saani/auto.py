@@ -861,6 +861,79 @@ def left_issues(rec, journal_rows, landed=()):
     return {n: v for n, v in out.items() if n not in set(landed)}
 
 
+NO_BUMP = "no version bump: merging creates no release; bump it or merge as is"
+
+
+def commits_word(n):
+    return f"{n} commit" + ("" if n == 1 else "s")
+
+
+def end_decision(ahead, pr, landed, version_file, before, after):
+    """What the End of a run does about the integration -> production pull request (pure). `ahead`: the commits the integration branch
+    has that production has not; `pr`: the number of the open release pull request, or None; `landed`: the issues the run landed;
+    `version_file`, `before`, `after`: `[release] version_file` and the version in it on production and on the integration branch.
+    The pull request is opened or updated whenever the branch is ahead, whether the run landed anything or not. When it does not change
+    the version (or no version file is set) it says so: `saani merge` then creates no release. The run never bumps the version."""
+    action = "none" if not ahead else ("update" if pr else "open")
+    if not ahead:
+        why = "the integration branch is not ahead of production: no pull request"
+    elif not landed:
+        why = f"the integration branch was ahead: {commits_word(ahead)} (the run landed nothing)"
+    else:
+        why = f"the integration branch is ahead of production: {commits_word(ahead)}"
+    no_bump = bool(ahead) and (not version_file or after is None or before == after)
+    return {"action": action, "ahead": ahead, "pr": pr, "landed": landed, "why": why, "no_bump": no_bump, "note": NO_BUMP if no_bump else None}
+
+
+def ahead_count():
+    """The commits of the integration branch that production does not have, from the remote branches; a failure stops, never "0"."""
+    c = cfg()
+    r = core.git("rev-list", "--count", f"origin/{c.production}..origin/{c.integration}", check=False)
+    try:
+        if r.returncode != 0:
+            raise ValueError("git failed")
+        return int((r.stdout or "").strip())
+    except ValueError:
+        raise SystemExit(f"saani auto end: cannot count the commits of {c.integration} ahead of {c.production}: {(r.stderr or r.stdout or '').strip()}")
+
+
+def open_release_pr():
+    """The number of the open integration -> production pull request, or None."""
+    c = cfg()
+    rows = json.loads(gh("pr", "list", "--repo", c.repo, "--base", c.production, "--head", c.integration, "--state", "open",
+                         "--json", "number") or "[]")
+    return rows[0]["number"] if rows else None
+
+
+def end_state(landed):
+    """`end_decision` from what git and GitHub say now; `landed`: how many issues the run landed."""
+    from . import notes
+    c = cfg()
+    ahead = ahead_count()
+    before = after = None
+    if ahead and c.version_file:
+        before = notes.version_of(notes.file_at(c.production, c.version_file))
+        after = notes.version_of(notes.file_at(c.integration, c.version_file))
+    return end_decision(ahead, open_release_pr() if ahead else None, landed, c.version_file, before, after)
+
+
+def cmd_end(args):
+    """`saani auto end [--json]`: what the End does about the release pull request (see end_decision); changes nothing."""
+    rec = read_record()
+    if not rec:
+        raise SystemExit("saani auto end: no auto run is on")
+    d = end_state(len(landed_issues(rec)))
+    if args.json:
+        print(json.dumps(d))
+        return 0
+    print(d["why"])
+    print({"none": "no pull request", "open": "open the release pull request (milestone, refs #n of every in-dev issue)",
+           "update": f"update the open release pull request #{d['pr']}"}[d["action"]])
+    if d["note"]:
+        print(f"description and report: {d['note']}")
+    return 0
+
+
 def cost_text(rec, now):
     from . import cost
     try:
@@ -878,7 +951,7 @@ def idle_reason(journal_rows):
     return notes[-1] if notes else None
 
 
-def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None, stopped=None, reason=None):
+def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None, stopped=None, reason=None, end=None):
     """The report's Markdown from what was read (pure). `landed`: [(number, title, commit subject)]; `left`: {number: (kind, title)};
     `stopped`: the stop rules reached ([(rule, value, limit)]), none: the run finished the list. The folder is its name only: a report on
     a pull request holds no path of the owner's machine."""
@@ -897,6 +970,10 @@ def render_report(rec, now, landed, left, by_reason, journal_rows, cost, pr=None
            f"| Folder | {esc(folder)} |", f"| Deploy | {'the owner started the run so' if rec.get('deploy') else 'no'} |", "",
            f"## Issues landed on the integration branch ({len(landed)})"]
     out += [f"- #{n} {esc(title) or esc(subject)}" for n, title, subject in landed] or ["- none"]
+    if end:
+        out += ["", "## Release pull request", f"- {esc(end['why'])[0].upper()}{esc(end['why'])[1:]}"]
+        if end.get("note"):
+            out.append(f"- {esc(end['note']).capitalize()}")
     out += ["", f"## Issues left with a question or blocked ({len(left)})"]
     if left:
         out += ["| Issue | Kind | Title |", "|---|---|---|"] + [f"| #{n} | {k} | {esc(t)} |" for n, (k, t) in sorted(left.items())]
@@ -933,8 +1010,12 @@ def cmd_report(args):
     if reason:
         journal(None, "stop", note=reason)
     landed = [(n, issue_title(n), subject) for n, subject in landed_issues(rec)]
+    try:
+        end = end_state(len(landed))
+    except SystemExit:                                           # the report is still written: the section is left out
+        end = None
     text = render_report(rec, now, landed, left_issues(rec, rows, [n for n, _, _ in landed]), refusals_by_reason(rec["id"]), rows,
-                         cost_text(rec, now), args.pr, reached(rec, now), reason=reason)
+                         cost_text(rec, now), args.pr, reached(rec, now), reason=reason, end=end)
     path = build_dir() / f"saani-auto-{rec['id']}.md"
     path.write_text(text, encoding="utf-8")
     print(text)
@@ -1170,5 +1251,5 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
 
 def cmd_run(args):
     """`saani auto on|off|status|report|away`."""
-    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "away": cmd_away,
+    return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "end": cmd_end, "away": cmd_away,
             "watch": cmd_watch}[args.action](args)
