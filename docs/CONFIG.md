@@ -39,7 +39,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | `[release]` | `version_file` | `""` | the file whose version a merged integration -> production pull request may change (a line like `__version__ = "1.2.0"`, `version = "1.2.0"` or `"version": "1.2.0"`). When the pull request changes it, `saani merge` creates the GitHub release `v<version>` on the merge commit (docs/SAANI.md, Releases). Empty: no release |
 | `[auto]` | `parallel` | `0` | issues an auto run keeps in flight: `0` = sized from the machine, min(2, cores // 4), at least 1, and 1 when free RAM cannot hold one issue (4 GB; macOS: cores only); `n >= 1` = fixed; at most 2 per project (another project's run has its own 2) |
 | | `ci_attempts` | `3` | an auto run: the most `saani ci pr` rounds (read why it is red, fix, land, run it again) before the pull request is left open |
-| | `wait_quiet_minutes` | `60` | an auto run started with `--wait`: the quiet time (nothing running, nothing eligible) after which it ends the normal way |
+| | `wait_quiet_minutes` | `60` | an auto run started with `--wait`: the quiet time (nothing running, nothing eligible) after which it ends the normal way (needs the owner's guard rule for `saani auto pick --wait`) |
 | `[ci]` | `workflow` | `ci.yml` | the GitHub Actions workflow `saani ci pr` starts (it must accept `workflow_dispatch`) |
 | | `free_minutes` | `2000` | free Actions minutes a month for the whole account |
 | | `reserve_minutes` | `50` | kept for the end of the month |

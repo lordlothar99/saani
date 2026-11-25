@@ -1,4 +1,4 @@
-"""What the agents are doing right now (`saani status`): one line per task that runs, is blocked or waits, or one line saying everything
+"""What Saani's machinery is doing right now (`saani status`): one line per task that runs, is blocked or waits, or one line saying everything
 is idle. Best effort, and honest about it: Saani knows its own machinery (the landing lock, the test queue, the auto run's record, the
 worktrees) and can look at the PC's processes for a test run started outside the queue; it does not know what a Claude session thinks.
 Standard library only; the functions take what they read as arguments so they can be tested without a PC."""

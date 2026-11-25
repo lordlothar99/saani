@@ -125,6 +125,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    branch by itself: never tell the owner to run `saani ci merged`, a manual `git worktree remove` or `git branch -d`.
 
 ## Wait mode (`--wait`)
+Needs the guard to allow `saani auto pick --wait`: while `saani/guard.py` does not list it, the call is refused; say so in the report.
 Only when the owner typed `--wait` (here or away; headless: the `run` arguments carry it). It changes one thing: what the loop does when
 nothing is running and nothing is eligible. Without `--wait` the run goes to "Review and clean" and the End. With it:
 1. Run `saani auto status --check` (exit 3: a stop rule, go to the End). Then run `saani auto pick --wait 8 --json` (add `--only ...`

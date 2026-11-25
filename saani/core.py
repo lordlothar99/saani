@@ -357,7 +357,7 @@ def cmd_auto(args):
     (folder / "build").mkdir(exist_ok=True)
     print(f"auto run:  {stamp}")
     print(f"worktree:  {folder}")
-    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` removes it once the run is off and it has no commit of its own, `saani ci merged` once it is merged)")
+    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` removes it once the run is off, it started more than 2 hours ago and it has no commit of its own, `saani ci merged` once it is merged)")
 
 
 def cmd_start(args):
