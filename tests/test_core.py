@@ -2,6 +2,7 @@
 files rebuilt at landing, and the record of a change in its commit message (trailers Why: and Undo:). The pure functions and the lock
 only: no gh call, no push."""
 import datetime
+import json
 import pathlib
 
 import pytest
@@ -162,6 +163,28 @@ def test_finished_auto_runs_and_old_longrun_ones_are_removed_but_never_a_dirty_o
     assert "auto/2026-11-01_1000" not in core.git("branch", "--format=%(refname:short)", cwd=main).splitlines()
     assert not (wt / "longrun-2026-11-01_0900").exists()
     assert (wt / "auto-2026-11-01_1100").is_dir()
+
+
+def test_an_auto_run_that_is_off_and_has_no_commit_of_its_own_is_removed_but_not_one_that_is_on_or_has_commits(origin_clone, git, tmp_path, monkeypatch):
+    """A run that finished with nothing landed has no pull request, so only `saani prune` can remove it (#75)."""
+    from saani import auto, config
+    origin, main = origin_clone
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main))
+    wt = tmp_path / "webshop-wt"
+    for stamp in ("2099-01-01_0100", "2099-01-01_0200", "2099-01-01_0300"):                # all recent: only the three rules tell them apart
+        core.cmd_auto(type("A", (), {"id": stamp})())
+    (wt / "auto-2099-01-01_0200" / "work.txt").write_text("mine", encoding="utf-8")
+    git("add", "work.txt", cwd=wt / "auto-2099-01-01_0200")
+    git("-c", "user.name=Someone", "-c", "user.email=someone@example.com", "commit", "-q", "-m", "own work", cwd=wt / "auto-2099-01-01_0200")
+    auto.record_path().write_text(json.dumps({"id": "2099-01-01_0300", "started": "2099-01-01T03:00:00Z"}), encoding="utf-8")   # this one is on
+    found, kept = core.unused_auto_runs(cwd=main)
+    assert [b for _, b in found] == ["auto/2099-01-01_0100"]                                # finished, nothing of its own: removed
+    assert dict(kept) == {"auto/2099-01-01_0200": "it has commits that are not on dev", "auto/2099-01-01_0300": "the run is still on"}
+    assert core.remove_auto_runs(found, cwd=main) == 1
+    assert not (wt / "auto-2099-01-01_0100").exists()
+    assert (wt / "auto-2099-01-01_0200").is_dir() and (wt / "auto-2099-01-01_0300").is_dir()
+    auto.record_path().unlink()                                                             # the run is off: its folder goes too
+    assert [b for _, b in core.unused_auto_runs(cwd=main)[0]] == ["auto/2099-01-01_0300"]
 
 
 def test_an_auto_run_starts_at_its_id_or_at_its_folders_creation(tmp_path):

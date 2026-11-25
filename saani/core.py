@@ -355,7 +355,7 @@ def cmd_auto(args):
     (folder / "build").mkdir(exist_ok=True)
     print(f"auto run:  {stamp}")
     print(f"worktree:  {folder}")
-    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` and `saani ci merged` remove it once it is finished)")
+    print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` removes it once the run is off and it has no commit of its own, `saani ci merged` once it is merged)")
 
 
 def cmd_start(args):
@@ -758,6 +758,34 @@ def finished_auto_runs(before=None, cwd=None):
     return out
 
 
+def unused_auto_runs(cwd=None):
+    """(found, kept): the auto runs (`auto/<id>`, with or without a worktree) of which the run is off (no run record, or the record is for
+    another id) and the branch has no commit beyond the integration branch it came from, with nothing uncommitted: `found` is
+    [(worktree path or None, branch)] as `finished_auto_runs`; `kept` is [(branch, reason)] for every other auto run branch (#75).
+    A run that finished with nothing landed has no pull request, so nothing else would ever remove it."""
+    from . import auto
+    c = cfg()
+    try:
+        rec = auto.read_record()
+    except SystemExit:
+        rec = None
+    on = rec["id"] if rec else None
+    held = {b: p for p, b in worktrees(cwd) if b}
+    branches = git("branch", "--format=%(refname:short)", cwd=cwd).splitlines()
+    found, kept = [], []
+    for branch in sorted(b for b in branches if b.startswith(RUN_BRANCHES)):
+        path = held.get(branch)
+        if on is not None and branch.split("/", 1)[1] == str(on):
+            kept.append((branch, "the run is still on"))
+        elif git("rev-list", "--count", f"origin/{c.integration}..{branch}", cwd=cwd).strip() != "0":
+            kept.append((branch, f"it has commits that are not on {c.integration}"))
+        elif path and git("status", "--porcelain", cwd=path):
+            kept.append((branch, "its folder has uncommitted changes"))
+        else:
+            found.append((path, branch))
+    return found, kept
+
+
 def remove_auto_runs(found, dry=False, cwd=None):
     """Removes those auto runs: the worktree first (git refuses a dirty one: then the branch stays too), then the branch. Returns the
     number removed."""
@@ -777,6 +805,11 @@ def remove_auto_runs(found, dry=False, cwd=None):
 def cmd_prune(args):
     local, remote = prune_candidates()
     runs = finished_auto_runs()
+    unused, kept = unused_auto_runs()
+    runs += [r for r in unused if r[1] not in {b for _, b in runs}]
+    kept = [(b, why) for b, why in kept if b not in {b2 for _, b2 in runs}]
+    for branch, why in kept:
+        print(f"kept the auto run {branch}: {why}")
     if runs:
         remove_auto_runs(runs, args.dry_run)
     if not local and (args.local_only or not remote):
