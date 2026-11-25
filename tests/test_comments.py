@@ -300,3 +300,19 @@ def test_a_landing_whose_label_edit_fails_prints_only_the_label_step(monkeypatch
     assert "label #14 in-dev" in out and "comment the commit" not in out
     monkeypatch.setattr(comments.subprocess, "run", lambda cmd, **k: Result(1))
     assert core.mark_on_dev("14", row) is False
+
+
+def test_a_dry_run_with_stdout_as_a_cp1252_pipe_prints_the_heading_and_exits_0(tmp_path):
+    """The wrapper runs `python -I`, which ignores PYTHONIOENCODING: the command must set UTF-8 itself, on every command."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    (tmp_path / "saani.toml").write_text('[project]\nrepo = "acme/webshop"\n', encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    r = subprocess.run([sys.executable, "-I", str(root / "saani.py"), "comment", "5", "deployed", "--dry-run", "--field", "Commit=c1ecf63",
+                        "--text", "- [x] test"], cwd=tmp_path, capture_output=True, env=env, timeout=60)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    assert "### ✔ Deployed" in r.stdout.decode("utf-8")
