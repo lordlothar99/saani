@@ -129,7 +129,7 @@ The guard allows `saani auto pick --wait`; if a call is refused anyway, say so i
 Only when the owner typed `--keep-on` (here or away; headless: the `run` arguments carry it). It changes one thing: what the loop does when
 nothing is running and nothing is eligible. Without `--keep-on` the run goes to "Review and clean" and the End. With it:
 1. Run `saani auto status --check` (exit 3: a stop rule, go to the End). Then run `saani auto pick --wait 8 --json` (add `--only ...`
-   as before), **alone, as one Bash call with the timeout set to 600000 ms** (a Bash call lasts 10 minutes at most; 8 leaves room for
+   as before; the pick takes every ready issue except those in Backlog, whatever their other GitHub status or none), **alone, as one Bash call with the timeout set to 600000 ms** (a Bash call lasts 10 minutes at most; 8 leaves room for
    the reads of GitHub and git). It blocks, with no model and no tokens, and returns when an issue is eligible and a slot is free,
    after 8 minutes with an empty `eligible`, or at once with a `stop` list (a stop rule is reached, or the run record is missing).
    Call it only when nothing is running and nothing is eligible, never while a coder works. If the call fails or times out, treat it as

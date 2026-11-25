@@ -134,8 +134,8 @@ def order_key(issue):
 
 def choose(issues, started, running, today, labels=None, types=None, only=None, branched=(), statuses=None):
     """Splits the open `issues` ([{number, title, labels, milestone, body, type}]) into those a run may take now and those it leaves.
-    `statuses`: the repo's GitHub issue statuses (saani/status.py): only Todo issues are taken; None (the repo has none, or they are
-    off): no status filter.
+    `statuses`: the repo's GitHub issue statuses (saani/status.py): every ready issue is taken except those in Backlog (no status, Todo and the
+    others are eligible; also with `only`); None (the repo has none, or they are off): no status filter.
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
     Returns (eligible, skipped): eligible [{number, title, milestone, type, flags}] in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
@@ -156,8 +156,10 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
             reason = "has a worker branch"
         elif have & owner_labels:
             reason = "needs the owner or is an idea (label " + ", ".join(sorted(have & owner_labels)) + ")"
-        elif statuses is not None and status.step_of(i.get("status"), statuses) != "todo":
-            reason = "not Todo (status: " + ((i.get("status") or {}).get("name") or "none") + ")"
+        elif statuses is not None and status.step_of(i.get("status"), statuses) == "backlog":
+            reason = "in Backlog"
+        elif statuses is not None and status.step_of(i.get("status"), statuses) in ("done", "closed"):
+            reason = "status: " + i["status"]["name"] + " (open, but marked finished)"   # reopened with Done, or left open as Not planned
         elif fit == "no":
             reason = "Auto: no"
         elif glance.is_blocked(g, open_numbers, today):
