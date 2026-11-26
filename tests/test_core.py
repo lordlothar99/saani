@@ -423,3 +423,91 @@ def test_land_of_a_hotfix_still_refuses_its_own_commit_without_trailers(origin_c
     with pytest.raises(SystemExit) as e:
         _land(wt)
     assert "Hotfix without trailers" in str(e.value) and "Edit the template" not in str(e.value)
+
+
+# ---------------------------------------------------------------- saani start claims the issue by pushing its branch (#100)
+
+def _start_world(origin_clone, tmp_path, monkeypatch, issue=7):
+    from saani import auto, config
+    origin, main = origin_clone
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=main, worktree_folder=str(tmp_path / "wt"), owner=""))
+    monkeypatch.setattr(core, "issue_info", lambda n: {"title": "Add a thing", "type": "Task", "milestone": "v1"})
+    monkeypatch.setattr(core, "latest_timing_report", lambda cwd=None: None)
+    monkeypatch.setattr(core.comments, "try_post", lambda *a, **k: True)
+    monkeypatch.setattr(auto, "journal", lambda *a, **k: None)
+    return origin, main, type("A", (), {"issue": issue, "hotfix": False, "slug": None, "no_assign": True, "no_comment": False})()
+
+
+def _heads(git, origin):
+    import subprocess
+    return subprocess.run(["git", "branch", "--format=%(refname:short)"], cwd=origin, capture_output=True, text=True).stdout.split()
+
+
+def test_start_pushes_the_new_branch_to_origin_and_says_so(origin_clone, git, tmp_path, monkeypatch, capsys):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    assert core.cmd_start(ns) == 0
+    assert "task/7-add-thing" in _heads(git, origin) and (tmp_path / "wt" / "7-add-thing").is_dir()
+    assert "pushed to origin: the issue is claimed" in capsys.readouterr().out
+
+
+def test_a_second_start_of_the_same_issue_is_refused_naming_the_branch_and_the_worktree(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    core.cmd_start(ns)
+    with pytest.raises(SystemExit) as e:
+        core.cmd_start(ns)
+    assert "already claimed" in str(e.value) and "task/7-add-thing" in str(e.value) and "7-add-thing" in str(e.value)
+    assert len(core.worktrees()) == 2                                  # no second worktree
+
+
+def test_a_start_from_another_clone_finds_the_branch_on_origin_and_refuses(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    core.cmd_start(ns)
+    other = tmp_path / "other"
+    git("clone", "-q", str(origin), str(other), cwd=tmp_path)
+    from saani import config
+    monkeypatch.setattr(config, "_current", config.Config(repo="acme/webshop", root=other, worktree_folder=str(tmp_path / "wt2"), owner=""))
+    with pytest.raises(SystemExit, match="another clone holds it"):
+        core.cmd_start(ns)
+    assert not (tmp_path / "wt2").exists()
+
+
+def test_a_start_that_cannot_push_stops_with_the_reason_and_makes_no_worktree(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho no-pushes-today >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    with pytest.raises(SystemExit, match="cannot claim #7"):
+        core.cmd_start(ns)
+    assert not (tmp_path / "wt").exists() and "task/7-add-thing" not in _heads(git, main)
+
+
+def test_a_start_with_origin_unreachable_stops_and_makes_no_worktree(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    git("remote", "set-url", "origin", str(tmp_path / "gone.git"), cwd=main)
+    with pytest.raises(SystemExit):
+        core.cmd_start(ns)
+    assert not (tmp_path / "wt").exists()
+
+
+def test_a_start_whose_branch_appears_meanwhile_loses_the_race(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    monkeypatch.setattr(core, "remote_branches", lambda: [])                       # the other start pushes after this one looked
+    git("push", "-q", "origin", "dev:refs/heads/task/7-add-thing", cwd=main)       # same commit: only the empty lease tells it apart
+    with pytest.raises(SystemExit, match="cannot claim #7"):
+        core.cmd_start(ns)
+    assert not (tmp_path / "wt").exists()
+
+
+def test_land_after_a_start_removes_the_remote_branch_too(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    core.cmd_start(ns)
+    wt = tmp_path / "wt" / "7-add-thing"
+    ident = ("-c", "user.name=Someone", "-c", "user.email=someone@example.com")
+    (wt / "a.txt").write_text("a", encoding="utf-8")
+    git("add", "a.txt", cwd=wt)
+    git(*ident, "commit", "-q", "-m", "Add a (refs #7)", "-m", "Why: x.", "-m", "Undo: revert.", cwd=wt)
+    monkeypatch.setattr(core, "queued_run", lambda *a, **k: 0)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: True)
+    monkeypatch.setattr(core.status, "advance", lambda *a, **k: None)
+    assert core.cmd_land(type("A", (), {"worktree": str(wt), "keep": False, "dry_run": False, "wait": 1, "no_comment": True})()) == 0
+    assert "task/7-add-thing" not in _heads(git, origin) and not wt.exists()

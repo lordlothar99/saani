@@ -358,12 +358,40 @@ def cmd_auto(args):
     print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` removes it once the run is off, it started more than 2 hours ago and it has no commit of its own, `saani ci merged` once it is merged)")
 
 
+def remote_branches():
+    """The branch names on origin right now (`git ls-remote`, not the remote-tracking refs, which may be stale). Stops when origin cannot
+    be reached."""
+    r = git("ls-remote", "--heads", "origin", check=False)
+    if r.returncode != 0:
+        raise SystemExit(f"cannot read the branches on origin, so the issue cannot be claimed: {(r.stderr or '').strip()[-300:]}")
+    return [line.split("refs/heads/", 1)[1] for line in r.stdout.splitlines() if "refs/heads/" in line]
+
+
+def claim_push(name, source, issue):
+    """Claims the issue by pushing its branch to origin. Origin makes the branch once: the lease with an empty expectation refuses a
+    branch that exists at another commit, and the porcelain report refuses one that exists at this very commit (two starts from the
+    same base push the same commit, and git calls that second push "up to date", not a failure). Stops with the reason on a refusal."""
+    done = git("push", "--porcelain", f"--force-with-lease=refs/heads/{name}:", "origin", f"{source}:refs/heads/{name}", check=False)
+    if done.returncode == 0 and any(line.startswith("=") for line in done.stdout.splitlines()):
+        done.returncode, done.stderr = 1, "the branch already exists on origin at this commit"
+    if done.returncode != 0:
+        raise SystemExit(f"cannot claim #{issue}: pushing {name} to origin failed (offline, refused, or the issue was claimed "
+                         f"meanwhile); no worktree was made: {(done.stderr or '').strip()[-300:]}")
+
+
 def cmd_start(args):
     c = cfg()
     info = issue_info(args.issue)
     git("fetch", "-q", "origin", c.integration)
     base, warning = hotfix_base() if args.hotfix else (f"origin/{c.integration}", None)
-    branches = git("branch", "-a", "--format=%(refname:short)").splitlines()
+    branches = git("branch", "--format=%(refname:short)").splitlines()      # local only: a remote-tracking ref may be stale
+    on_origin = remote_branches()
+    taken = existing_branch(args.issue, on_origin, hotfix=args.hotfix)
+    if taken:                                           # the claim is a branch on origin (#100): a second one is refused
+        home = next((p for p, b in worktrees() if b == taken), None)
+        raise SystemExit(f"issue #{args.issue} is already claimed: branch {taken} is on origin"
+                         + (f", its worktree is {home}: work there" if home else
+                            f" (not a worktree of this clone: another clone holds it; if it is abandoned, delete it: git push origin --delete {taken})"))
     name = existing_branch(args.issue, branches, hotfix=args.hotfix)
     if not name:
         prefix = branch_type(info.get("type"))
@@ -378,15 +406,17 @@ def cmd_start(args):
     folder = c.wt_dir / name.split("/", 1)[1]
     if folder.exists():
         raise SystemExit(f"{folder} already exists: work there, or land or remove it first")
-    folder.parent.mkdir(parents=True, exist_ok=True)
     local = name in branches
-    remote = f"origin/{name}" in branches
-    if local:
-        git("worktree", "add", str(folder), name)
-    elif remote:
-        git("worktree", "add", "-b", name, str(folder), f"origin/{name}")
-    else:
-        git("worktree", "add", "--no-track", "-b", name, str(folder), base)
+    claim_push(name, name if local else git("rev-parse", f"{base}^{{commit}}"), args.issue)     # the claim: before any worktree exists
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if local:
+            git("worktree", "add", str(folder), name)
+        else:
+            git("worktree", "add", "--no-track", "-b", name, str(folder), base)
+    except SystemExit:
+        git("push", "origin", "--delete", name, check=False)      # no worktree: the claim goes too
+        raise
     (folder / "build").mkdir(exist_ok=True)
     report = latest_timing_report()
     if report:
@@ -401,7 +431,7 @@ def cmd_start(args):
         from . import auto
         auto.journal(args.issue, "started")                # the comment journals it itself; inside a run this marks the issue as the run's (#56)
     print(f"worktree: {folder}")
-    print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
+    print(f"branch:   {name} ({'existing' if local else 'from ' + base}; pushed to origin: the issue is claimed)")
     print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
     need = " and ".join(t + ":" for t in c.trailers)
     if args.hotfix:
@@ -639,6 +669,13 @@ def cmd_land(args):
         print(f"next: comment the commit on #{n} and label it {c.labels.get('in_dev', 'in-dev')}{why}")
         status.advance(n, "review")             # the comment sets it; without one (--no-comment, or refused), set it here
     if not args.keep:
+        try:
+            if branch in remote_branches():            # the claim made at the start (#100) goes with the local branch
+                gone = git("push", "origin", "--delete", branch, cwd=cwd, check=False)
+                print(f"removed: the branch {branch} on origin" if gone.returncode == 0 else
+                      f"next: delete the branch on origin: git push origin --delete {branch} ({(gone.stderr or '').strip()[-200:]})")
+        except (Exception, SystemExit) as e:   # noqa: BLE001
+            print(f"next: delete the branch on origin: git push origin --delete {branch} ({e})")
         try:
             remove_landed_worktree(cwd, branch)
         except (Exception, SystemExit) as e:   # noqa: BLE001
