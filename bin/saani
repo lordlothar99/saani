@@ -32,9 +32,16 @@ if [ "$#" -eq 1 ] && [ "$1" = guard ]; then
     { [ -n "$h" ] && quiet "$h"; } || fast=0
   done
   if [ "$fast" = 1 ]; then
-    # Read the event to its end, so Claude Code's write never meets a closed pipe: -N reads a pipe in blocks (-d '' would read it a byte
-    # per system call, about 1 s for a 200 KB Write on Windows).
-    while IFS= read -r -N 65536 _; do :; done
+    # Read the event to its end, so Claude Code's write never meets a closed pipe; silent, and over at once when stdin is closed or empty.
+    # From bash 5.1 `read -N` reads a pipe in blocks (Git Bash 5.2: no cost over bash's own start; `read -d ''` reads a byte per system
+    # call, about 1 s for a 200 KB event on Windows). An older bash (macOS's 3.2 has no -N) uses cat, one more process (about 50 ms on
+    # Windows), and with no cat the byte-wise read. SAANI_TEST_DRAIN_CAT=1 takes that branch on any bash (the tests).
+    if [ -z "$SAANI_TEST_DRAIN_CAT" ] &&
+       { [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; }; then
+      while IFS= read -r -N 65536 _; do :; done 2>/dev/null
+    else
+      cat >/dev/null 2>&1 || while IFS= read -r -d '' _; do :; done 2>/dev/null
+    fi
     exit 0
   fi
   shopt -u nullglob dotglob nocaseglob

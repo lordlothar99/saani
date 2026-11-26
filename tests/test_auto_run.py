@@ -172,6 +172,32 @@ def test_on_stops_before_its_marker_when_the_pending_mark_cannot_be_written(worl
     assert auto.read_record() is None and not (world.git / auto.RECORD).exists()       # nothing blocks the next `saani auto on`
 
 
+def test_plain_off_with_no_record_removes_the_stale_pending_marks(world, capsys, monkeypatch):
+    """A `saani auto on` that wrote its mark but not its record: `off` says no run is on and removes the marks of runs the guard holds
+    no entry of; the mark of a registered run stays, and `off --run` is unchanged."""
+    real = pathlib.Path.write_text
+
+    def fail_on_the_record(self, *a, **kw):
+        if self.name == auto.RECORD:
+            raise OSError("disk full")
+        return real(self, *a, **kw)
+    with monkeypatch.context() as m, pytest.raises(OSError):
+        m.setattr(pathlib.Path, "write_text", fail_on_the_record)
+        auto.cmd_on(args())
+    reg = pathlib.Path(guard.registry())
+    stale = reg / "2026-11-22_0800.pending"
+    assert stale.is_file() and auto.read_record() is None
+    guard.turn_on("sess-1", "held", world.root, world.wt, folder=world.run)
+    (reg / "held.pending").write_text("", encoding="utf-8")
+    (reg / "other.pending").write_text("", encoding="utf-8")
+    assert auto.cmd_off(args(run_id=None)) == 0
+    out = capsys.readouterr().out
+    assert "removed 2 .pending marks of the guard with no run registered: 2026-11-22_0800, other" in out and "no auto run is on" in out
+    assert not stale.exists() and not (reg / "other.pending").exists() and (reg / "held.pending").is_file()
+    assert guard.state("sess-1")["id"] == "held"
+    assert auto.cmd_off(args(run_id=None)) == 0 and capsys.readouterr().out == "no auto run is on\n"
+
+
 def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):
     os.makedirs(guard.registry(), exist_ok=True)
     pathlib.Path(guard.registry(), "sess-9.over").write_text("{broken", encoding="utf-8")

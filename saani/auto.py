@@ -721,7 +721,7 @@ def mark_pending(run_id):
     """Leaves `<run_id>.pending` in the guard's registry (~/.saani/auto) before `saani auto on` prints its marker line. bin/saani starts
     Python for the guard hook only when the registry holds an entry, an over mark or such a mark, so the PostToolUse hook of this call
     gets to register the session. The mark turns nothing on: the guard's rules for the switch are unchanged. It stays until `saani auto
-    off` (end_guard_entries). The registry gets the refusal log too, so it is never empty (bin/saani reads an empty registry as one it
+    off` (end_guard_entries; with no record, clear_stale_pending). The registry gets the refusal log too, so it is never empty (bin/saani reads an empty registry as one it
     cannot list)."""
     from . import guard
     folder = guard.registry()
@@ -742,6 +742,31 @@ def clear_pending(run_id):
             os.remove(os.path.join(guard.registry(), run_id + PENDING))
         except OSError:
             pass
+
+
+def clear_stale_pending():
+    """Removes the `.pending` marks of runs the guard holds no entry of (over marks included), whatever the project: a `saani auto on`
+    that wrote its mark but not its record, or whose session never registered. Only the plain `saani auto off` with no record calls it.
+    A mark only makes bin/saani start Python, so removing one of a `saani auto on` still waiting for its hook can at worst leave that
+    session in present mode. Returns the run ids, sorted."""
+    from . import guard
+    folder = guard.registry()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    held = {e.get("id") for _, e in entries()}
+    removed = []
+    for name in names:
+        run_id = name[:-len(PENDING)]
+        if not name.lower().endswith(PENDING) or run_id in held:
+            continue
+        try:
+            os.remove(os.path.join(folder, name))
+        except OSError:
+            continue
+        removed.append(run_id)
+    return sorted(removed)
 
 
 def end_guard_entries(run_id):
@@ -895,10 +920,15 @@ def guard_live(session):
 
 def cmd_off(args):
     """The owner's end of the run, from a terminal (the guard refuses it inside the run): the guard's entries of the run, then the record.
-    `--run ID` ends that run even when the record is gone or another."""
+    `--run ID` ends that run even when the record is gone or another. With neither, it removes the stale `.pending` marks of the guard
+    (clear_stale_pending)."""
     rec = read_record()
     run_id = args.run_id or (rec or {}).get("id")
     if not run_id:
+        stale = clear_stale_pending()
+        if stale:
+            print(f"removed {len(stale)} .pending mark{'' if len(stale) == 1 else 's'} of the guard with no run registered: "
+                  + ", ".join(stale))
         print("no auto run is on")
         return 0
     if not valid_id(run_id):

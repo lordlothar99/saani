@@ -66,8 +66,10 @@ def launch(tmp_path, home):
         finally:
             if p.poll() is None:
                 p.kill()
+        run.err = err
         out = out.decode().strip()
         return (json.loads(out)["hookSpecificOutput"] if out else None), mark.exists()
+    run.fakes = fakes
     return run
 
 
@@ -98,11 +100,36 @@ def test_no_auto_run_registered_no_python_started_and_no_output(tmp_path, home, 
     assert launch(work, after(work, AUTO_ON, ran("auto"))) == (None, False)      # no `saani auto on` waiting: nothing to register
 
 
-def test_a_big_event_is_read_to_its_end_on_the_fast_path(tmp_path, launch):
-    """Over 64 KB, more than a pipe holds: bin/saani reads it all before it exits, so the writer never meets a closed pipe."""
+FAKE_CAT = "#!/bin/bash\necho cat >> \"$SAANI_TEST_CAT\"\nwhile IFS= read -r -d '' _; do :; done\n"
+
+
+@pytest.mark.parametrize("drain", ["read -N", "cat", "no cat"])
+def test_a_big_event_is_read_to_its_end_on_the_fast_path(tmp_path, launch, drain):
+    """Over 64 KB, more than a pipe holds: bin/saani reads it all before it exits, so the writer never meets a closed pipe, and prints
+    nothing. bash 5.1 or newer reads with `read -N`; an older one (forced here by SAANI_TEST_DRAIN_CAT) with cat, or bash's byte-wise
+    read when there is no cat (the PATH holds only the fake Pythons)."""
     main, work = fake_repo(tmp_path)
     big = _event(work, "Write", "s-1", "PreToolUse", None, {"file_path": str(work / "a.txt"), "content": "x" * 200_000})
-    assert launch(work, big) == (None, False)
+    cat_mark = tmp_path / "cat-started"
+    if drain == "cat":
+        (launch.fakes / "cat").write_text(FAKE_CAT, newline="\n")
+        (launch.fakes / "cat").chmod(0o755)
+    env = {"SAANI_TEST_CAT": fwd(cat_mark)} if drain == "read -N" else {"SAANI_TEST_CAT": fwd(cat_mark), "SAANI_TEST_DRAIN_CAT": "1"}
+    assert launch(work, big, **env) == (None, False)
+    assert launch.err == b"" and cat_mark.exists() == (drain == "cat")
+
+
+@pytest.mark.parametrize("drain", ["read -N", "cat"])
+@pytest.mark.parametrize("stdin", ["closed", "empty"])
+def test_a_closed_or_empty_stdin_ends_the_fast_path_at_once_and_silently(tmp_path, home, launch, drain, stdin):
+    main, work = fake_repo(tmp_path)
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "PATH": str(launch.fakes)}
+    if drain == "cat":
+        env["SAANI_TEST_DRAIN_CAT"] = "1"
+    script = '"$BASH" "$1" guard <&-' if stdin == "closed" else '"$BASH" "$1" guard'
+    r = subprocess.run([BASH, "-c", script, "bash", fwd(ROOT) + "/bin/saani"], stdin=subprocess.DEVNULL, capture_output=True, cwd=work,
+                       env=env, timeout=30)
+    assert (r.returncode, r.stdout, r.stderr) == (0, b"", b"")
 
 
 def test_an_empty_home_starts_python(tmp_path, home, launch):
