@@ -109,7 +109,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
      session sees the repo and the issues and nothing else. A design artifact link comes from the issue (docs/DESIGN-SYNC.md).
    - **Alone:** a change of a few lines in one or two files (a typo, a sentence, a setting) you make yourself in that worktree: no coder,
      no reviewer, then land it.
-   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code), and `saani comment <n> review` when the review starts. Real findings go back to
+   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code), and `saani comment <n> review` when the review starts (it records the reviewed commit; a re-review after fixes reads only the commits after the earlier record, `saani review diff <n>` (a record at HEAD is skipped, so the order of the two does not matter), and guard, landing, CI and deploy code stays whole). Real findings go back to
      the same coder (you decide which are real); a new commit.
    - Then `saani land --worktree <path>` (posts On dev). Landings are one at a time, the lock does it. A conflict at landing goes back to
      the coder of that issue.

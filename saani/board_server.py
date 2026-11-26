@@ -892,6 +892,12 @@ def milestones(rows, open_issues):
     return sorted(out, key=lambda m: milestone_key(m["title"]))
 
 
+def closed_milestones(rows):
+    """The titles of the closed milestones, from the same list of GitHub's milestones as the strip: the map leaves the done issues of
+    these out of its Citadel (a milestone not named here is kept)."""
+    return [m["title"] for m in rows if m.get("state") == "closed" and m.get("title")]
+
+
 def hygiene(open_issues, closed_issues, landed, labels):
     """What needs tidying: [{kind, issues}] without the empty ones. closed_labelled: closed but still labelled in-dev / in-main;
     no_milestone: open (not an idea) with no milestone; landed_unlabelled: commits between production and the integration branch name
@@ -1013,9 +1019,11 @@ def state():
     testing = testing_issues(trees, tst["runs"], int(m.group(2)) if m else None)
     titles = {i["number"]: i["title"] for i in iss.get("open", []) + iss.get("closed", [])}
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
-    strips = safe(lambda: cached("strips", 120, lambda: {
-        "milestones": milestones(milestone_rows(), iss.get("open", [])),
-        "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}), default={"milestones": [], "hygiene": []})
+    def strips_of():
+        rows = milestone_rows()                                              # one fetch for the strip and the closed ones
+        return {"milestones": milestones(rows, iss.get("open", [])), "closed_milestones": closed_milestones(rows),
+                "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}
+    strips = safe(lambda: cached("strips", 120, strips_of), default={"milestones": [], "closed_milestones": [], "hygiene": []})
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
@@ -1023,7 +1031,8 @@ def state():
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],
-            "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
+            "milestones": strips.get("milestones", []), "closed_milestones": strips.get("closed_milestones", []),
+            "hygiene": strips.get("hygiene", []),
             "board": board, "kanban": safe(lambda: build_kanban(board, has_statuses(iss.get("board", [])), int(m.group(2)) if m else None), default=False),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci)),

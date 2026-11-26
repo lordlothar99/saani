@@ -597,6 +597,47 @@ def test_the_milestone_strip_counts_and_says_when_a_milestone_is_ready_to_releas
     assert got[1]["ready"] and not got[2]["ready"]                                                 # nothing done yet is not ready
 
 
+def test_the_closed_milestones_are_named_for_the_maps_citadel():
+    rows = [{"title": "v0.2.0", "state": "open", "open_issues": 0, "closed_issues": 4}, {"title": "v0.0.9", "state": "closed", "open_issues": 0, "closed_issues": 9},
+            {"title": "v0.0.8", "state": "closed", "open_issues": 0, "closed_issues": 2}]
+    assert fp.closed_milestones(rows) == ["v0.0.9", "v0.0.8"]
+    assert [m["title"] for m in fp.milestones(rows, [])] == ["v0.2.0"]                              # the strip still shows the open ones only
+    assert fp.closed_milestones([]) == []
+
+
+def test_the_state_names_the_closed_milestones_from_the_one_milestone_fetch(monkeypatch, tmp_path):
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    listing = {"board": [], "open": [], "closed": []}
+    fetches = []
+    monkeypatch.setattr(fp, "cached", lambda key, seconds, fn: listing if key == "issues" else fn())
+    monkeypatch.setattr(fp, "milestone_rows", lambda: fetches.append(1) or [{"title": "v1.0.0", "state": "closed", "open_issues": 0, "closed_issues": 3},
+                                                                           {"title": "v1.1.0", "state": "open", "open_issues": 1, "closed_issues": 0}])
+    monkeypatch.setattr(fp, "landed_refs", lambda: set())
+    monkeypatch.setattr(fp, "tasks", lambda: [])
+    monkeypatch.setattr(fp, "landing", lambda: None)
+    monkeypatch.setattr(fp, "agents", lambda: [])
+    monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
+    state = fp.state()
+    assert state["closed_milestones"] == ["v1.0.0"] and [m["title"] for m in state["milestones"]] == ["v1.1.0"]
+    assert len(fetches) == 1
+
+
+def test_the_state_has_no_closed_milestones_when_github_cannot_be_read(monkeypatch, tmp_path):
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(fp, "cached", lambda key, seconds, fn: {"board": [], "open": [], "closed": []} if key == "issues" else fn())
+    monkeypatch.setattr(fp, "milestone_rows", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+    monkeypatch.setattr(fp, "tasks", lambda: [])
+    monkeypatch.setattr(fp, "landing", lambda: None)
+    monkeypatch.setattr(fp, "agents", lambda: [])
+    monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
+    assert fp.state()["closed_milestones"] == []
+
+
+def test_the_map_reads_the_closed_milestones_of_the_state():
+    page = (fp.HERE / "map.html").read_text(encoding="utf-8")
+    assert "DATA.closed_milestones" in page
+
+
 def test_the_hygiene_strip_lists_only_what_needs_tidying():
     lab = {"in_dev": "in-dev", "in_main": "in-main", "idea": "idea"}
     open_ = [{"number": 1, "labels": [], "milestone": None}, {"number": 2, "labels": ["idea"], "milestone": None},

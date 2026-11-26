@@ -176,8 +176,23 @@ def try_post(number, kind, fields=None, text="", io=None, **kw):
         return False
 
 
+def review_fields(fields, issue, worktree):
+    """The fields of a `review` comment plus the record of the review cache (saani/review.py): the commit at HEAD of the issue's worktree
+    (`--worktree`, else the worktree of the issue's branch) and the hash of its whole diff. A given field wins; no worktree found: the
+    fields as they are (a review comment without a record)."""
+    from . import review
+    cwd = review.worktree_of(issue, worktree)
+    return {**review.record_fields(cwd), **fields} if cwd else fields
+
+
 def cmd_comment(args):
-    post(args.issue, args.kind, parse_fields(args.field), args.text or "", Direct(args.dry_run))
+    fields = parse_fields(args.field)
+    worktree = getattr(args, "worktree", None)
+    if worktree and args.kind != "review":
+        raise SystemExit("--worktree is for the review kind only (it names the worktree whose commit the comment records)")
+    if args.kind == "review":
+        fields = review_fields(fields, args.issue, worktree)
+    post(args.issue, args.kind, fields, args.text or "", Direct(args.dry_run))
     return 0
 
 
@@ -187,5 +202,6 @@ def add_parsers(sub):
     p.add_argument("kind", choices=list(KINDS))
     p.add_argument("--text", help="the body, under the fields")
     p.add_argument("--field", action="append", metavar="KEY=VALUE", help="a column of the one-row table (repeatable)")
+    p.add_argument("--worktree", help="review only: the worktree whose HEAD and diff hash the comment records (saani review diff reads them)")
     p.add_argument("--dry-run", action="store_true", help="print the gh commands, post nothing")
     p.set_defaults(run=cmd_comment)
