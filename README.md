@@ -121,6 +121,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | `saani land [--dry-run] [--worktree P]` | `/saani:land` | land a worktree: lock, merge, rebuild, landing tests, push, clean up |
 | `saani test [--kind landing\|full] [--fresh] -- <cmd>` | `/saani:test`, `/saani:test full` | a test command through the machine-wide queue (a green result for the same tree and command is reused; `--fresh` runs anyway) |
 | `saani comment <n> <kind>` | `/saani:comment 42 blocked` | a status comment on an issue and its label (`start`, `land` and `ci` post theirs by themselves) |
+| `saani review diff <n>` | `/saani:review diff 42` | the diff a review must read: the commits after the issue's last recorded review, or all of it |
 | `saani merge [PR] [--deploy [--skip-ci WHY]] [--dry-run]` | `/saani:merge` | merge the green `dev` -> `main` pull request, relabel, clean up, create the release when the version changed |
 | `saani deploy [--dry-run] [--skip-ci WHY]` | `/saani:deploy` | CI green, no issue says "⛔ Do not deploy", checks, dry run, deploy, log, prod tag, issues closed; `--skip-ci` (the owner's) skips only the CI gate, the reason goes into the log |
 | `saani release notes <milestone> \| --pr N` | `/saani:release notes v1.0.0` | the release notes from the issues: by Type, each with its Result line and its commits |

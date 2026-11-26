@@ -34,6 +34,8 @@ class Config:
     rebuild: list = dataclasses.field(default_factory=list)     # commands that rebuild them, in order
     frozen: dict = dataclasses.field(default_factory=dict)      # path -> mark: once the mark is on the integration branch, no change
     timing_reports: tuple = ()                   # copied into a new worktree so its first test estimate is not blind
+    review_whole: tuple = ("saani/guard.py", "saani/core.py", "saani/ci.py", "saani/deploy.py", "saani/merge.py", "hooks/*", "bin/*",
+                           ".githooks/*", ".github/workflows/*")   # paths (globs) a re-review always reads whole: guard, landing, CI, deploy
     lock_stale_hours: float = 2
     push_attempts: int = 3
     labels: dict = dataclasses.field(default_factory=lambda: {"in_dev": "in-dev", "in_main": "in-main", "answer": "help wanted",
@@ -130,7 +132,7 @@ def from_toml(data, root):
             ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
-            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "keep_on_quiet_minutes"): "keep_on_quiet_minutes", ("auto", "reference_clones"): "reference_clones", ("ci", "relabel"): "relabel", ("hints",): "hints"}
+            ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "keep_on_quiet_minutes"): "keep_on_quiet_minutes", ("auto", "reference_clones"): "reference_clones", ("ci", "relabel"): "relabel", ("review", "always_whole"): "review_whole", ("hints",): "hints"}
     for table, values in data.items():
         if table == "hints":
             flat["hints"] = dict(values)
@@ -158,7 +160,9 @@ def from_toml(data, root):
             raise SystemExit(f"{FILE}: unknown [board] folders key `{key}` (allowed: {', '.join(FOLDER_KEYS)}; docs/CONFIG.md)")
         if not isinstance(value, str):
             raise SystemExit(f"{FILE}: [board] folders {key} must be a path (a string)")
-    for key in ("trailers", "generated", "timing_reports", "deploy_paths"):
+    if "review_whole" in flat and not (isinstance(flat["review_whole"], list) and all(isinstance(p, str) for p in flat["review_whole"])):
+        raise SystemExit(f'{FILE}: [review] always_whole must be a list of path globs, e.g. ["src/auth/*"]')
+    for key in ("trailers", "generated", "timing_reports", "deploy_paths", "review_whole"):
         if key in flat:
             flat[key] = tuple(flat[key])
     if "labels" in flat:

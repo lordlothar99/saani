@@ -7,7 +7,7 @@ to In review (only forward; docs/SAANI.md, Issue statuses).
 | Heading | When | Content |
 |---|---|---|
 | `### ▶ Started` | `saani start` posts it | branch, worktree folder (`--no-comment` skips it) |
-| `### 🔎 In review` | a review begins | who reviews, what is checked |
+| `### 🔎 In review` | a review begins | who reviews, what is checked; `Reviewed commit` and `Diff hash` (`saani comment <n> review` adds them from the issue's worktree: the next review reads only the commits after that commit, `saani review diff <n>`) |
 | `### ⚙ Progress` | a commit or a round | commit, what is done, what is left (checkboxes) |
 | `### ❓ Question` | `help wanted` added (`saani comment <n> question` adds it) | context, then a grid: options, pros and cons, recommendation |
 | `### ⛔ Blocked` | blocked | by what, what was done meanwhile |
