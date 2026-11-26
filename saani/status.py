@@ -8,7 +8,7 @@ available); names may change, so a step is matched by its configured name first,
 Saani's steps (the decision of #72), the status only ever moving forward:
   start                                   -> started  (In progress)
   the review starts, land, merge          -> review   (In review); `in-dev` / `in-main` say where the change waits
-  deploy closes the issue as completed    -> Done (GitHub sets it on close)
+  the release pull request's `Closes #n` -> Done (GitHub sets it when the merge closes the issue; `saani deploy` closes nothing)
 `saani auto pick` takes every ready issue except those in `backlog` (Backlog) when the repo has statuses. `[status] enabled = "off"`, or a repo without statuses:
 nothing here does anything (a step says so in one line), and Saani works from its labels alone. `gh` has no status flag (2.92): reads and writes go through `gh api`.
 

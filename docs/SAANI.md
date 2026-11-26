@@ -179,8 +179,11 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
   queue), removed after. Either way the result is the commit status `[ci] status_context` on the pull request's head.
 - After a merge into production, `saani ci merged <PR>` checks that the relabel workflow ran; if not, it runs `[ci] relabel` here, or, with
   no such command, swaps `in-dev` for `in-main` itself with `gh` on the issues the pull request names (`#n` in its title, body and commits;
-  a pull request that is not merged is refused). It then removes the auto runs that began before the merge and are finished, so nothing is
-  left for the owner.
+  a pull request that is not merged is refused). The issues the pull request lists with `Closes #n` (what `saani release pr` writes for an
+  issue whose Auto row is yes) were closed by GitHub at the merge: Saani closes none by hand, and prints which closed and which (`refs`)
+  stay open for the owner. A closed issue gets `in-main` only when the project has a `[deploy] command` (it waits for the deploy as To
+  deploy); without a deploy the merge's close is the end and only `in-dev` is removed. It then removes the auto runs that began before the
+  merge and are finished, so nothing is left for the owner.
 - Every decision goes to `build/saani-ci.json`.
 
 ## The map and the kanban page
@@ -191,8 +194,9 @@ every 5 s, read-only.
   **Done** (closed in the last 7 days, folded by default; Not planned and Duplicate in a closed section of it). The GitHub status decides,
   never below where the work is on this PC (a worktree is at least In progress; dev and production at least In review). Inside **In
   review** a section says where the code is: on its branch, on dev, in the release pull request (it keeps its card with the CI in three
-  colours), on production to deploy, on production to close (the status stays In review until the issue is closed: `saani deploy` sets Done
-  itself later, #84). **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
+  colours), on production to deploy, on production to close (the status stays In review until the issue is closed). An issue the merge
+  closed (`Closes #n`) that still carries `in-main` is not deployed yet: it sits under **Done**, section **To deploy**, until `saani deploy`
+  removes the label, then under Closed (the map's To deploy zone holds it too). **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
   status; it also stays in its own column. Testing, ready to land and landing are badges on the card, with an agent working; a Backlog or Todo card shows
   why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
   map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
@@ -556,19 +560,21 @@ between them. Saani moves an issue's status forward at its steps, next to the la
 | `saani start` (the `Started` comment; `--no-comment` sets it anyway) | In progress | |
 | the review starts (`saani comment <n> review`), through the fixes | In review | |
 | `saani land` (`On dev`; `--no-comment` sets it anyway) | In review | `in-dev` |
-| `saani ci merged` / `saani merge` (`On main`) | In review | `in-main` |
-| `saani deploy` closes the issue as completed | Done (GitHub sets it on close) | `in-main` removed |
+| `saani ci merged` / `saani merge` (`On main`), an issue that stays open (`refs`) | In review | `in-main` |
+| the merge of the release pull request, an issue it lists with `Closes #n` | Done (GitHub closes it and sets the status) | `in-main` if the project has a deploy (To deploy until then), else `in-dev` removed |
+| `saani deploy` (`Deployed`; closes nothing, records a GitHub Deployment) | unchanged | `in-main` / `in-dev` removed |
 | you close it as not planned or duplicate | Not planned / Duplicate | |
 | it needs you | unchanged | `help wanted` / `owner-action` (there is no Blocked status) |
 
-The status never moves back: an issue In review stays there through the landing, the release pull request and main, until the deploy
-closes it; a closed issue is never reopened by Saani. `saani auto pick` takes every ready issue except those in Backlog, so Backlog is the
+The status never moves back: an issue In review stays there through the landing, the release pull request and main, until the merge
+closes it (`Closes #n`) or the owner does (`refs`); a closed issue is never reopened by Saani. `saani auto pick` takes every ready issue except those in Backlog, so Backlog is the
 place for what may not be taken yet (an issue with no status, Todo or In progress is taken when it is ready; an open issue still marked Done, Not planned or Duplicate is not). Statuses are matched by the names in `[status] names`, then by category (a renamed status still works). On a repo without
 statuses (`planningStatuses` is null), or with `[status] enabled = "off"`, no status is set: each step prints a one-line `status of #n unchanged (...)` instead, and Saani works from its labels alone.
 `gh` has no status flag yet: Saani reads and sets statuses with `gh api` (GraphQL `setIssueStatus`, the REST `status` field).
 
 The `--dry-run` of `saani land`, `saani merge` and `saani deploy` (and of `saani comment` and `saani ci merged`) prints the status each
-issue would get (`dry-run: #12 status -> In review`; for `deploy`, Done, which GitHub sets when the issue is closed) and sets nothing. A step
+issue would get (`dry-run: #12 status -> In review`) and sets nothing; the dry run of `merge` also prints which issues GitHub closes at the
+merge and which stay open (`refs`) and each label change, and that of `deploy` the comments, the label removals and the GitHub Deployment. A step
 that leaves the status alone says why in one line (`status of #12 unchanged (review): already In review`, or: statuses are off in
 saani.toml, the repo has none, they could not be read, the issue was not found) and never fails the command.
 
@@ -586,7 +592,7 @@ Each step is printed, the first failure stops with what to do next:
 2. The issues: every `refs #n` (also `refs #1, #2 and #3`) in `git log <prod tag>..origin/<production>`, open or closed, is read. One whose
    At a glance Deploy row starts with "⛔", "Do not deploy" or "Don't deploy" (any case) refuses the deploy and is listed. "None", "No" and
    "—" mean there is nothing to deploy and never block (the issue templates offer `None / <what to deploy> / ⛔ Do not deploy: <why>`).
-   No prod tag yet: a first deploy, so the open issues labelled `in-main` are read for the marker, and none is commented or closed.
+   No prod tag yet: a first deploy, so the open issues labelled `in-main` are read for the marker, and none is commented.
 3. The `[deploy] checks` (each exits 0, e.g. disk space), then the `dry_run` command (empty: skipped). `{sha}` in these commands is the
    commit checked.
 4. Production is fetched again and must still be that commit (else nothing is deployed). Then the deploy, with `timeout_minutes`: its output
@@ -596,7 +602,10 @@ Each step is printed, the first failure stops with what to do next:
    deploys exactly the commit that was checked, not whatever it fetches.
 5. After a success: the prod tag moved to the deployed commit and pushed (`git push origin refs/tags/<prod_tag> --force`: the only force
    push Saani does, for the moving tag and nothing else), then `### ✔ Deployed` (commit, log file name; once per commit) on each issue of
-   the range labelled `in-main`, and those issues closed as completed.
+   the range, open or closed, with `in-main` / `in-dev` removed from it, then a GitHub Deployment on the deployed commit (REST
+   `deployments` plus a `success` status; environment `[deploy] environment`, default `production`). `saani deploy` closes no issue: the
+   merge of the release pull request did (`Closes #n`, Close at release). A Deployment GitHub refuses is reported and does not undo the
+   deploy.
 
 An auto run never deploys: the owner's "merge and deploy" (or "deploy") does.
 

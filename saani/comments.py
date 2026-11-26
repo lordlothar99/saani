@@ -27,7 +27,7 @@ KINDS = {
 }
 
 # kind: the GitHub issue status step it moves the issue to (saani/status.py), only forward; the others leave the status alone.
-# Deploy needs none: closing an issue as completed sets Done.
+# Deploy needs none: the merge of the release pull request closes the issue (`Closes #n`), which sets Done.
 STATUS_STEP = {"started": "started", "review": "review", "on-dev": "review", "on-main": "review"}
 GH_TIMEOUT = 120                     # seconds: a stalled gh never hangs a command
 

@@ -1,7 +1,9 @@
 """saani/deploy.py: the deployer's steps with git and gh faked; the checks and the deploy are real tiny Python commands. No network."""
 import argparse
+import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -33,6 +35,8 @@ class FakeGh:
         self.heads = []                           # successive answers for origin/main after the first (a moving production)
         self.calls = []
         self.fail_push = False
+        self.no_deployment_id = False             # GitHub answers the deployment without an id
+        self.deployment_body = None               # the JSON the deployment was created with
         self.annotations = {}                     # check run id -> its annotations
         self.jobs = {}                            # Actions job id (= check run id) -> the job
 
@@ -74,6 +78,9 @@ class FakeGh:
 
     def write(self, *cmd):
         self.calls.append(cmd)
+        if cmd[:2] == ("gh", "api") and cmd[2].endswith("/deployments"):
+            self.deployment_body = json.loads(Path(cmd[cmd.index("--input") + 1]).read_text(encoding="utf-8"))
+            return "" if self.no_deployment_id else '{"id": 77}'
         return ""
 
     def wrote(self, *start):
@@ -186,7 +193,17 @@ def test_dry_run_runs_steps_one_to_three_and_hides_the_key(world, cfg, capsys, t
     assert not world.gh.wrote("git", "tag") and not world.gh.wrote("git", "push") and not world.gh.wrote("gh", "issue", "close")
 
 
-def test_a_deploy_that_succeeds_logs_moves_the_tag_and_closes_the_issues(world, cfg, capsys):
+def test_dry_run_prints_the_comments_the_label_changes_and_the_deployment_and_writes_nothing(world, capsys):
+    world.gh.issues[2]["labels"] = []
+    assert deploy.run(args(dry=True)) == 0
+    out = capsys.readouterr().out
+    assert "dry-run: #1: comment ### ✔ Deployed (ccccccc); remove in-main; the issue is not closed here" in out
+    assert "dry-run: #2: comment ### ✔ Deployed (ccccccc); the issue is not closed here" in out
+    assert "dry-run: GitHub Deployment of ccccccc to production, then its success status" in out
+    assert not world.gh.wrote("gh", "issue", "comment") and not world.gh.wrote("gh", "issue", "edit") and not world.gh.wrote("gh", "api", "repos/acme/webshop/deployments")
+
+
+def test_a_deploy_that_succeeds_logs_moves_the_tag_and_comments_the_issues(world, cfg, capsys):
     assert deploy.run(args()) == 0
     out = capsys.readouterr().out
     assert "deploy ok" in out and "deploy_ed25519" not in out
@@ -198,18 +215,43 @@ def test_a_deploy_that_succeeds_logs_moves_the_tag_and_closes_the_issues(world, 
     assert [c[3] for c in comments] == ["1", "2"]
     body = comments[0][comments[0].index("--body") + 1]
     assert body.startswith("### ✔ Deployed") and SHA[:7] in body and logs[0].name in body
-    assert not world.gh.wrote("gh", "issue", "edit")                        # no label change: in-main stays until the issue closes
-    closes = world.gh.wrote("gh", "issue", "close")
-    assert [(c[3], c[c.index("--reason") + 1]) for c in closes] == [("1", "completed"), ("2", "completed")]
-    # the tag moves after the deploy, the issues after the tag
+    assert not world.gh.wrote("gh", "issue", "close")                       # the merge closed them: the deploy closes nothing
+    edits = world.gh.wrote("gh", "issue", "edit")
+    assert [(c[3], c[c.index("--remove-label") + 1]) for c in edits] == [("1", "in-main"), ("2", "in-main")]
+    # the tag moves after the deploy, the issues after the tag, the Deployment last
     order = [c[:3] for c in world.gh.calls]
     assert order.index(("git", "tag", "-f")) < order.index(("gh", "issue", "comment"))
+    assert [c[2] for c in world.gh.wrote("gh", "api")][-2:] == ["repos/acme/webshop/deployments", "repos/acme/webshop/deployments/77/statuses"]
 
 
-def test_only_issues_labelled_in_main_are_closed(world):
-    world.gh.issues[2]["labels"] = [{"name": "in-dev"}]
+def test_a_deploy_records_a_github_deployment_with_a_success_status(world, cfg, capsys):
     assert deploy.run(args()) == 0
-    assert [c[3] for c in world.gh.wrote("gh", "issue", "close")] == ["1"]
+    assert "GitHub Deployment recorded: ccccccc to production" in capsys.readouterr().out
+    body = world.gh.deployment_body
+    assert body["ref"] == SHA and body["environment"] == "production" and body["required_contexts"] == [] and body["auto_merge"] is False
+    status = world.gh.wrote("gh", "api", "repos/acme/webshop/deployments/77/statuses")[0]
+    assert "state=success" in status and "environment=production" in status and "POST" in status
+    cfg.deploy_environment = "staging"
+    assert deploy.run(args()) == 0
+    assert world.gh.deployment_body["environment"] == "staging" and world.gh.deployment_body["production_environment"] is False
+
+
+def test_a_deployment_github_refuses_is_reported_and_the_deploy_stays_done(world, capsys):
+    world.gh.no_deployment_id = True
+    assert deploy.run(args()) == 1
+    assert "GitHub Deployment was not recorded" in capsys.readouterr().out
+    assert world.gh.wrote("git", "tag") and len(world.gh.wrote("gh", "issue", "comment")) == 2
+
+
+def test_every_issue_of_the_range_is_commented_open_or_closed_and_both_labels_come_off(world, capsys):
+    world.gh.issues[1]["labels"] = [{"name": "in-dev"}, {"name": "in-main"}]
+    world.gh.issues[1]["state"] = "CLOSED"
+    world.gh.issues[2]["labels"] = []                                       # no label: still commented, nothing removed
+    assert deploy.run(args()) == 0
+    assert [c[3] for c in world.gh.wrote("gh", "issue", "comment")] == ["1", "2"]
+    edits = world.gh.wrote("gh", "issue", "edit")
+    assert len(edits) == 1 and edits[0][3] == "1" and edits[0].count("--remove-label") == 2 and "in-main" in edits[0] and "in-dev" in edits[0]
+    assert not world.gh.wrote("gh", "issue", "close")
 
 
 def test_no_prod_tag_moves_the_tag_and_closes_nothing(world, capsys):
@@ -258,12 +300,12 @@ def test_a_deploy_that_times_out_is_stopped_and_moves_nothing(world, cfg, capsys
     assert not world.gh.wrote("git", "tag") and not world.gh.wrote("gh", "issue", "close")
 
 
-def test_a_refused_tag_push_is_reported_and_the_issues_are_still_closed(world, capsys):
+def test_a_refused_tag_push_is_reported_and_the_issues_are_still_commented(world, capsys):
     world.gh.fail_push = True
     assert deploy.run(args()) == 1
     out = capsys.readouterr().out
     assert "tag was not moved" in out and "git push origin refs/tags/prod --force" in out
-    assert len(world.gh.wrote("gh", "issue", "close")) == 2
+    assert len(world.gh.wrote("gh", "issue", "comment")) == 2 and world.gh.deployment_body["ref"] == SHA
 
 
 def test_the_expanded_command_has_python_and_the_key(cfg):
@@ -370,11 +412,12 @@ def test_a_first_deploy_reads_the_open_in_main_issues_for_the_marker(world, caps
     assert not world.gh.wrote("git", "tag")
 
 
-def test_an_issue_already_commented_for_this_commit_is_only_closed(world):
+def test_an_issue_already_commented_for_this_commit_is_not_commented_again(world):
     world.gh.issues[1]["comments"] = [{"body": "### ✔ Deployed | Commit | " + SHA[:7]}]
     assert deploy.run(args()) == 0
     assert [c[3] for c in world.gh.wrote("gh", "issue", "comment")] == ["2"]
-    assert [c[3] for c in world.gh.wrote("gh", "issue", "close")] == ["1", "2"]
+    assert [c[3] for c in world.gh.wrote("gh", "issue", "edit")] == ["1", "2"]      # the labels come off all the same
+    assert not world.gh.wrote("gh", "issue", "close")
 
 
 def test_a_timeout_keeps_stderr_and_the_output_is_shown_and_logged_as_it_comes(world, cfg, capsys):
@@ -491,7 +534,7 @@ def test_skip_ci_skips_only_the_gate_and_writes_the_reason_into_the_log(world, c
     assert "# CI gate skipped (--skip-ci, the owner's): GitHub refuses jobs: spending limit" in log
     assert "# the gate said: saani/ci is failure on ccccccc" in log
     assert ("git", "tag", "-f", "prod", SHA) in world.gh.calls
-    assert [c[3] for c in world.gh.wrote("gh", "issue", "close")] == ["1", "2"]
+    assert [c[3] for c in world.gh.wrote("gh", "issue", "comment")] == ["1", "2"] and world.gh.deployment_body["ref"] == SHA
 
 
 def test_skip_ci_still_refuses_an_issue_that_says_not_to_deploy(world, capsys):

@@ -34,6 +34,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `key` | `""` | the path of the deploy key, never its content: only passed through as `{key}` (printed as `<key>`) |
 | | `timeout_minutes` | `30` | the deploy is stopped after this long |
 | | `paths` | `[]` | path prefixes a served project deploys; an issue on production whose commits touch none of them shows as "To close" on the map (empty: everything on production is "To deploy") |
+| | `environment` | `"production"` | the environment of the GitHub Deployment `saani deploy` records (a `success` status on the deployed commit) |
 | `[board]` | `folders` | `{}` | `work`, `deploy`, `auto`: the folders the map's prompts name (read by `saani ui`; the section keeps its old name, `board`). Only these three keys: any other is refused, and the old `longrun` is refused with its new name, `auto` |
 | | `session_match` | the repo name | Claude Code sessions whose project folder name contains this are listed |
 | | `port` | `8771` | the local port of `saani ui` |

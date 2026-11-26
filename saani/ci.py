@@ -305,6 +305,7 @@ def cmd_merged(run, number):
     if pr.get("state") != "MERGED":
         print(f"pull request #{number} is not merged: nothing to relabel")
         return 1
+    print_closing(pr, number)
     relabel = c.ci_jobs.get("relabel", {})
     states = {w["name"]: w["state"] for w in run.json("gh", "workflow", "list", "--repo", c.repo, "--all", "--json", "name,state") or []}
     if relabel.get("workflow") and states.get(relabel["workflow"]) == "active":
@@ -363,6 +364,31 @@ def issues_named(pr):
     return sorted({int(n) for n in re.findall(r"#(\d+)", "\n".join(texts))})
 
 
+CLOSING_KEYWORD = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)", re.I)
+
+
+def closes_named(pr):
+    """The issue numbers a pull request closes by GitHub's keywords (`Closes #n`, in its title or body): GitHub closes them at the merge into
+    the default branch (what `saani release pr` writes for an issue whose Auto row is yes). The others it names (`refs #n`) stay open."""
+    return sorted({int(n) for n in CLOSING_KEYWORD.findall(f"{pr.get('title') or ''}\n{pr.get('body') or ''}")})
+
+
+def closing_summary(pr, number):
+    """(closed, open) numbers among the issues a pull request names: closed by GitHub at the merge, and left open for the owner (`refs`)."""
+    closes = closes_named(pr)
+    named = [n for n in issues_named(pr) if n != number]
+    return [n for n in named if n in closes], [n for n in named if n not in closes]
+
+
+def print_closing(pr, number, dry=False):
+    closed, kept = closing_summary(pr, number)
+    prefix = "dry-run: " if dry else ""
+    if closed:
+        print(f"{prefix}closed by GitHub at the merge (Closes): " + ", ".join(f"#{n}" for n in closed) + "; Saani does not close them by hand")
+    if kept:
+        print(f"{prefix}stay open for the owner (refs): " + ", ".join(f"#{n}" for n in kept))
+
+
 def comment_in_pr(run, number, url=None):
     """`In PR` on each named issue that carries the in-dev label, once per pull request and issue. A gh failure only warns."""
     c = cfg()
@@ -389,17 +415,25 @@ def comment_on_main(run, number, pr):
 
 
 def relabel_issues(run, number, pr):
-    """The relabel done here, with gh: each issue the pull request names that carries the in-dev label swaps it for in-main."""
+    """The relabel done here, with gh: each issue the pull request names that carries the in-dev label swaps it for in-main. An issue the
+    merge closes (`Closes #n`) gets in-main only when the project has a deploy (`[deploy] command`): the board shows it as To deploy until
+    `saani deploy` removes the label; without a deploy the close is the end, and in-dev is only removed."""
     c = cfg()
     dev, main = c.labels["in_dev"], c.labels["in_main"]
+    closes = set(closes_named(pr))
     failed = 0
     for n in issues_named(pr):
         info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels,state") or {}
         if dev not in [x["name"] for x in info.get("labels", [])]:
             continue
-        print(f"#{n}: {dev} -> {main}")
+        if n in closes and not c.deploy_command:
+            print(f"#{n}: {dev} removed (closed by the merge, nothing to deploy)")
+            changes = ["--remove-label", dev]
+        else:
+            print(f"#{n}: {dev} -> {main}")
+            changes = ["--remove-label", dev, "--add-label", main]
         try:
-            run.write("gh", "issue", "edit", str(n), "--repo", c.repo, "--remove-label", dev, "--add-label", main)
+            run.write("gh", "issue", "edit", str(n), "--repo", c.repo, *changes)
         except SystemExit as e:
             print(e)
             failed += 1
@@ -410,14 +444,26 @@ def relabel_issues(run, number, pr):
 
 
 def preview_status(run, number):
-    """A dry run of the merge: the status each issue the pull request names (and that carries in-dev or in-main) would get."""
+    """A dry run of the merge: what GitHub closes and what stays open, the label change of each issue the pull request names, and the status
+    each one that stays open would get (a closed issue is Done: GitHub sets it)."""
     c = cfg()
     pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "title,body,commits") or {}
+    print_closing(pr, number, dry=True)
+    closes = set(closes_named(pr))
+    dev, main = c.labels["in_dev"], c.labels["in_main"]
     for n in issues_named(pr):
         if n == number:
             continue
         info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels") or {}
-        if {x["name"] for x in info.get("labels", [])} & {c.labels["in_dev"], c.labels["in_main"]}:
+        have = {x["name"] for x in info.get("labels", [])}
+        if not have & {dev, main}:
+            continue
+        if n in closes:
+            if dev in have:
+                print(f"dry-run: #{n}: {dev} " + (f"-> {main}" if c.deploy_command else "removed (nothing to deploy)"))
+        else:
+            if dev in have:
+                print(f"dry-run: #{n}: {dev} -> {main}")
             status.advance(n, "review", run)
 
 

@@ -298,7 +298,8 @@ def column_for(issue, worktree=None, testing=(), closing=()):
     if worktree and (worktree.get("ahead") or worktree.get("dirty")):
         return "building"
     if issue.get("state") == "CLOSED":
-        return "live"
+        # the merge closed it; until the deploy removes in-main it is not live yet (a project without a deploy never sets in-main)
+        return "main" if lab.get("in_main", "in-main") in labels else "live"
     if lab.get("in_main", "in-main") in labels:
         return "close" if issue["number"] in closing else "main"
     if lab.get("in_dev", "in-dev") in labels:
@@ -457,7 +458,8 @@ KANBAN_SECTIONS = {
                ("main", "On production: to deploy", "Merged into production: goes live with the next deploy. Command: /saani:ci merged <pr>."),
                ("close", "On production: to close", "Merged into production, nothing of it to deploy: close it. Command: /saani:ci merged <pr>."),
                ("elsewhere", "Not found here", "In review on GitHub, but no worktree or label of it on this PC.")],
-    "done": [("deployed", "Closed", "Deployed or closed after the merge."),
+    "done": [("todeploy", "To deploy", "Closed by the merge into production, not deployed yet: it carries in-main until `saani deploy` removes it. Command: /saani:deploy."),
+             ("deployed", "Closed", "Deployed, or closed with nothing to deploy."),
              ("notplanned", "Not planned and duplicates", "Closed as not planned or as a duplicate.")],
 }
 KANBAN_FLOOR = {"building": "started", "testing": "started", "tested": "started", "dev": "review", "main": "review",
@@ -474,6 +476,8 @@ def kanban_place(card, col, carried=()):
     step = issue_status.step_of(card.get("status"))
     if col == "live":
         return "done", "notplanned" if step == "closed" else "deployed"
+    if col == "main" and card.get("state") == "CLOSED":          # closed by the merge, not deployed yet: Done, section to deploy
+        return "done", "todeploy"
     if col in ("ready", "you"):
         if step not in ("started", "review"):
             step = "started" if card.get("worktree") else card.get("queue") or "backlog"
@@ -540,7 +544,7 @@ def build_kanban(board, statuses_on, landing=None):
             sections.append({"id": sid, "title": stitle, "hint": shint, "count": len(numbers),
                              "pr": pr if sid == "pr" else None,
                              "prompt": column_prompt("dev", numbers, pr) if sid == "pr" else
-                             column_prompt(sid, numbers, None) if sid in ("dev", "main", "close") else None})
+                             column_prompt("main" if sid == "todeploy" else sid, numbers, None) if sid in ("dev", "main", "close", "todeploy") else None})
         out.append({"id": key, "title": title, "hint": hint, "cards": cards, "sections": sections})
     return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
 
@@ -903,8 +907,9 @@ def hygiene(open_issues, closed_issues, landed, labels):
     no_milestone: open (not an idea) with no milestone; landed_unlabelled: commits between production and the integration branch name
     them, yet they carry neither in-dev nor in-main."""
     life = {labels["in_dev"], labels["in_main"]}
+    stale = {labels["in_dev"]} if cfg().deploy_command else life        # a closed issue keeps in-main until the deploy: that is To deploy
     found = {
-        "closed_labelled": [i["number"] for i in closed_issues if life & set(i["labels"])],
+        "closed_labelled": [i["number"] for i in closed_issues if stale & set(i["labels"])],
         "no_milestone": [i["number"] for i in open_issues if not i.get("milestone") and labels["idea"] not in i["labels"]],
         "landed_unlabelled": [i["number"] for i in open_issues if i["number"] in landed and not life & set(i["labels"])],
     }

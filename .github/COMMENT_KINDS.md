@@ -14,7 +14,7 @@ to In review (only forward; docs/SAANI.md, Issue statuses).
 | `### ✅ On dev` | `saani land` posts it | commit, tests run (tier, result), `in-dev` |
 | `### 📦 In PR` | `saani ci pr` posts it, once per pull request | pull request, URL |
 | `### 🚀 On main` | `saani ci merged` posts it, once per pull request | pull request, merge commit, `in-main` |
-| `### ✔ Deployed` | deployed and verified | deploy log, live checks done, follow-up issues |
+| `### ✔ Deployed` | `saani deploy` posts it on each issue of the deployed range, open or closed, once per commit (it closes nothing: the merge of the release pull request closed the `Closes #n` issues) and removes `in-main` / `in-dev` | commit, deploy log; live checks done, follow-up issues |
 | `### 🔗 Linked` | a related issue appears | a table: issue, relation |
 
 `saani comment <n> <kind> [--text ...] [--field KEY=VALUE ...]` posts any of them (kinds: started, review, blocked, question, progress,
