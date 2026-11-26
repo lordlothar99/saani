@@ -162,8 +162,11 @@ def review_fields(fields, issue, worktree):
 
 def cmd_comment(args):
     fields = parse_fields(args.field)
+    worktree = getattr(args, "worktree", None)
+    if worktree and args.kind != "review":
+        raise SystemExit("--worktree is for the review kind only (it names the worktree whose commit the comment records)")
     if args.kind == "review":
-        fields = review_fields(fields, args.issue, args.worktree)
+        fields = review_fields(fields, args.issue, worktree)
     post(args.issue, args.kind, fields, args.text or "", Direct(args.dry_run))
     return 0
 

@@ -498,10 +498,14 @@ knows (the options for each pending issue).
 ### Review cache
 A review of a worktree does not read again what an earlier review of it read. `saani comment <n> review` records, in the `In review`
 comment, the commit at the worktree's HEAD (`Reviewed commit`) and the hash of the whole diff against `origin/<integration>` (`Diff
-hash`); the worktree is the one of the issue's branch, or `--worktree PATH`. `saani review diff <n> [--worktree PATH]` then prints the diff
-a reviewer must read, after a line saying the range it covers: the commits after the issue's latest recorded commit (`since`); the whole
-diff when the issue has no record, or its commit is no longer in the branch (rebased away) (`whole`); nothing when HEAD is the recorded
-commit (`none`). Guard, landing, CI, merge and deploy files that the branch changes are always printed whole, after the range. The reviewer
+hash`); the worktree is the one of the issue's branch, or `--worktree PATH`. `saani review diff <n> [--worktree PATH] [--base REF]` then prints the diff
+a reviewer must read, after a line saying the range it covers: the commits after the issue's latest recorded commit that is not at HEAD
+(`since`); the whole diff when the issue has no such record, or its commit is no longer in the branch (rebased away) (`whole`). A record
+at HEAD is the review being done now (the comment is posted when a review begins), so it is skipped: review A, commit B, comment again,
+`review diff` gives A..B, in whichever order the comment and the diff are run. It refuses when no worktree has the issue's branch and
+`--worktree` is not given; `--base` is the ref the whole diff is taken against (default `origin/<integration branch>`). Files the
+branch changes that match `[review] always_whole` (docs/CONFIG.md; by default Saani's guard, landing, CI, merge and deploy code, hooks,
+`bin/` and workflows) are always printed whole, after the range. `--worktree` on another comment kind is refused. The reviewer
 names the range in its review and re-reads in full a file the earlier review covered that the new commits touch. GitHub is the record:
 nothing is cached on the PC. A merge of the integration branch into the branch after the review brings that branch's changes into the range.
 

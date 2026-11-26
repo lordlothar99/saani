@@ -1,4 +1,7 @@
 """saani/review.py: the review cache. Real temporary git repositories, gh faked: no network."""
+import subprocess
+from types import SimpleNamespace
+
 import pytest
 
 from saani import comments, review
@@ -11,8 +14,7 @@ def commit(repo, git, name, text="x\n"):
     git("commit", "-q", "-m", f"add {name}", cwd=repo)
 
 
-def head(repo, git_out=None):
-    import subprocess
+def head(repo):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
 
 
@@ -68,10 +70,18 @@ def test_a_record_whose_commit_is_gone_is_the_whole_diff(branch, git):
     assert p["mode"] == "whole"
 
 
-def test_nothing_new_since_the_review(branch):
-    sha = review.record_fields(branch, "dev")[review.COMMIT]
-    p = review.plan(branch, [review_comment(sha)], "dev")
-    assert p["mode"] == "none" and p["diff"] == ""
+def test_a_record_at_head_is_the_review_being_done_now_not_an_earlier_one(branch, git):
+    """The comment is posted when a review begins: review A (record at A), fixes B, the comment again (record at B), then `review diff`."""
+    first = review.record_fields(branch, "dev")[review.COMMIT]
+    only = review.plan(branch, [review_comment(first)], "dev")          # the first review: its own record is at HEAD
+    assert only["mode"] == "whole"
+    commit(branch, git, "b.py")
+    second = review.record_fields(branch, "dev")[review.COMMIT]
+    p = review.plan(branch, [review_comment(first), review_comment(second)], "dev")
+    assert p["mode"] == "since" and p["since"] == first
+    assert "b.py" in p["diff"] and "a.py" not in p["diff"]
+    p = review.plan(branch, [review_comment(first)], "dev")             # the diff read before the comment: the same range
+    assert p["since"] == first and "b.py" in p["diff"]
 
 
 def test_guard_landing_ci_and_deploy_code_is_always_read_whole(branch, git):
@@ -82,15 +92,40 @@ def test_guard_landing_ci_and_deploy_code_is_always_read_whole(branch, git):
     assert p["mode"] == "since" and "guard.py" not in p["diff"]
     assert p["whole"] == ["saani/guard.py"] and "g = 1" in p["whole_diff"]
     assert "Always reviewed whole" in review.render(p)
-    for path in (".github/workflows/ci.yml", "scripts/deploy.sh", "src/landing_page.py"):
-        assert review.ALWAYS_WHOLE.search(path)
-    assert not review.ALWAYS_WHOLE.search("src/cart.py")
+
+
+def test_the_whole_list_is_precise_paths_and_the_project_can_change_it(cfg):
+    for path in ("saani/core.py", "hooks/hooks.json", "bin/saani", ".githooks/commit-msg", ".github/workflows/ci.yml", "saani/guard.py"):
+        assert review.always_whole([path]) == [path]
+    for path in ("saani/emergency.py", "saani/island.py", "src/landing_page.py", "src/cart.py", "tests/test_guard.py"):
+        assert review.always_whole([path]) == []
+    cfg.review_whole = ("src/auth/*",)
+    assert review.always_whole(["src/auth/login.py", "saani/guard.py"]) == ["src/auth/login.py"]
+
+
+def test_the_toml_setting_is_read_and_checked():
+    from saani import config
+    got = config.from_toml({"project": {"repo": "acme/webshop"}, "review": {"always_whole": ["src/auth/*"]}}, ".")
+    assert got.review_whole == ("src/auth/*",)
+    with pytest.raises(SystemExit):
+        config.from_toml({"project": {"repo": "acme/webshop"}, "review": {"always_whole": "src"}}, ".")
+
+
+def test_a_worktree_is_for_the_review_kind_only():
+    args = SimpleNamespace(issue=5, kind="progress", field=[], text="", worktree="x", dry_run=True)
+    with pytest.raises(SystemExit, match="review kind only"):
+        comments.cmd_comment(args)
+
+
+def test_review_diff_refuses_when_the_issue_has_no_worktree(branch):
+    with pytest.raises(SystemExit, match="no worktree"):
+        review.cmd_review_diff(SimpleNamespace(issue=6, worktree=None, base="dev"))
 
 
 def test_a_review_comment_records_the_commit_and_the_diff_hash(branch, monkeypatch):
     monkeypatch.setattr(review, "base_ref", lambda: "dev")
     fields = comments.review_fields({"Who": "reviewer"}, 5, None)                   # found by the issue's number
     assert list(fields) == [review.COMMIT, review.DIGEST, "Who"]
-    assert review.last_record([comments.render("review", fields)]) == fields[review.COMMIT]
+    assert review.records([comments.render("review", fields)]) == [fields[review.COMMIT]]
     assert review.worktree_of(5) == branch                              # found by the issue's number
     assert comments.review_fields({}, 6, None) == {}                    # no worktree of the issue: a comment without a record

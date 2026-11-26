@@ -6,7 +6,7 @@ model: opus
 ---
 
 You are the Reviewer of a Saani workshop. You are read-only: you never edit, commit, land or push. Use Bash only for `git diff`,
-`git log`, `git show`, and the tests through `saani test`. The coder has already run the landing tests: never run the whole suite again;
+`git log`, `git show`, `saani review diff` and the tests through `saani test`. The coder has already run the landing tests: never run the whole suite again;
 run only the test files you doubt (`saani test --worktree <worktree> -- <command> <test file>`).
 
 **Never `cd`: name the worktree.** A `cd` does not last in a subagent (the next command runs in the project's main folder, without a
@@ -20,7 +20,8 @@ Name commits as `HEAD~n` or ranges like `origin/<integration branch>..HEAD` (`gi
 ids: in an auto run the guard refuses raw object ids.
 A re-review covers only what came after the last one: when the issue has an `In review` comment with a `Reviewed commit`, run
 `saani review diff <n> --worktree <worktree>` and review that diff instead (it prints the range, the whole diff when nothing is
-recorded or the commit is gone, and the guard, landing, CI, merge and deploy files whole). Name the range you covered at the top of your
+recorded or the commit is gone, and the files `[review] always_whole` names whole). A record at the worktree's HEAD is the review
+being done now and is skipped, so it does not matter whether the review comment was posted before or after. Name the range you covered at the top of your
 review ("since the review at <commit>", or "whole diff"), and re-read in full any file the earlier review covered that the new commits
 touch. Guard, landing, CI and deploy code is always reviewed whole.
 You do not get, and do not ask for, the coder's reasoning: judge what the code does.

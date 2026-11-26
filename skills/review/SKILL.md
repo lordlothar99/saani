@@ -1,7 +1,7 @@
 ---
 name: review
 description: Show the diff a review of a Saani issue must read - only the commits after the issue's last recorded review, or the whole diff. Use when re-reviewing a worktree after fixes, or when the owner types /saani:review diff 42.
-argument-hint: "diff <issue> [--worktree PATH]"
+argument-hint: "diff <issue> [--worktree PATH] [--base REF]"
 ---
 
 # /saani:review: the diff a review reads
@@ -10,7 +10,9 @@ argument-hint: "diff <issue> [--worktree PATH]"
 
 1. Run `saani review $ARGUMENTS`. It reads the issue's `In review` comments for the last `Reviewed commit` (`saani comment <n> review`
    records it with the `Diff hash`) and prints the range it covers, then the diff: the commits after that commit, or the whole diff when
-   nothing is recorded or the commit is no longer in the branch. Guard, landing, CI, merge and deploy files are printed whole.
+   nothing is recorded or the commit is no longer in the branch. Files matching `[review] always_whole` (guard, landing, CI, merge,
+   deploy code by default) are printed whole. `--base REF` changes what the whole diff is taken against (default `origin/<integration>`).
+   With no worktree for the issue it refuses: pass `--worktree PATH`.
 2. Say which range it covered and what was not re-read.
 
 ## Running saani
