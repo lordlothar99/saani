@@ -130,7 +130,7 @@ def from_toml(data, root):
             ("land", "lock_stale_hours"): "lock_stale_hours", ("land", "push_attempts"): "push_attempts",
             ("deploy", "paths"): "deploy_paths", ("deploy", "command"): "deploy_command", ("deploy", "dry_run"): "deploy_dry_run",
             ("deploy", "checks"): "deploy_checks", ("deploy", "log_ok"): "deploy_log_ok", ("deploy", "key"): "deploy_key",
-            ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("deploy", "environment"): "deploy_environment",("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
+            ("deploy", "timeout_minutes"): "deploy_timeout_minutes", ("deploy", "environment"): "deploy_environment", ("board", "folders"): "folders", ("board", "session_match"): "session_match", ("board", "port"): "board_port",
             ("ci", "workflow"): "ci_workflow", ("ci", "free_minutes"): "ci_free_minutes", ("ci", "reserve_minutes"): "ci_reserve_minutes",
             ("ci", "pace_slack"): "ci_pace_slack", ("ci", "status_context"): "ci_status_context", ("ci", "jobs"): "ci_jobs",
             ("release", "version_file"): "version_file", ("auto", "parallel"): "parallel", ("auto", "ci_attempts"): "ci_attempts", ("auto", "keep_on_quiet_minutes"): "keep_on_quiet_minutes", ("auto", "reference_clones"): "reference_clones", ("ci", "relabel"): "relabel", ("review", "always_whole"): "review_whole", ("hints",): "hints"}

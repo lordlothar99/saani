@@ -182,7 +182,9 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
   a pull request that is not merged is refused). The issues the pull request lists with `Closes #n` (what `saani release pr` writes for an
   issue whose Auto row is yes) were closed by GitHub at the merge: Saani closes none by hand, and prints which closed and which (`refs`)
   stay open for the owner. A closed issue gets `in-main` only when the project has a `[deploy] command` (it waits for the deploy as To
-  deploy); without a deploy the merge's close is the end and only `in-dev` is removed. It then removes the auto runs that began before the
+  deploy); without a deploy the merge's close is the end and only `in-dev` is removed (when the relabel ran on GitHub or as `[ci] relabel`,
+  Saani takes `in-main` off the closed issues after it). `Closes` is read from the pull request's description only: GitHub does not link
+  a keyword in the title. It then removes the auto runs that began before the
   merge and are finished, so nothing is left for the owner.
 - Every decision goes to `build/saani-ci.json`.
 
@@ -196,7 +198,8 @@ every 5 s, read-only.
   review** a section says where the code is: on its branch, on dev, in the release pull request (it keeps its card with the CI in three
   colours), on production to deploy, on production to close (the status stays In review until the issue is closed). An issue the merge
   closed (`Closes #n`) that still carries `in-main` is not deployed yet: it sits under **Done**, section **To deploy**, until `saani deploy`
-  removes the label, then under Closed (the map's To deploy zone holds it too). **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
+  removes the label, then under Closed (the map's To deploy zone holds it too), however long ago it was closed. One closed as not planned or
+  as a duplicate stays under Not planned and duplicates, and the hygiene strip flags its `in-main`. **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
   status; it also stays in its own column. Testing, ready to land and landing are badges on the card, with an agent working; a Backlog or Todo card shows
   why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
   map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
@@ -592,7 +595,8 @@ Each step is printed, the first failure stops with what to do next:
 2. The issues: every `refs #n` (also `refs #1, #2 and #3`) in `git log <prod tag>..origin/<production>`, open or closed, is read. One whose
    At a glance Deploy row starts with "⛔", "Do not deploy" or "Don't deploy" (any case) refuses the deploy and is listed. "None", "No" and
    "—" mean there is nothing to deploy and never block (the issue templates offer `None / <what to deploy> / ⛔ Do not deploy: <why>`).
-   No prod tag yet: a first deploy, so the open issues labelled `in-main` are read for the marker, and none is commented.
+   No prod tag yet: a first deploy, so the issues labelled `in-main`, open or closed (the merge closed most of them), are read for the
+   marker, and step 5 comments them and takes the label off like the issues of a range.
 3. The `[deploy] checks` (each exits 0, e.g. disk space), then the `dry_run` command (empty: skipped). `{sha}` in these commands is the
    commit checked.
 4. Production is fetched again and must still be that commit (else nothing is deployed). Then the deploy, with `timeout_minutes`: its output

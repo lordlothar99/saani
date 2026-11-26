@@ -46,10 +46,30 @@ def edits(io):
     return {w[3]: w[6:] for w in io.written if w[2] == "edit"}               # after `--repo acme/webshop`
 
 
-def test_the_keywords_a_pull_request_closes_with_are_read_from_its_title_and_body():
+def test_the_keywords_a_pull_request_closes_with_are_read_from_its_body_only():
     assert ci.closes_named({"title": "x", "body": BODY}) == [1, 3]
-    assert ci.closes_named({"title": "Fixes #8", "body": "closed #9, resolves: #10, closes the door, refs #11"}) == [8, 9, 10]
+    assert ci.closes_named({"title": "Fixes #8", "body": "closed #9, resolves: #10, closes the door, refs #11"}) == [9, 10]   # not the title
     assert ci.closes_named({"body": None}) == []
+
+
+def test_a_relabel_that_ran_outside_takes_in_main_off_the_closed_issues_of_a_project_without_a_deploy(merged, capsys, monkeypatch):
+    class Io(MergedIo):
+        def __init__(self):
+            super().__init__()
+            self.labels = {n: [{"name": "in-main"}] for n in (1, 2, 3)}      # the GitHub workflow already swapped them
+        def json(self, *cmd):
+            if cmd[:3] == ("gh", "workflow", "list"):
+                return [{"name": "Relabel merged issues", "state": "active"}]
+            if cmd[:3] == ("gh", "run", "list"):
+                return [{"databaseId": 1, "conclusion": "success", "createdAt": "2026-11-22T14:27:00Z"}]
+            return super().json(*cmd)
+    merged.ci_jobs = {"relabel": {"minutes": 1, "heavy": False, "what": "x", "workflow": "Relabel merged issues"}}
+    io = Io()
+    assert ci.cmd_merged(io, 9) == 0
+    assert edits(io) == {"1": ("--remove-label", "in-main"), "3": ("--remove-label", "in-main")}      # #2 stays open (refs): untouched
+    io = Io()
+    merged.deploy_command = ["deploy.sh"]
+    assert ci.cmd_merged(io, 9) == 0 and edits(io) == {}                                              # with a deploy they wait as To deploy
 
 
 def test_ci_merged_says_which_issues_closed_and_which_stay_open_and_closes_none_by_hand(merged, capsys):
@@ -113,6 +133,37 @@ def test_the_kanban_puts_it_under_done_in_the_section_to_deploy_until_the_deploy
     assert sections["todeploy"]["count"] == 1 and "#1" in sections["todeploy"]["prompt"]
     review = next(c for c in kanban["columns"] if c["id"] == "review")
     assert [c["number"] for c in review["cards"] if c["section"] == "main"] == [3]        # the open one stays on production, to deploy
+
+
+def test_a_closed_issue_marked_not_planned_or_duplicate_stays_under_not_planned_and_is_flagged(cfg):
+    cfg.deploy_command = ["deploy.sh"]
+    dropped = [card(1, ["in-main"], state_reason="NOT_PLANNED"), card(2, ["in-main"], state_reason="DUPLICATE"),
+               card(3, ["in-main"], status={"name": "Not planned", "category": "not_planned"}), card(4, ["in-main"], state_reason="COMPLETED")]
+    assert [fp.column_for(i) for i in dropped] == ["live", "live", "live", "main"]
+    board = fp.build_board(dropped, [], set(), [], [])
+    kanban = fp.build_kanban(board, True)
+    done = next(c for c in kanban["columns"] if c["id"] == "done")
+    assert sorted(c["number"] for c in done["cards"] if c["section"] == "notplanned") == [1, 2, 3]
+    assert [c["number"] for c in done["cards"] if c["section"] == "todeploy"] == [4]
+    assert fp.hygiene([], dropped, set(), cfg.labels) == [{"kind": "closed_labelled", "issues": [1, 2, 3]}]
+
+
+def test_closed_in_main_issues_are_fetched_without_a_date_limit(cfg, monkeypatch):
+    calls = []
+
+    def fake_run(*cmd, **k):
+        if cmd[:3] == ("gh", "issue", "list"):
+            calls.append(cmd)
+            state = cmd[cmd.index("--state") + 1]
+            if "--label" in cmd:                                         # closed long ago, still in-main
+                return '[{"number": 5, "title": "old", "labels": [{"name": "in-main"}], "state": "CLOSED", "stateReason": "COMPLETED"}]'
+            return '[]' if state == "open" else '[{"number": 6, "title": "new", "labels": [], "state": "CLOSED"}]'
+        return ""
+    monkeypatch.setattr(fp, "run", fake_run)
+    got = fp.issues()
+    waiting = [c for c in calls if "--label" in c][0]
+    assert "in-main" in waiting and "--search" not in waiting
+    assert sorted(i["number"] for i in got["closed"]) == [5, 6] and sorted(i["number"] for i in got["board"]) == [5, 6]
 
 
 def test_a_closed_issue_labelled_in_main_is_not_untidy_with_a_deploy_but_is_without_one(cfg):

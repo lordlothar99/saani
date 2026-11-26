@@ -412,6 +412,17 @@ def test_a_first_deploy_reads_the_open_in_main_issues_for_the_marker(world, caps
     assert not world.gh.wrote("git", "tag")
 
 
+def test_a_first_deploy_records_the_closed_in_main_issues_too(world, capsys):
+    world.gh.tag = False
+    world.gh.open_in_main = [{"number": 1, "body": BODY_OK, "labels": [{"name": "in-main"}]},
+                             {"number": 2, "body": BODY_NONE, "labels": [{"name": "in-main"}]}]
+    assert deploy.run(args()) == 0
+    listing = world.gh.wrote("gh", "issue", "list")[0]
+    assert listing[listing.index("--state") + 1] == "all"                       # the merge closed them: open and closed
+    assert [c[3] for c in world.gh.wrote("gh", "issue", "comment")] == ["1", "2"]
+    assert [c[3] for c in world.gh.wrote("gh", "issue", "edit")] == ["1", "2"] and not world.gh.wrote("gh", "issue", "close")
+
+
 def test_an_issue_already_commented_for_this_commit_is_not_commented_again(world):
     world.gh.issues[1]["comments"] = [{"body": "### ✔ Deployed | Commit | " + SHA[:7]}]
     assert deploy.run(args()) == 0

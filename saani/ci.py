@@ -314,6 +314,7 @@ def cmd_merged(run, number):
             print(f"the relabel ran on GitHub (run {ok[0]['databaseId']}): nothing to do here")
             log({"job": "relabel", "pr": number, "place": "github", "result": "passed"})
             comment_on_main(run, number, pr)
+            drop_in_main_from_closed(run, number, pr)
             core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
             return 0
     if c.relabel:
@@ -330,6 +331,8 @@ def cmd_merged(run, number):
         code = relabel_issues(run, number, pr)
     if code == 0:
         comment_on_main(run, number, pr)
+        if c.relabel:
+            drop_in_main_from_closed(run, number, pr)
     core.remove_auto_runs(core.finished_auto_runs(before=merged_at(pr)), run.dry)
     return code
 
@@ -368,9 +371,29 @@ CLOSING_KEYWORD = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\
 
 
 def closes_named(pr):
-    """The issue numbers a pull request closes by GitHub's keywords (`Closes #n`, in its title or body): GitHub closes them at the merge into
-    the default branch (what `saani release pr` writes for an issue whose Auto row is yes). The others it names (`refs #n`) stay open."""
-    return sorted({int(n) for n in CLOSING_KEYWORD.findall(f"{pr.get('title') or ''}\n{pr.get('body') or ''}")})
+    """The issue numbers a pull request closes by GitHub's keywords (`Closes #n`, in its description: GitHub does not link keywords from the
+    title): GitHub closes them at the merge into the default branch (what `saani release pr` writes for an issue whose Auto row is yes). The
+    others it names (`refs #n`) stay open."""
+    return sorted({int(n) for n in CLOSING_KEYWORD.findall(pr.get("body") or "")})
+
+
+def drop_in_main_from_closed(run, number, pr):
+    """A project without a `[deploy] command`: the merge's close is the end, so in-main comes off the issues the merge closed, after a relabel
+    that ran outside this code (the GitHub workflow, `[ci] relabel`) set it on them."""
+    c = cfg()
+    if c.deploy_command:
+        return
+    main = c.labels["in_main"]
+    for n in closes_named(pr):
+        if n == number:
+            continue
+        info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels") or {}
+        if main in [x["name"] for x in info.get("labels", [])]:
+            print(f"#{n}: {main} removed (closed by the merge, nothing to deploy)")
+            try:
+                run.write("gh", "issue", "edit", str(n), "--repo", c.repo, "--remove-label", main)
+            except SystemExit as e:
+                print(e)
 
 
 def closing_summary(pr, number):

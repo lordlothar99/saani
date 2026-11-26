@@ -175,13 +175,15 @@ def step_issues(gh, sha):
     c = cfg()
     found, blocked = [], []
     if not gh.ok("git", "rev-parse", "-q", "--verify", f"refs/tags/{c.prod_tag}"):
-        # A first deploy: there is no range, so the issues merged and not yet deployed are the open ones labelled in_main.
-        print(f"2. no {c.prod_tag} tag: a first deploy; the open {c.labels['in_main']} issues are read for the marker, none is commented")
-        for issue in gh.json("gh", "issue", "list", "--repo", c.repo, "--label", c.labels["in_main"], "--state", "open", "--limit", "200",
-                             "--json", "number,body") or []:
+        # A first deploy: there is no range, so the issues merged and not yet deployed are those labelled in_main, open or closed (the merge
+        # of the release pull request closed most of them).
+        print(f"2. no {c.prod_tag} tag: a first deploy; the {c.labels['in_main']} issues (open or closed) are read for the marker and recorded")
+        for issue in gh.json("gh", "issue", "list", "--repo", c.repo, "--label", c.labels["in_main"], "--state", "all", "--limit", "200",
+                             "--json", "number,body,labels") or []:
             text = says_do_not_deploy(issue.get("body"))
             if text:
                 blocked.append((issue["number"], text))
+            found.append((issue["number"], [lab.get("name") for lab in issue.get("labels", [])]))
     else:
         for n in issues_in(gh.read("git", "log", "--format=%B%x1e", f"{c.prod_tag}..{sha}")):
             issue = gh.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "number,body,labels") or {}
