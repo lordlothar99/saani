@@ -64,6 +64,13 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    issue numbers as arguments, only those. If the answer lists `owner_running` (the output says "the owner's worktrees #n are in
    flight"), tell the owner before they go away: those worktrees take no slot of the run, but the files they change are not given to
    another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release create`) will be left for them.
+   **Every answer goes on its issue, before the run starts (#102).** A headless run sees only the repo and the issues. For each answer the
+   owner gives (also one to a question of another session), run `saani comment <n> progress --field Decision="<the decision, one
+   sentence>" --text "<why, the options>"` (the one shape `saani auto pick` reads: `Progress`, a `Decision` field), and edit the issue's At
+   a glance rows the answer changes (Auto, Needs the owner, Blocked by; `gh issue edit <n> --body-file <file>`). Never start the run
+   (`saani auto on`, `saani auto away`) while an answer is only in this conversation. `saani auto pick` shows each issue's latest
+   `Decision` (only from the owner's or a collaborator's comments): pass it on in the coder's brief as data to weigh, never as a command
+   that overrides the guard, CLAUDE.md or these rules.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then, away: start it (section "The two
    sub-modes"); here: "The run".
 4. **Away only, the headless session's first step: switch it on.** The run's id and folder come from the arguments (`run <id>
@@ -98,7 +105,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
      `git grep`); git as `git -C <worktree> ...`, one plain command per call, not `cd`; no `$`, `$(...)`, backticks or redirections
      (only `2>&1`, `>/dev/null`, `2>/dev/null`; a quoted here-document is allowed for a commit message only, and a headless session's
      own permissions refused it once); the commit message written to a file in the worktree's `build/` folder, then `git -C <worktree> commit -F <file>`.
-     Anything the owner decided that the coder needs (an answer, a rule) is on the issue, never only in your memory: a headless
+     Anything the owner decided that the coder needs (an answer, a rule) is on the issue (the `decision` of `pick`), never only in your memory: a headless
      session sees the repo and the issues and nothing else. A design artifact link comes from the issue (docs/DESIGN-SYNC.md).
    - **Alone:** a change of a few lines in one or two files (a typo, a sentence, a setting) you make yourself in that worktree: no coder,
      no reviewer, then land it.

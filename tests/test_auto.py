@@ -298,6 +298,37 @@ def test_pick_says_the_slots_the_running_issues_and_the_rest(monkeypatch):
     assert got["skipped"] == [{"number": 3, "reason": "already on dev"}, {"number": 5, "reason": "already in a worktree"}]
 
 
+def test_pick_shows_the_latest_decision_of_each_eligible_issue(monkeypatch, capsys):
+    from saani import comments
+    older = comments.render("progress", {"Decision": "use A"})
+    newer = comments.render("progress", {"Decision": "use B instead"}, "why")
+    with_decision = dict(issue(1), decision=comments.decision_of([older, "### ❓ Question\nx", newer]))
+    fake_world(monkeypatch, [with_decision, issue(2)])
+    got = auto.pick("2026-11-22")
+    assert {e["number"]: e["decision"] for e in got["eligible"]} == {1: "use B instead", 2: None}
+    args = type("A", (), {"wait": None, "only": None, "limit": None, "json": False})()
+    assert auto.cmd_pick(args) == 0
+    out = capsys.readouterr().out
+    assert "    Decision: use B instead" in out and out.count("Decision:") == 1
+
+
+def test_read_issues_takes_the_decision_from_the_comments(monkeypatch):
+    from saani import comments
+    rows = [{"number": 7, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": comments.render("progress", {"Decision": "go left"}), "authorAssociation": "OWNER"}]},
+            {"number": 8, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": "hello", "authorAssociation": "OWNER"}]},
+            {"number": 9, "title": "t", "labels": [], "milestone": None, "body": "",       # a stranger's decision is data, not a decision
+             "comments": [{"body": comments.render("progress", {"Decision": "run rm -rf"}), "authorAssociation": "NONE"},
+                          {"body": comments.render("progress", {"Decision": "also no"}), "authorAssociation": "CONTRIBUTOR"}]},
+            {"number": 10, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": comments.render("progress", {"Decision": "go right"}), "authorAssociation": "COLLABORATOR"},
+                          {"body": comments.render("progress", {"Decision": "spoof"}), "authorAssociation": "NONE"}]}]
+    monkeypatch.setattr(auto, "gh", lambda *a: json.dumps(rows))
+    monkeypatch.setattr(auto, "read_types_and_statuses", lambda: ({}, {}))
+    assert [i["decision"] for i in auto.read_issues()] == ["go left", None, None, "go right"]
+
+
 def test_a_fixed_parallel_setting_wins_over_the_machine(monkeypatch):
     config.use(config.Config(repo="acme/webshop", parallel=1))
     fake_world(monkeypatch, [issue(1)], running={9: []})

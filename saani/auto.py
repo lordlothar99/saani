@@ -137,7 +137,7 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
     `statuses`: the repo's GitHub issue statuses (saani/status.py): every ready issue is taken except those in Backlog (no status, Todo and the
     others are eligible; also with `only`); None (the repo has none, or they are off): no status filter.
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
-    Returns (eligible, skipped): eligible [{number, title, milestone, type, flags}] in the run's order, skipped [{number, reason}]."""
+    Returns (eligible, skipped): eligible [{number, title, milestone, type, flags, decision}] (`decision`: the issue's latest `Decision`, #102) in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
     types = cfg().types if types is None else types
     owner_labels = {labels["answer"], labels["act"], labels["idea"]}
@@ -189,7 +189,8 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
             skipped.append({"number": n, "reason": f"overlaps #{hit[0]} ({hit[1]})"})
             continue
         named[n] = paths
-        eligible.append({"number": n, "title": i.get("title", ""), "milestone": i.get("milestone"), "type": i.get("type"), "flags": flags})
+        eligible.append({"number": n, "title": i.get("title", ""), "milestone": i.get("milestone"), "type": i.get("type"), "flags": flags,
+                         "decision": i.get("decision")})
     return eligible, sorted(skipped, key=lambda s: s["number"])
 
 
@@ -235,13 +236,15 @@ def read_issues():
     """The open issues (up to ISSUE_LIMIT) with their body and Type."""
     try:
         rows = json.loads(gh("issue", "list", "--repo", cfg().repo, "--state", "open", "--limit", str(ISSUE_LIMIT), "--json",
-                             "number,title,labels,milestone,body") or "[]")
+                             "number,title,labels,milestone,body,comments") or "[]")
     except json.JSONDecodeError:
         raise SystemExit("saani auto pick: gh issue list gave an answer that is not JSON")
     types, statuses = read_types_and_statuses()
+    from . import comments
     return [{"number": r["number"], "title": r["title"], "labels": [x["name"] for x in r.get("labels", [])],
              "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"]),
-             "status": statuses.get(r["number"])}
+             "status": statuses.get(r["number"]),
+             "decision": comments.decision_of(comments.trusted_bodies(r.get("comments")))}
             for r in rows]
 
 
@@ -437,6 +440,8 @@ def cmd_pick(args):
     for e in got["eligible"]:
         extra = [e["type"] or "no Type", e["milestone"] or "no milestone"] + e["flags"]
         print(f"  #{e['number']} {e['title']} [{'; '.join(extra)}]")
+        if e.get("decision"):
+            print(f"    Decision: {e['decision']}")
     if not got["eligible"]:
         print("  none")
     print(f"skipped ({len(got['skipped'])}):")

@@ -197,7 +197,8 @@ every 5 s, read-only.
   why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
   map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
   Ready to land, Merged, To deploy, To close, Deployed). `/api/state` carries both: `board` (the map's columns, unchanged) and `kanban` (`columns` with
-  `sections`, `pinned`; `null` without statuses); the open pull request with its CI in three colours; the Claude Code sessions of
+  `sections`, `pinned`; `null` without statuses); `closed_milestones` (the titles of the project's closed milestones, from the same fetch as the
+  milestone strip: the map's Citadel leaves out their done issues; `[]` when there are none or GitHub cannot be read); the open pull request with its CI in three colours; the Claude Code sessions of
   the project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in);
   the PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above.
@@ -507,6 +508,17 @@ or whose latest journal line is; an issue that landed is never left); a "Release
 tokens and the estimate per issue, role and model; the window counts whole days from the start's date); the timeline; and the next step:
 `/saani:merge N` or `/saani:merge N --deploy`. With `--post` it is also a comment on the pull request. The skill adds what only Claude Code
 knows (the options for each pending issue).
+
+### The owner's decisions (#102)
+A headless auto run sees only the repo and the issues, so an answer the owner gives in a session is worth nothing to it until it is on the
+issue. Every decision is posted as a `Progress` comment with a `Decision` field, with the existing command (no separate command):
+`saani comment <n> progress --field Decision="<the decision>" [--text "<why>"]`; where it changes the issue's rules, the At a glance rows
+(Auto, Needs the owner, Blocked by) are edited too. `/saani:auto` does both for each answer before `saani auto away` starts, and never
+starts a run with an answer that is not on its issue. `saani auto pick` (text and `--json`) gives each eligible issue its latest `Decision`
+(`decision`, `null` when none), so the coder's brief has it. Only comments by the repo's owner or a collaborator (`authorAssociation` OWNER,
+MEMBER or COLLABORATOR) count: anyone can comment a public repo, so a `Decision` from anyone else is data and is ignored. Limit: the pick
+reads the comments `gh issue list` returns, which may not hold every comment of a very long thread (not confirmed); a decision lost
+that way is not seen.
 
 ### Review cache
 A review of a worktree does not read again what an earlier review of it read. `saani comment <n> review` records, in the `In review`

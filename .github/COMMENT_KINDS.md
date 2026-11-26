@@ -20,7 +20,18 @@ to In review (only forward; docs/SAANI.md, Issue statuses).
 `saani comment <n> <kind> [--text ...] [--field KEY=VALUE ...]` posts any of them (kinds: started, review, blocked, question, progress,
 on-dev, in-pr, on-main, deployed, linked), as a one-row table of the fields, a blank line, then the text, and sets the matching label.
 
+**A decision of the owner** (#102) is a `Progress` comment with a `Decision` column: `saani comment <n> progress --field Decision="<what the owner decided>" [--text "<why, context>"]`. It is the one shape `saani auto pick` reads: the latest `Decision` of an issue is in the coder's brief.
+
 ## Examples
+```markdown
+### ⚙ Progress
+| Decision |
+|---|
+| Keep the cache per worktree, not global |
+
+The owner's answer to the question of the auto run of 2026-11-25.
+```
+
 ```markdown
 ### ✅ On dev
 | Commit | Tests | Next |

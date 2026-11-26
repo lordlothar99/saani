@@ -109,6 +109,31 @@ def has_comment(bodies, kind, needle):
     return any(KINDS[kind][0] in b and pattern.search(b) for b in bodies)
 
 
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")   # the authorAssociation of a comment a decision may come from
+
+
+def trusted_bodies(rows):
+    """The bodies of the comments (gh's `comments` rows, in posting order) written by the repo's owner or a collaborator: any GitHub user can
+    comment a public repo, and a decision is passed on to coders, so the others' comments are never read as decisions."""
+    return [r.get("body") or "" for r in rows or [] if r.get("authorAssociation") in TRUSTED]
+
+
+def decision_of(bodies):
+    """The text of the latest `Decision` of an issue (#102): the last Progress comment (bodies are in posting order) whose one-row table has
+    a `Decision` column (`saani comment <n> progress --field Decision=<text>`), None when there is none or its cell is empty."""
+    found = None
+    heading = KINDS["progress"][0]
+    for body in bodies:
+        lines = body.splitlines()
+        if not lines or lines[0].strip() != heading or len(lines) < 3:
+            continue
+        split = lambda line: [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip())[1:-1]]  # noqa: E731
+        head, row = split(lines[1]), split(lines[3] if len(lines) > 3 else "")
+        if "Decision" in head and len(row) == len(head) and row[head.index("Decision")]:
+            found = row[head.index("Decision")]
+    return found
+
+
 def apply_labels(number, kind, io=None):
     """The kind's label change, one `gh issue edit` (nothing when the kind has none)."""
     add, remove = label_changes(kind)
