@@ -148,19 +148,27 @@ class DeployStatusGh(DeployGh):
     def __init__(self):
         super().__init__()
         self.statuses = FakeGh("In review")
+        self.dry = False
+        self.graphql_dry = []                                               # the dry flag of the Run at each status read
 
     def json(self, *cmd):
         if cmd[:3] == ("gh", "api", "graphql"):
+            self.graphql_dry.append(self.dry)
             return self.statuses.json(*cmd)
         return super().json(*cmd)
 
 
-def test_deploy_dry_run_prints_the_done_status_of_each_issue(deploy_world, statuses, capsys):  # noqa: F811
+def test_deploy_dry_run_prints_the_done_status_of_each_issue(deploy_world, statuses, capsys, monkeypatch):  # noqa: F811
     import test_deploy
     deploy_world.gh = DeployStatusGh()
-    deploy_world.gh.dry = True                                              # what ci.Run(True) is
+
+    def make(dry):                                                          # like ci.Run: the flag is the caller's
+        deploy_world.gh.dry = dry
+        return deploy_world.gh
+    monkeypatch.setattr(ci, "Run", make)
     assert test_deploy.deploy.run(test_deploy.args(dry=True)) == 0
     out = capsys.readouterr().out
+    assert deploy_world.gh.graphql_dry and all(deploy_world.gh.graphql_dry)      # every status read went through a dry Run
     assert "dry-run: #1 status -> Done" in out and "dry-run: #2 status -> Done" in out
     assert not deploy_world.gh.wrote("gh", "issue", "close") and ids(deploy_world.gh.calls) == []
 
