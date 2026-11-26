@@ -351,6 +351,19 @@ def test_no_journal_without_a_run(world):
     assert not (world.root / "build").exists()
 
 
+def test_an_issue_is_parked_by_its_blocked_line_until_started_again_or_landed(world):
+    record(world)
+    for n, kinds in {1: ["started", "blocked"], 2: ["started", "blocked", "progress"], 3: ["started", "blocked", "started"],
+                     4: ["started", "blocked", "landed"], 5: ["started", "question"]}.items():
+        for kind in kinds:
+            auto.journal(n, kind)
+    assert auto.run_parked_issues() == {1, 2}
+
+
+def test_no_run_parks_nothing(world):
+    assert auto.run_parked_issues() == set()
+
+
 def test_the_journal_has_a_line_per_comment_and_landing(world, monkeypatch):
     record(world)
     posted = []

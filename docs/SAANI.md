@@ -393,7 +393,12 @@ the coder of that issue. **Whose issues count as running** (#56): only the issue
 parallel` less the run's own running issues. The sizing reads the machine's free memory, which already shows the owner's work, so the
 machine is not overloaded. `pick` still lists the owner's worktrees (`owner_running`, "the owner's worktrees #12, #15 are in flight"),
 keeps their changed files out of other issues, and says "no slot: ..." or "nothing eligible" (`note`, also journaled as a `pick` line when
-a run is on, once per change). The skill tells the owner about their worktrees before the run starts. Outside a run (no record) every
+a run is on, once per change). **A parked issue takes no slot** (#110): an issue the run blocked (its latest `started`, `blocked` or
+`landed` journal line is `blocked`, written by `saani comment <n> blocked`) keeps its worktree but is not counted against the slots, and
+is listed in `pick`'s `parked` (and by `saani status`, "parked: blocked, takes no slot"). Only the `blocked` kind parks an issue; a
+`question` comment does not. The run never re-picks a parked issue by itself, and `--only <n>` on it is skipped too: only `saani start
+<n>` (a new `started` line) or its landing re-admits it. Its changed files still keep overlapping issues waiting. The skill tells the
+owner about their worktrees before the run starts. Outside a run (no record) every
 worktree is the owner's. The record and the journal are per repository, so an owner's own `saani start` while a run is on counts as the
 run's and takes one of the run's slots. `saani kpis` gives the cost per issue, role and model.
 

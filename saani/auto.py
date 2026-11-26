@@ -296,6 +296,21 @@ def run_started_issues():
     return {int(r["issue"]) for r in read_journal(rec["id"]) if r.get("kind") == "started" and r.get("issue") is not None} if rec else set()
 
 
+def run_parked_issues():
+    """The issues the run that is on has parked (#110): the issue's latest `started`, `blocked` or `landed` journal line is `blocked`
+    (`saani comment <n> blocked`). They keep their worktree but take no slot and are not offered again; a later `started` (the issue
+    was started again) or `landed` clears it. Empty when no run is on."""
+    try:
+        rec = read_record()
+    except SystemExit:
+        rec = None
+    last = {}
+    for r in read_journal(rec["id"]) if rec else []:
+        if r.get("issue") is not None and r.get("kind") in ("started", "blocked", "landed"):
+            last[int(r["issue"])] = r["kind"]
+    return {n for n, kind in last.items() if kind == "blocked"}
+
+
 def pick_note(got):
     """One sentence for why a pick gives nothing to start (no slot, or nothing eligible), else None."""
     if got.get("eligible") and got["slots"] > 0:
@@ -326,11 +341,18 @@ def pick(today=None, only=None):
     # The owner's worktrees stay in `running` for the overlap rule above (their files still count) but not for the slots: the run's slots
     # are [auto] parallel less the issues this run started. The memory check reads the machine's free memory, which already shows
     # the owner's work, so the machine is not overloaded by this choice.
-    own = sorted(n for n in running if n in mine)
+    # An issue the run parked (blocked) keeps its worktree (and its files still count above) but takes no slot, and is not offered again.
+    parked = run_parked_issues() & mine
+    own = sorted(n for n in running if n in mine and n not in parked)
     owner = sorted(n for n in running if n not in mine)
+    if parked:
+        eligible = [e for e in eligible if e["number"] not in parked]
+        skipped = sorted([s for s in skipped if s["number"] not in parked]
+                         + [{"number": n, "reason": "parked: blocked in this run"} for n in parked
+                            if any(i["number"] == n for i in issues)], key=lambda s: s["number"])
     parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(own))
     got = {"slots": free_slots(parallel, len(own)), "parallel": parallel, "running": own, "owner_running": owner,
-           "eligible": eligible, "skipped": skipped}
+           "parked": sorted(parked), "eligible": eligible, "skipped": skipped}
     warning = parallel_warning(parallel)
     if warning:
         got["warning"] = warning
@@ -407,6 +429,8 @@ def cmd_pick(args):
         owner = ", ".join(f"#{n}" for n in got["owner_running"])
         print(f"the owner's worktrees {owner} are in flight: they take no slot (slots = [auto] parallel less this run's own running issues), "
               "but a file they change is not given to another issue")
+    if got.get("parked"):
+        print("parked (blocked, worktree kept): " + ", ".join(f"#{n}" for n in got["parked"]) + ": they take no slot and are not offered again")
     if note:
         print(note)
     print(f"eligible ({len(got['eligible'])}), in the run's order:")

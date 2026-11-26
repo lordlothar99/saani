@@ -962,7 +962,7 @@ def cmd_status(args):
                                         activity.known_commands(cfg())) if procs is not None else []
         from . import auto
         lines = activity.tasks(held, busy, waiting, auto.read_record(), wts, outside, job_since=lambda j: activity.job_since(j, folder))
-        print("\n".join(activity.render(lines, wts, outside_unknown=procs is None)))
+        print("\n".join(activity.render(lines, wts, outside_unknown=procs is None, parked=auto.run_parked_issues())))
         return 0
     print("statistics:")
     log = main_checkout() / "build" / LANDINGS
