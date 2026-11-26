@@ -147,6 +147,30 @@ def test_off_run_ends_a_run_without_a_record(world, capsys):
         auto.cmd_off(args(run_id="a b"))
 
 
+def test_on_leaves_the_pending_mark_for_bin_saani_and_off_removes_it(world, capsys):
+    """bin/saani starts Python for the guard hook only when ~/.saani/auto holds an entry, an over mark or a .pending mark (#63): `saani auto
+    on` leaves one before its marker line, so the PostToolUse hook of that call registers the session; the registry is never empty."""
+    pending = pathlib.Path(guard.registry()) / "2026-11-22_0800.pending"
+    assert auto.cmd_on(args()) == 0
+    assert pending.is_file() and (pathlib.Path(guard.registry()) / guard.REFUSALS).is_file()
+    assert guard.state("sess-1") is None                                                     # the mark turns nothing on
+    assert auto.cmd_off(args(run_id=None)) == 0
+    assert not pending.exists()
+
+
+def test_on_here_leaves_no_pending_mark(world):
+    assert auto.cmd_on(args(here=True)) == 0
+    assert not (pathlib.Path(guard.registry()) / "2026-11-22_0800.pending").exists()
+
+
+def test_on_stops_before_its_marker_when_the_pending_mark_cannot_be_written(world, capsys):
+    (world.home / ".saani").mkdir()
+    (world.home / ".saani" / "auto").write_text("not a folder", encoding="utf-8")
+    with pytest.raises(SystemExit, match="cannot write the guard's mark"):
+        auto.cmd_on(args())
+    assert not guard.MARKER.search(capsys.readouterr().out)
+
+
 def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):
     os.makedirs(guard.registry(), exist_ok=True)
     pathlib.Path(guard.registry(), "sess-9.over").write_text("{broken", encoding="utf-8")

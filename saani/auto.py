@@ -625,10 +625,41 @@ def valid_id(text):
 
 # ---- on
 
+PENDING = ".pending"
+
+
+def mark_pending(run_id):
+    """Leaves `<run_id>.pending` in the guard's registry (~/.saani/auto) before `saani auto on` prints its marker line. bin/saani starts
+    Python for the guard hook only when the registry holds an entry, an over mark or such a mark, so the PostToolUse hook of this call
+    gets to register the session. The mark turns nothing on: the guard's rules for the switch are unchanged. It stays until `saani auto
+    off` (end_guard_entries). The registry gets the refusal log too, so it is never empty (bin/saani reads an empty registry as one it
+    cannot list)."""
+    from . import guard
+    folder = guard.registry()
+    try:
+        os.makedirs(folder, exist_ok=True)
+        open(os.path.join(folder, guard.REFUSALS), "a", encoding="utf-8").close()
+        with open(os.path.join(folder, run_id + PENDING), "w", encoding="utf-8") as f:
+            f.write("saani auto on: waiting for the guard's PostToolUse hook; removed by saani auto off\n")
+    except OSError as e:
+        raise SystemExit(f"saani auto on: cannot write the guard's mark in {folder}: {e}")
+
+
+def clear_pending(run_id):
+    """Removes the mark of `mark_pending`, if there is one."""
+    from . import guard
+    if valid_id(run_id):
+        try:
+            os.remove(os.path.join(guard.registry(), run_id + PENDING))
+        except OSError:
+            pass
+
+
 def end_guard_entries(run_id):
     """Removes the guard's registry entries of this run made for this repository (every session that registered it), through the guard's
-    `turn_off`; the entries of another project's run with the same id stay. Returns how many."""
+    `turn_off`; the entries of another project's run with the same id stay; and the run's `.pending` mark. Returns how many entries."""
     from . import guard
+    clear_pending(run_id)
     mine = own_entries(run_id)
     if len(mine) == len([1 for _, e in entries() if e.get("id") == run_id]):      # no other project holds this id: the guard's own call
         return guard.turn_off_run(run_id) or 0
@@ -694,7 +725,9 @@ def cmd_on(args):
         print(f"saani auto: here {run_id} folder={folder} (interactive: the guard stays in present mode)")
         return 0
     # The guard's PostToolUse hook registers the session after this process exits 0 and printed this line: the last line of stdout, on
-    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both).
+    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both). The mark
+    # first: without it bin/saani would not start Python for that hook when no other run is registered.
+    mark_pending(run_id)
     print(f"saani auto: on {run_id} folder={folder}")
     return 0
 

@@ -1,0 +1,152 @@
+"""bin/saani, the guard hook's launcher, run through bash as Claude Code runs it (#63): with no auto run registered anywhere it prints
+nothing and starts no Python; with an entry, an over mark, a `saani auto on` waiting for its hook, or a registry it cannot list for sure,
+it starts Python and the guard decides as before. The Pythons on the PATH are fakes that note they were started, then run the real one."""
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+from saani import auto, guard
+from guard_helpers import AUTO_ON, ROOT, _event, fake_repo, marker, ran, run_folder
+
+
+def find_bash():
+    """Git Bash on Windows (never WSL's bash.exe in System32), else bash from the PATH; None when there is none."""
+    found = shutil.which("bash")
+    if os.name != "nt":
+        return found
+    if found and "system32" not in found.lower() and "windowsapps" not in found.lower():
+        return found
+    git = shutil.which("git")
+    for parent in pathlib.Path(git).resolve().parents if git else ():
+        for c in (parent / "bin" / "bash.exe", parent / "usr" / "bin" / "bash.exe"):
+            if c.is_file():
+                return str(c)
+    return None
+
+
+BASH = find_bash()
+pytestmark = [pytest.mark.skipif(BASH is None, reason="no bash"), pytest.mark.usefixtures("home")]
+FAKE = "#!/bin/bash\necho started >> \"$SAANI_TEST_MARK\"\n[ \"$1\" = -3 ] && shift\nexec \"$SAANI_TEST_PYTHON\" \"$@\"\n"
+
+
+def fwd(p):
+    return str(p).replace("\\", "/")
+
+
+@pytest.fixture
+def launch(tmp_path, home):
+    """Runs bin/saani guard through bash with one hook event: (its output, parsed or None, and whether a Python was started)."""
+    fakes = tmp_path / "fakebin"
+    fakes.mkdir()
+    for name in ("py", "python", "python3"):
+        (fakes / name).write_text(FAKE, newline="\n")
+        (fakes / name).chmod(0o755)
+    (home / ".profile").write_text("", encoding="utf-8")                  # a home lists files: an empty one is not read for sure
+    mark = tmp_path / "python-started"
+
+    def run(cwd, event, **env_more):
+        if mark.exists():
+            mark.unlink()
+        env = {**{k: v for k, v in os.environ.items() if k.upper() != "PATH"}, "PATH": str(fakes), "HOME": str(home),
+               "USERPROFILE": str(home), "SAANI_TEST_MARK": fwd(mark), "SAANI_TEST_PYTHON": fwd(sys.executable), **env_more}
+        r = subprocess.run([BASH, fwd(ROOT) + "/bin/saani", "guard"], input=json.dumps(event).encode(), capture_output=True, cwd=cwd,
+                           env=env, timeout=60)
+        assert r.returncode == 0, r.stderr
+        out = r.stdout.decode().strip()
+        return (json.loads(out)["hookSpecificOutput"] if out else None), mark.exists()
+    return run
+
+
+def pre(cwd, command, session="s-1"):
+    return _event(cwd, "Bash", session, "PreToolUse", None, {"command": command})
+
+
+def after(cwd, command, response, session="s-1"):
+    return _event(cwd, "Bash", session, "PostToolUse", response, {"command": command})
+
+
+def registry():
+    path = pathlib.Path(guard.registry())
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@pytest.mark.parametrize("layout", ["no .saani", "no registry", "only the refusal log"])
+def test_no_auto_run_registered_no_python_started_and_no_output(tmp_path, home, launch, layout):
+    main, work = fake_repo(tmp_path)
+    if layout != "no .saani":
+        (home / ".saani").mkdir()
+        (home / ".saani" / "projects.toml").write_text("projects = []\n", encoding="utf-8")
+    if layout == "only the refusal log":
+        (registry() / guard.REFUSALS).write_text("", encoding="utf-8")
+    assert launch(work, pre(work, "git push --force")) == (None, False)
+    assert launch(work, after(work, "ls", ran("x"))) == (None, False)
+    assert launch(work, after(work, AUTO_ON, ran("auto"))) == (None, False)      # no `saani auto on` waiting: nothing to register
+
+
+def test_an_auto_run_registered_the_guard_runs_and_decides_as_before(tmp_path, launch):
+    main, work = fake_repo(tmp_path)
+    guard.turn_on("s-1", "run-1", main, tmp_path / "webshop-wt")
+    out, started = launch(work, pre(work, "git push origin HEAD:dev"))
+    assert started and out["permissionDecision"] == "deny" and "saani land" in out["permissionDecisionReason"]
+    out, started = launch(work, pre(work, "git status"))
+    assert started and out["permissionDecision"] == "allow"
+    assert launch(work, pre(work, "git push --force", session="s-2")) == (None, True)     # another session: present, but Python decided
+
+
+@pytest.mark.parametrize("layout", ["entry", "over mark", "pending mark", "empty registry", "registry is a file", "empty .saani"])
+def test_anything_else_in_the_registry_starts_python(tmp_path, home, launch, layout):
+    main, work = fake_repo(tmp_path)
+    (home / ".saani").mkdir()
+    if layout == "entry":
+        (registry() / "other-session.json").write_text("{}", encoding="utf-8")
+    elif layout == "over mark":
+        (registry() / "OTHER-SESSION.OVER").write_text("{}", encoding="utf-8")        # whatever the case of the name
+    elif layout == "pending mark":
+        (registry() / "run-1.pending").write_text("", encoding="utf-8")
+    elif layout == "empty registry":
+        registry()
+    elif layout == "registry is a file":
+        (home / ".saani" / "auto").write_text("", encoding="utf-8")
+    assert launch(work, pre(work, "git status"))[1] is True
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="POSIX permissions, not as root")
+def test_a_registry_that_cannot_be_listed_starts_python_and_fails_closed(tmp_path, launch):
+    main, work = fake_repo(tmp_path)
+    reg = registry()
+    (reg / guard.REFUSALS).write_text("", encoding="utf-8")
+    reg.chmod(0)
+    try:
+        out, started = launch(work, pre(work, "git status"))
+    finally:
+        reg.chmod(0o755)
+    assert started and out["permissionDecision"] == "deny" and "guard error" in out["permissionDecisionReason"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows: a Windows Python's home is USERPROFILE, Git Bash's HOME may differ")
+def test_windows_looks_at_home_and_userprofile(tmp_path, home, launch):
+    main, work = fake_repo(tmp_path)
+    other = tmp_path / "other-home"
+    other.mkdir()
+    (other / ".profile").write_text("", encoding="utf-8")
+    assert launch(work, pre(work, "git status"), HOME=str(other)) == (None, False)
+    guard.turn_on("s-1", "run-1", main, tmp_path / "webshop-wt")                    # under USERPROFILE (the `home` fixture) only
+    assert launch(work, pre(work, "git status"), HOME=str(other))[1] is True
+    assert launch(work, pre(work, "git status"), HOME=str(home), USERPROFILE=str(other))[1] is True
+
+
+def test_saani_auto_on_still_registers_through_the_launcher(tmp_path, launch):
+    """`saani auto on` leaves its .pending mark before its marker line, so the PostToolUse hook of that call starts Python and registers
+    the session, even with no other run registered."""
+    main, work = fake_repo(tmp_path)
+    run = run_folder(tmp_path, main)
+    auto.mark_pending("run-1")
+    out, started = launch(work, after(work, AUTO_ON, ran(marker("run-1", run))))
+    assert started and out is None
+    assert guard.state("s-1")["id"] == "run-1"

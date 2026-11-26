@@ -73,5 +73,5 @@ production) next to the status (In review), and the others still mark what the o
 | `saani-auto-<id>.log`, `saani-auto-<id>.pid` | `saani auto away`: the headless session's output and its process id |
 | `saani-deploy-<UTC>.log` | `saani deploy` |
 
-The guard's own files (an auto run's registry entries and `refusals.jsonl`) are in `~/.saani/auto/`; the map's project list is
+The guard's own files (an auto run's registry entries, its `<id>.pending` mark and `refusals.jsonl`) are in `~/.saani/auto/`; the map's project list is
 `~/.saani/projects.toml`.
