@@ -714,6 +714,20 @@ def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(w
     assert "next: journal the landing of #12" in out and "next: comment the commit on #12" in out and order == ["remove"]
 
 
+def test_landing_deletes_the_branch_the_start_pushed_to_origin_unless_the_worktree_is_kept(world, monkeypatch, capsys):
+    record(world)
+    calls = stub_landing(world, monkeypatch, on_git=lambda a: subprocess.CompletedProcess(a, 0, stdout="abc\trefs/heads/task/12-cart\n", stderr="")
+                         if a[:2] == ("ls-remote", "--heads") else None)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: True)
+    monkeypatch.setattr(auto, "journal", lambda *a, **k: None)
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: None)
+    assert core.cmd_land(land_args(keep=True)) == 0
+    assert ("push", "origin", "--delete", "task/12-cart") not in calls
+    assert core.cmd_land(land_args()) == 0
+    assert ("push", "origin", "--delete", "task/12-cart") in calls
+    assert "removed: the branch task/12-cart on origin" in capsys.readouterr().out
+
+
 def failing_removal(world, monkeypatch, listed=None, name="task-12-cart", error="in use"):
     """A landed worktree's folder whose `git worktree remove` fails; `listed` is how `git worktree list` spells that folder (None: it is
     not registered any more). Returns (folder, the git calls)."""
