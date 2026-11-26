@@ -1424,3 +1424,92 @@ def test_report_reason_is_a_report_option_only(world):
     with pytest.raises(SystemExit) as e:
         core.cmd_auto(parser.parse_args(["auto", "pick", "--reason", "x"]))
     assert "--reason belongs to `saani auto report`" in e.value.code
+
+
+# ---------------------------------------------------------------- saani auto wait and the cut-off issues (#111)
+
+def test_wait_returns_at_once_when_nothing_is_in_flight(world):
+    t = FakeTime()
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: {}, stop_fn=lambda: [], clock=t.clock, sleep=lambda s: pytest.fail("slept"))
+    assert got["reason"] == "none in flight" and got["in_flight"] == [] and got["finished"] == []
+
+
+def test_wait_returns_when_a_coder_commits(world):
+    t = FakeTime()
+    states = [{5: ("/w/5", "a"), 6: ("/w/6", "b")}] * 3 + [{5: ("/w/5", "a"), 6: ("/w/6", "c")}]
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: states.pop(0) if len(states) > 1 else states[0], stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "handed back" and got["finished"] == [6] and got["in_flight"] == [5]
+    assert t.slept == [15, 15] and got["waited_minutes"] == 0.5
+
+
+def test_wait_returns_when_a_worktree_goes_away(world):
+    t, states = FakeTime(), [{5: ("/w/5", "a")}, {5: ("/w/5", "a")}, {}]
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: states.pop(0), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "handed back" and got["finished"] == [5] and got["in_flight"] == []
+
+
+def test_wait_ends_at_its_time_limit(world):
+    t = FakeTime()
+    got = auto.wait_coder(1, "r1", marks_fn=lambda: {5: ("/w/5", "a")}, stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "time limit" and got["in_flight"] == [5] and got["finished"] == []
+    assert t.slept == [15, 15, 15, 15] and got["waited_minutes"] == 1.0
+
+
+def test_wait_returns_at_a_stop_rule(world):
+    t = FakeTime()
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: {5: ("/w/5", "a")}, stop_fn=lambda: [("hours", 10.5, 10)], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "stop" and got["stop"][0]["rule"] == "hours" and t.slept == []
+
+
+def test_wait_command_prints_json_and_checks_its_arguments(world, capsys, monkeypatch):
+    with pytest.raises(SystemExit, match="no run is on"):
+        auto.cmd_wait(args(minutes=1.0))
+    record(world)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {})
+    assert auto.cmd_wait(args(minutes=None)) == 0
+    assert json.loads(capsys.readouterr().out)["reason"] == "none in flight"
+    for bad in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(SystemExit, match="--minutes needs a number"):
+            auto.cmd_wait(args(minutes=bad))
+
+
+def test_wait_is_an_action_with_minutes_and_nothing_else_takes_minutes(world):
+    import argparse
+    parser = argparse.ArgumentParser()
+    core.add_parsers(parser.add_subparsers(dest="cmd", required=True))
+    got = parser.parse_args(["auto", "wait", "--minutes", "6"])
+    assert got.action == "wait" and got.minutes == 6.0
+    with pytest.raises(SystemExit, match="--minutes belongs to `saani auto wait`"):
+        core.cmd_auto(parser.parse_args(["auto", "pick", "--minutes", "6"]))
+
+
+def test_the_guard_allows_auto_wait_with_minutes_only():
+    assert ("auto", "wait") in guard.SAANI_SPEC
+    assert guard.SAANI_SPEC[("auto", "wait")] == ({"--minutes": True}, [])
+
+
+def test_cut_off_issues_skip_the_landed_ones(world, monkeypatch):
+    rec = record(world)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {5: ("/w/5", "a"), 6: ("/w/6", "b")})
+    monkeypatch.setattr(auto, "landed_issues", lambda r: [(6, "done")])
+    assert auto.cut_off_issues(rec) == [(5, "/w/5")]
+
+
+def test_the_fallback_report_names_the_issues_in_flight_and_the_watcher_comments_them_blocked(world, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
+    monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $0.00")
+    monkeypatch.setattr(auto, "fetch", lambda: None)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {63: ("/w/63-x", "a"), 100: ("/w/100-y", "b")})
+    monkeypatch.setattr(auto, "landed_issues", lambda rec: [])
+    posted = []
+    monkeypatch.setattr(comments, "try_post", lambda n, kind, fields=None, text="", io=None, **kw: posted.append((n, kind, text)) or True)
+    def on(env):
+        record(world, started=auto.utc_now(), watch=env[auto.WATCH_VAR])
+        guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
+    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=on)) == 0
+    text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    assert "cut off while in flight: #63 (/w/63-x), #100 (/w/100-y)" in text
+    assert [(n, k) for n, k, _ in posted] == [(63, "blocked"), (100, "blocked")]
+    assert "/w/63-x" in posted[0][2] and "r1" in posted[0][2]
+    assert auto.read_record() is None
+    assert "#63 commented as blocked" in capsys.readouterr().out

@@ -426,6 +426,18 @@ asking after repeated blocks by its auto mode classifier; a background subagent'
 `--permission-mode auto` lets Claude Code's classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
 
+**Waiting for a coder, and the cut-off fallback** (#111). `claude -p` exits when a turn ends without a tool call, even with the ceiling
+set to 0, which stops the coders and the run. While an issue is in flight and there is nothing else to do, the session therefore calls
+`saani auto wait [--minutes N]` (default 8, a finite number above 0; a Bash call lasts 10 minutes at most), alone. It blocks in the
+standard library, with no model: every 15 seconds it reads the local branches of the issues this run started (the journal's `started`
+lines) that still have a worker worktree, and returns when one has a new commit (its coder handed back) or its worktree is gone, when a
+stop rule of the run is reached (`stop`, as in `pick --wait`), at its time limit, or at once when nothing of the run is in flight. It
+prints JSON: `reason` (`none in flight`, `handed back`, `stop`, `time limit`), `finished`, `in_flight`, `waited_minutes`. It reads no
+GitHub and starts no loop in the session, which is why the guard allows it (`("auto", "wait")` with `--minutes`). The skill says never to end
+a turn with a text-only message while an issue is in flight. If the session ends anyway, the watcher's fallback report says which issues
+were cut off, with their worktree paths ("cut off while in flight"), and the watcher comments each as blocked with the worktree where
+its work stands (uncommitted changes included); the issue's label and milestone are not touched.
+
 **Keep-on mode** (#70). `/saani:auto here|away --keep-on` (`saani auto away --keep-on`; `--wait` on `away` is refused) makes the run stay on
 and keep taking newly eligible issues (filed, relabelled or answered while it runs) instead of ending when its list is empty, until
 `[auto] keep_on_quiet_minutes` without work or a stop rule. In v1.1.0, `--keep-on` meant something else: the watcher did not switch the run

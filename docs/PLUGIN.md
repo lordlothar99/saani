@@ -61,6 +61,13 @@ version changed). See `skills/auto/SKILL.md`.
 to keep its turn open until the coders are done. It also warns when Claude Code does not trust the main folder yet: open Claude Code there
 once and accept the dialog. The mechanics (the command by hand, the trust check, the process id) are in docs/SAANI.md, "An auto run".
 
+The ceiling setting is not enough (#111): `claude -p` also exits as soon as a turn ends with no tool call, and a session that says "I am
+waiting for the coder" ends exactly like that. So while an issue is in flight the session waits in a Bash call that returns: `saani auto
+wait [--minutes N]` (default 8) blocks, with no model and no tokens, until a coder of the run hands back (its worktree gets a new commit
+or goes away), a stop rule is reached or the time passes, and prints JSON (`reason`, `finished`, `in_flight`). The skill never ends a turn
+with a text-only message while an issue is in flight. If the session ends anyway, the watcher's fallback report names the issues cut
+off (with their worktree paths) and the watcher comments each as blocked with where it stands.
+
 ## Install (checked against the Claude Code docs and `claude plugin validate`, 2026-11-22)
 This repository is both the marketplace and the plugin: `.claude-plugin/marketplace.json` lists one plugin whose source is `./`, the repo
 root, with `.claude-plugin/plugin.json` beside it. Claude Code copies only a plugin's own folder at install, so the plugin is the whole

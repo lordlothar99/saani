@@ -421,6 +421,68 @@ def cmd_pick(args):
     return 0
 
 
+# ---------------------------------------------------------------- saani auto wait: keep the headless session's turn open (#111)
+
+WAIT_DEFAULT_MINUTES = 8          # `auto wait` without --minutes (a Bash call lasts 10 minutes at most)
+WAIT_LOOK_SECONDS = 15            # `auto wait` looks at the run's branches this often (local git only, no model, no gh)
+
+
+def flight_marks(rec_id):
+    """{issue: (worktree path, the branch's commit or None)} of the issues this run started whose worker worktree still exists."""
+    c = cfg()
+    started = {int(r["issue"]) for r in read_journal(rec_id) if r.get("kind") == "started" and r.get("issue") is not None}
+    out = {}
+    for path, branch in core.worktrees():
+        m = c.worker_branch.match(branch)
+        if m and core.in_wt_dir(path) and int(m.group(2)) in started:
+            head = core.git("rev-parse", branch, check=False)
+            out[int(m.group(2))] = (str(path), head.stdout.strip() or None if head.returncode == 0 else None)
+    return out
+
+
+def wait_coder(minutes, rec_id, marks_fn=None, stop_fn=None, every=WAIT_LOOK_SECONDS, clock=None, sleep=None):
+    """`saani auto wait`: blocks, with no model, until a worktree of this run gets a new commit (its coder handed back) or goes away, a
+    stop rule is reached, or `minutes` pass; at once when nothing of this run is in flight. Returns {"in_flight": [issues now],
+    "finished": [issues that handed back], "reason": "none in flight" | "handed back" | "stop" | "time limit", "waited_minutes", "stop"?}.
+    It starts no loop of its own in the session: the loop is here, which is why the guard allows this command."""
+    marks_fn = marks_fn or (lambda: flight_marks(rec_id))
+    stop_fn = stop_fn or stop_rules_hit
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    start = clock()
+    deadline = start + minutes * 60
+    first = marks_fn()
+
+    def done(reason, now, **extra):
+        finished = sorted(n for n, m in first.items() if n not in now or now[n][1] != m[1])
+        return {"reason": reason, "in_flight": sorted(n for n in now if n not in finished), "finished": finished,
+                "waited_minutes": round((clock() - start) / 60, 1), **extra}
+    if not first:
+        return done("none in flight", {})
+    while True:
+        hit = stop_fn()
+        if hit:
+            return done("stop", marks_fn(), stop=[{"rule": k, "value": v, "limit": limit} for k, v, limit in hit])
+        now = marks_fn()
+        if any(n not in now or now[n][1] != m[1] for n, m in first.items()):
+            return done("handed back", now)
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return done("time limit", now)
+        sleep(min(every, remaining))
+
+
+def cmd_wait(args):
+    minutes = getattr(args, "minutes", None)
+    minutes = WAIT_DEFAULT_MINUTES if minutes is None else minutes
+    if not math.isfinite(minutes) or minutes <= 0:
+        raise SystemExit("saani auto wait: --minutes needs a number more than 0, e.g. --minutes 8")
+    rec = read_record()
+    if not rec:
+        raise SystemExit("saani auto wait: no run is on")
+    print(json.dumps(wait_coder(minutes, rec["id"]), indent=1, ensure_ascii=False))
+    return 0
+
+
 # ---------------------------------------------------------------- the run: saani auto on | off | status | report
 
 RECORD = "saani-auto-run.json"      # in the repository's shared git folder: one run per repository, git never tracks it
@@ -1194,6 +1256,29 @@ def watch_note(text):
     print(f"saani auto watch {stamp(utc_now())}: {text}", flush=True)
 
 
+def cut_off_issues(rec):
+    """[(issue, worktree path)] of the issues this run started that still have a worker worktree and did not land: what a session that
+    ended left in flight. Reads git and the journal only; empty when it cannot tell."""
+    try:
+        landed = {n for n, _ in landed_issues(rec)}
+        return sorted((n, p) for n, (p, _) in flight_marks(rec["id"]).items() if n not in landed)
+    except (Exception, SystemExit):
+        return []
+
+
+def park_cut_off(rec, what):
+    """The watcher comments each cut-off issue as blocked, with where it stands (its worktree). A refusal by gh only prints a warning."""
+    from . import comments
+    for n, path in cut_off_issues(rec):
+        text = (f"The away run {rec['id']} ended ({what}) while this issue was in flight. Its work stands in the worktree `{path}`, "
+                "possibly with uncommitted changes. Nothing was landed for it.")
+        try:
+            if comments.try_post(n, "blocked", text=text):
+                watch_note(f"#{n} commented as blocked (worktree {path})")
+        except Exception as e:                 # the watcher always goes on to switch the run off
+            watch_note(f"#{n} could not be commented ({e})")
+
+
 def fallback_report(rec, what):
     """The watcher's safety net: a session that ended without writing its report (it died, was stopped, or never got a slot) still leaves
     one for the owner, in build/saani-auto-<id>.md, with why (the stop rules, else the last pick's reason, else how the session ended).
@@ -1205,8 +1290,12 @@ def fallback_report(rec, what):
         now = utc_now()
         rows = read_journal(rec["id"])
         landed = [(n, "", subject) for n, subject in landed_issues(rec)]
+        cut = cut_off_issues(rec)
+        reason = None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})"
+        if cut:
+            reason = (reason or f"the session ended ({what})") + "; cut off while in flight: " + ", ".join(f"#{n} ({p})" for n, p in cut)
         text = render_report(rec, now, landed, {}, refusals_by_reason(rec["id"]), rows, cost_text(rec, now), None, reached(rec, now),
-                             end=end_or_error(len(landed)), reason=None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})")
+                             end=end_or_error(len(landed)), reason=reason)
         path.write_text(text, encoding="utf-8")
         watch_note(f"no report was written by the session: written for it, {path}")
     except (Exception, SystemExit) as e:
@@ -1254,6 +1343,7 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
         return 0
     watch_note("token matched")
     fallback_report(rec, what)
+    park_cut_off(rec, what)
     try:
         cmd_off(type("Args", (), {"run_id": run_id})())
     except SystemExit as e:
@@ -1266,4 +1356,4 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
 def cmd_run(args):
     """`saani auto on|off|status|report|away`."""
     return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "end": cmd_end, "away": cmd_away,
-            "watch": cmd_watch}[args.action](args)
+            "watch": cmd_watch, "wait": cmd_wait}[args.action](args)
