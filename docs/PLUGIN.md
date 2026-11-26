@@ -55,6 +55,16 @@ and reviews and lands as each coder finishes. Landings are one at a time (the lo
 pull request, `saani ci pr`, the report on the pull request; the owner's `/saani:merge` merges it (and creates the GitHub release when the
 version changed). See `skills/auto/SKILL.md`.
 
+**What a run starts with.** A headless run sees only the repo and the issues, not the main session's memory: an owner's answer or a rule
+the coder needs is on the issue (its At a glance row or a comment). The coder's brief (`agents/coder.md`, and the brief the main session
+writes, `skills/auto/SKILL.md`) lists the command forms the guard allows and refuses, so a coder avoids the refusals (each counts toward
+the run's 40) from its first call: Read and Grep instead of `sed`, `cat` and `git grep`; `git -C <worktree>` instead of `cd`; no
+`$`, `$(...)`, backticks or redirections (the guard allows a quoted here-document for a commit message, but a headless session's
+own permissions refused one once); a commit message written to a file in `build/` and `git commit -F <file>`.
+`agents/reviewer.md` has the same. Leftover worktree folders (a landed worktree's folder that git could not delete) are removed by
+`saani start`, `land`, `status` and `prune` themselves (docs/SAANI.md, `saani prune`). Keeping a UI and its Claude Design artifact in step
+is docs/DESIGN-SYNC.md.
+
 ## The headless session of an away run (#52)
 `claude -p` stops its background tasks 10 minutes after the last turn and exits, and the away run has its coders in the background. So
 `saani auto away` starts the session with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` (wait indefinitely) and the skill's away part tells it
