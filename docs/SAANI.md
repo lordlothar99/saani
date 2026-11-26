@@ -191,10 +191,10 @@ every 5 s, read-only.
   review** a section says where the code is: on its branch, on dev, in the release pull request (it keeps its card with the CI in three
   colours), on production to deploy, on production to close (the status stays In review until the issue is closed: `saani deploy` sets Done
   itself later, #84). **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
-  status; it also stays in its own column. Testing and landing are badges on the card, with an agent working; a Backlog or Todo card shows
+  status; it also stays in its own column. Testing, ready to land and landing are badges on the card, with an agent working; a Backlog or Todo card shows
   why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
   map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
-  Merged, To deploy, To close, Deployed). `/api/state` carries both: `board` (the map's columns, unchanged) and `kanban` (`columns` with
+  Ready to land, Merged, To deploy, To close, Deployed). `/api/state` carries both: `board` (the map's columns, unchanged) and `kanban` (`columns` with
   `sections`, `pinned`; `null` without statuses); the open pull request with its CI in three colours; the Claude Code sessions of
   the project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in);
   the PC's load.
@@ -205,6 +205,10 @@ every 5 s, read-only.
   none of them), and **The Granary**, stage Todo (released: status Todo, or In progress / In review with nobody on it; an auto run takes
   it when it is ready). A repo without statuses (or `[status] enabled = "off"`) has the same two zones, filled as `saani status sync`
   would set them: a milestone is Todo, none is Backlog. The server decides it per Ready card (`queue`, saani/board_server.py).
+  Between the **Proving Ground** (tests running now) and the **Caravan Depot** (on the integration branch), **The Loading Yard**, stage
+  Ready to land, holds the work that only waits for `saani land`: a clean worktree, ahead of the integration branch, whose current tree has
+  a green landing-tests result in the test queue (the one `saani land` reuses). A new commit changes the tree and sends it back to the
+  Workshops; without `[tests] landing` nothing is known, so it stays in the Workshops.
   Each issue is a block parked at its zone (its colour is its Type, the same
   everywhere; a ring when it needs the owner; a pennant for whether an auto run can take it), the blocks of one milestone side by side, the
   milestone written in the sand in front of them; a search box and the milestone and auto-fit filters narrow what is shown. Each worker is a
