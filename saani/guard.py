@@ -656,13 +656,24 @@ def grep_tool(inp, ctx):
         import fnmatch
         plain = bool(globs) and not any(re.search(r"[/\\{}]|\*\*", g) for g in globs)
 
+        real_root = os.path.realpath(root)
+
+        def real_rel(path):
+            # Where the entry really is (os.walk enters a junction, and a symlink below the root leads anywhere): its path below the
+            # real root when it stays inside, its full real path when it leaves.
+            real = os.path.realpath(path)
+            inside = os.path.commonpath([real, real_root]) == real_root if os.path.splitdrive(real)[0] == os.path.splitdrive(real_root)[0] else False
+            return real, (os.path.relpath(real, real_root) if inside else real)
+
         def hit(path, name):
+            real, rrel = real_rel(path)
             if os.path.isdir(path):
-                return not plain and git_parts(name) == [".git"]
+                return not plain and (git_parts(name) == [".git"] or git_parts(real)[-1:] == [".git"])
             if plain and not any(fnmatch.fnmatchcase(name, g.lower()) for g in globs):
                 return False
             rel = os.path.relpath(path, root)
-            return ".git" in git_parts(rel)[:-1] or secret_name(rel) or secret_name(path)
+            return (".git" in git_parts(rel)[:-1] or ".git" in git_parts(rrel)[:-1] or secret_name(rel) or secret_name(rrel)
+                    or secret_name(path) or secret_name(real))
         if tree_has(root, hit, ctx):
             return deny("secret", "Grep in a folder tree that holds a secret file or a .git folder the search could read (or too big to "
                         "look through)", how="give Grep a glob of plain names that leaves the secret and .git out (*.py), or a deeper path")
@@ -1003,6 +1014,7 @@ SAANI_SPEC = {
     ("progress", "show"): ({}, [r".+"]),
     ("progress", "watch"): ({"--every": True}, [r".+"]),
     ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+", "--wait": True}, []),
+    ("auto", "wait"): ({"--minutes": True}, []),
     ("auto", "status"): ({"--check": False}, []),
     ("auto", "report"): ({"--pr": True, "--post": False, "--reason": True}, []),
     ("auto", "end"): ({"--json": False}, []),

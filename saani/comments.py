@@ -109,6 +109,31 @@ def has_comment(bodies, kind, needle):
     return any(KINDS[kind][0] in b and pattern.search(b) for b in bodies)
 
 
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")   # the authorAssociation of a comment a decision may come from
+
+
+def trusted_bodies(rows):
+    """The bodies of the comments (gh's `comments` rows, in posting order) written by the repo's owner or a collaborator: any GitHub user can
+    comment a public repo, and a decision is passed on to coders, so the others' comments are never read as decisions."""
+    return [r.get("body") or "" for r in rows or [] if r.get("authorAssociation") in TRUSTED]
+
+
+def decision_of(bodies):
+    """The text of the latest `Decision` of an issue (#102): the last Progress comment (bodies are in posting order) whose one-row table has
+    a `Decision` column (`saani comment <n> progress --field Decision=<text>`), None when there is none or its cell is empty."""
+    found = None
+    heading = KINDS["progress"][0]
+    for body in bodies:
+        lines = body.splitlines()
+        if not lines or lines[0].strip() != heading or len(lines) < 3:
+            continue
+        split = lambda line: [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip())[1:-1]]  # noqa: E731
+        head, row = split(lines[1]), split(lines[3] if len(lines) > 3 else "")
+        if "Decision" in head and len(row) == len(head) and row[head.index("Decision")]:
+            found = row[head.index("Decision")]
+    return found
+
+
 def apply_labels(number, kind, io=None):
     """The kind's label change, one `gh issue edit` (nothing when the kind has none)."""
     add, remove = label_changes(kind)
@@ -151,8 +176,23 @@ def try_post(number, kind, fields=None, text="", io=None, **kw):
         return False
 
 
+def review_fields(fields, issue, worktree):
+    """The fields of a `review` comment plus the record of the review cache (saani/review.py): the commit at HEAD of the issue's worktree
+    (`--worktree`, else the worktree of the issue's branch) and the hash of its whole diff. A given field wins; no worktree found: the
+    fields as they are (a review comment without a record)."""
+    from . import review
+    cwd = review.worktree_of(issue, worktree)
+    return {**review.record_fields(cwd), **fields} if cwd else fields
+
+
 def cmd_comment(args):
-    post(args.issue, args.kind, parse_fields(args.field), args.text or "", Direct(args.dry_run))
+    fields = parse_fields(args.field)
+    worktree = getattr(args, "worktree", None)
+    if worktree and args.kind != "review":
+        raise SystemExit("--worktree is for the review kind only (it names the worktree whose commit the comment records)")
+    if args.kind == "review":
+        fields = review_fields(fields, args.issue, worktree)
+    post(args.issue, args.kind, fields, args.text or "", Direct(args.dry_run))
     return 0
 
 
@@ -162,5 +202,6 @@ def add_parsers(sub):
     p.add_argument("kind", choices=list(KINDS))
     p.add_argument("--text", help="the body, under the fields")
     p.add_argument("--field", action="append", metavar="KEY=VALUE", help="a column of the one-row table (repeatable)")
+    p.add_argument("--worktree", help="review only: the worktree whose HEAD and diff hash the comment records (saani review diff reads them)")
     p.add_argument("--dry-run", action="store_true", help="print the gh commands, post nothing")
     p.set_defaults(run=cmd_comment)

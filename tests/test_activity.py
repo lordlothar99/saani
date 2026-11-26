@@ -23,6 +23,11 @@ def test_idle_still_lists_the_open_worktrees():
     assert "#12" in out[1] and "no landing or tests" in out[1]
 
 
+def test_status_says_a_parked_worktree_is_parked():
+    out = activity.render([], [(WT / "12-cart", "task/12-cart"), (WT / "13-pay", "task/13-pay")], parked=[12])
+    assert "#12 (12-cart) parked: blocked, takes no slot" in out[1] and "#13 (13-pay)" in out[1] and "13-pay) parked" not in out[1]
+
+
 def test_running_tests_and_a_landing_are_told_with_since():
     runner = {"id": "a", "kind": "landing", "worktree": str(WT / "12-cart")}
     held = {"branch": "task/13-search", "started": "2026-11-25T14:30:00"}

@@ -147,6 +147,74 @@ def test_off_run_ends_a_run_without_a_record(world, capsys):
         auto.cmd_off(args(run_id="a b"))
 
 
+def test_on_leaves_the_pending_mark_for_bin_saani_and_off_removes_it(world, capsys):
+    """bin/saani starts Python for the guard hook only when ~/.saani/auto holds an entry, an over mark or a .pending mark (#63): `saani auto
+    on` leaves one before its marker line, so the PostToolUse hook of that call registers the session; the registry is never empty."""
+    pending = pathlib.Path(guard.registry()) / "2026-11-22_0800.pending"
+    assert auto.cmd_on(args()) == 0
+    assert pending.is_file() and (pathlib.Path(guard.registry()) / guard.REFUSALS).is_file()
+    assert guard.state("sess-1") is None                                                     # the mark turns nothing on
+    assert auto.cmd_off(args(run_id=None)) == 0
+    assert not pending.exists()
+
+
+def test_on_here_leaves_no_pending_mark(world):
+    assert auto.cmd_on(args(here=True)) == 0
+    assert not (pathlib.Path(guard.registry()) / "2026-11-22_0800.pending").exists()
+
+
+def test_on_stops_before_its_marker_when_the_pending_mark_cannot_be_written(world, capsys):
+    (world.home / ".saani").mkdir()
+    (world.home / ".saani" / "auto").write_text("not a folder", encoding="utf-8")
+    with pytest.raises(SystemExit, match="cannot write the guard's mark"):
+        auto.cmd_on(args())
+    assert not guard.MARKER.search(capsys.readouterr().out)
+    assert auto.read_record() is None and not (world.git / auto.RECORD).exists()       # nothing blocks the next `saani auto on`
+
+
+def test_plain_off_with_no_record_removes_the_stale_pending_marks(world, capsys, monkeypatch):
+    """A `saani auto on` that wrote its mark but not its record: `off` says no run is on and removes the marks older than the grace
+    period of runs the guard holds no entry of; a fresh mark (another `saani auto on` waiting for its hook: without its mark that session
+    would never be registered) and the mark of a registered run stay."""
+    real = pathlib.Path.write_text
+
+    def fail_on_the_record(self, *a, **kw):
+        if self.name == auto.RECORD:
+            raise OSError("disk full")
+        return real(self, *a, **kw)
+    with monkeypatch.context() as m, pytest.raises(OSError):
+        m.setattr(pathlib.Path, "write_text", fail_on_the_record)
+        auto.cmd_on(args())
+    reg = pathlib.Path(guard.registry())
+    stale = reg / "2026-11-22_0800.pending"
+    assert stale.is_file() and auto.read_record() is None
+    guard.turn_on("sess-1", "held", world.root, world.wt, folder=world.run)
+    old = os.stat(stale).st_mtime - auto.PENDING_GRACE - 1
+    for name in ("held", "other", "fresh"):
+        (reg / f"{name}.pending").write_text("", encoding="utf-8")
+    for p in (stale, reg / "held.pending", reg / "other.pending"):
+        os.utime(p, (old, old))
+    assert auto.cmd_off(args(run_id=None)) == 0
+    out = capsys.readouterr().out
+    assert "removed 2 .pending marks of the guard with no run registered: 2026-11-22_0800, other" in out and "no auto run is on" in out
+    assert "left 1 .pending mark of the guard younger than 10 minutes" in out
+    assert not stale.exists() and not (reg / "other.pending").exists()
+    assert (reg / "held.pending").is_file() and (reg / "fresh.pending").is_file()
+    assert guard.state("sess-1")["id"] == "held"
+    (reg / "fresh.pending").unlink()
+    assert auto.cmd_off(args(run_id=None)) == 0 and capsys.readouterr().out == "no auto run is on\n"
+
+
+def test_a_pending_mark_from_the_future_or_just_at_the_grace_edge_counts_as_young(world):
+    reg = pathlib.Path(guard.registry())
+    reg.mkdir(parents=True)
+    (reg / "r.pending").write_text("", encoding="utf-8")
+    t = os.stat(reg / "r.pending").st_mtime
+    assert auto.clear_stale_pending(now=t - 5) == ([], 1)                                # a clock behind the file's time
+    assert auto.clear_stale_pending(now=t + auto.PENDING_GRACE - 1) == ([], 1)
+    assert auto.clear_stale_pending(now=t + auto.PENDING_GRACE + 1) == (["r"], 0)
+
+
 def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):
     os.makedirs(guard.registry(), exist_ok=True)
     pathlib.Path(guard.registry(), "sess-9.over").write_text("{broken", encoding="utf-8")
@@ -349,6 +417,19 @@ def test_a_left_issue_the_journal_knows_is_reported_when_github_cannot_be_read(w
 def test_no_journal_without_a_run(world):
     auto.journal(5, "landed")
     assert not (world.root / "build").exists()
+
+
+def test_an_issue_is_parked_by_its_blocked_line_until_started_again_or_landed(world):
+    record(world)
+    for n, kinds in {1: ["started", "blocked"], 2: ["started", "blocked", "progress"], 3: ["started", "blocked", "started"],
+                     4: ["started", "blocked", "landed"], 5: ["started", "question"]}.items():
+        for kind in kinds:
+            auto.journal(n, kind)
+    assert auto.run_parked_issues() == {1, 2}
+
+
+def test_no_run_parks_nothing(world):
+    assert auto.run_parked_issues() == set()
 
 
 def test_the_journal_has_a_line_per_comment_and_landing(world, monkeypatch):
@@ -633,6 +714,20 @@ def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(w
     assert "next: journal the landing of #12" in out and "next: comment the commit on #12" in out and order == ["remove"]
 
 
+def test_landing_deletes_the_branch_the_start_pushed_to_origin_unless_the_worktree_is_kept(world, monkeypatch, capsys):
+    record(world)
+    calls = stub_landing(world, monkeypatch, on_git=lambda a: subprocess.CompletedProcess(a, 0, stdout="abc\trefs/heads/task/12-cart\n", stderr="")
+                         if a[:2] == ("ls-remote", "--heads") else None)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: True)
+    monkeypatch.setattr(auto, "journal", lambda *a, **k: None)
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: None)
+    assert core.cmd_land(land_args(keep=True)) == 0
+    assert ("push", "origin", "--delete", "task/12-cart") not in calls
+    assert core.cmd_land(land_args()) == 0
+    assert ("push", "origin", "--delete", "task/12-cart") in calls
+    assert "removed: the branch task/12-cart on origin" in capsys.readouterr().out
+
+
 def failing_removal(world, monkeypatch, listed=None, name="task-12-cart", error="in use"):
     """A landed worktree's folder whose `git worktree remove` fails; `listed` is how `git worktree list` spells that folder (None: it is
     not registered any more). Returns (folder, the git calls)."""
@@ -714,11 +809,12 @@ def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_regi
     assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
 
 
-def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
+def test_a_folder_in_use_is_left_for_the_next_start_land_or_status_with_nothing_to_do_by_hand(world, monkeypatch, capsys):
     folder, _ = failing_removal(world, monkeypatch, name="it's a folder", error="busy")
     monkeypatch.setattr(core, "force_remove_folder", lambda p: False)
     core.remove_landed_worktree(folder, "task/12-cart")
-    assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "next `saani start`, `land` or `status` removes it" in out and "Remove-Item" not in out
 
 
 def test_git_exiting_during_the_post_push_steps_still_prints_every_next_step(world, monkeypatch, capsys):
@@ -1424,3 +1520,120 @@ def test_report_reason_is_a_report_option_only(world):
     with pytest.raises(SystemExit) as e:
         core.cmd_auto(parser.parse_args(["auto", "pick", "--reason", "x"]))
     assert "--reason belongs to `saani auto report`" in e.value.code
+
+
+# ---------------------------------------------------------------- saani auto wait and the cut-off issues (#111)
+
+def test_wait_returns_at_once_when_nothing_is_in_flight(world):
+    t = FakeTime()
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: {}, stop_fn=lambda: [], clock=t.clock, sleep=lambda s: pytest.fail("slept"))
+    assert got["reason"] == "none in flight" and got["in_flight"] == [] and got["finished"] == []
+
+
+def test_wait_returns_when_a_coder_commits(world):
+    t = FakeTime()
+    states = [{5: ("/w/5", "a"), 6: ("/w/6", "b")}] * 3 + [{5: ("/w/5", "a"), 6: ("/w/6", "c")}]
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: states.pop(0) if len(states) > 1 else states[0], stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "handed back" and got["finished"] == [6] and got["in_flight"] == [5]
+    assert t.slept == [15, 15] and got["waited_minutes"] == 0.5
+
+
+def test_wait_returns_when_a_worktree_goes_away(world):
+    t, states = FakeTime(), [{5: ("/w/5", "a")}, {5: ("/w/5", "a")}, {}]
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: states.pop(0), stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "handed back" and got["finished"] == [5] and got["in_flight"] == []
+
+
+def test_wait_ends_at_its_time_limit(world):
+    t = FakeTime()
+    got = auto.wait_coder(1, "r1", marks_fn=lambda: {5: ("/w/5", "a")}, stop_fn=lambda: [], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "time limit" and got["in_flight"] == [5] and got["finished"] == []
+    assert t.slept == [15, 15, 15, 15] and got["waited_minutes"] == 1.0
+
+
+def test_wait_returns_at_a_stop_rule(world):
+    t = FakeTime()
+    got = auto.wait_coder(8, "r1", marks_fn=lambda: {5: ("/w/5", "a")}, stop_fn=lambda: [("hours", 10.5, 10)], clock=t.clock, sleep=t.sleep)
+    assert got["reason"] == "stop" and got["stop"][0]["rule"] == "hours" and t.slept == []
+
+
+def test_wait_command_prints_json_and_checks_its_arguments(world, capsys, monkeypatch):
+    with pytest.raises(SystemExit, match="no run is on"):
+        auto.cmd_wait(args(minutes=1.0))
+    record(world)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {})
+    assert auto.cmd_wait(args(minutes=None)) == 0
+    assert json.loads(capsys.readouterr().out)["reason"] == "none in flight"
+    for bad in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(SystemExit, match="--minutes needs a number"):
+            auto.cmd_wait(args(minutes=bad))
+    with pytest.raises(SystemExit, match="--minutes is at most 9.5"):
+        auto.cmd_wait(args(minutes=10.0))
+    assert auto.cmd_wait(args(minutes=9.5)) == 0
+
+
+def test_wait_is_an_action_with_minutes_and_nothing_else_takes_minutes(world):
+    import argparse
+    parser = argparse.ArgumentParser()
+    core.add_parsers(parser.add_subparsers(dest="cmd", required=True))
+    got = parser.parse_args(["auto", "wait", "--minutes", "6"])
+    assert got.action == "wait" and got.minutes == 6.0
+    with pytest.raises(SystemExit, match="--minutes belongs to `saani auto wait`"):
+        core.cmd_auto(parser.parse_args(["auto", "pick", "--minutes", "6"]))
+
+
+def test_the_guard_allows_auto_wait_with_minutes_only():
+    assert ("auto", "wait") in guard.SAANI_SPEC
+    assert guard.SAANI_SPEC[("auto", "wait")] == ({"--minutes": True}, [])
+
+
+def test_cut_off_issues_skip_the_landed_ones(world, monkeypatch):
+    rec = record(world)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {5: ("/w/5", "a"), 6: ("/w/6", "b")})
+    monkeypatch.setattr(auto, "landed_issues", lambda r: [(6, "done")])
+    assert auto.cut_off_issues(rec) == [(5, "/w/5")]
+
+
+def test_the_fallback_report_names_the_issues_in_flight_and_the_watcher_comments_them_blocked(world, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
+    monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $0.00")
+    monkeypatch.setattr(auto, "fetch", lambda: None)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {5: ("/w/5-x", "a"), 6: ("/w/6-y", "b")})
+    monkeypatch.setattr(auto, "landed_issues", lambda rec: [])
+    posted = []
+    def try_post(n, kind, fields=None, text="", io=None, **kw):
+        assert kw.get("once") == "r1"
+        posted.append((n, kind, text))
+        return True
+    monkeypatch.setattr(comments, "try_post", try_post)
+    def on(env):
+        record(world, started=auto.utc_now(), watch=env[auto.WATCH_VAR])
+        guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
+    assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=on)) == 0
+    text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
+    assert "cut off while in flight: #5 (/w/5-x), #6 (/w/6-y)" in text
+    assert [(n, k) for n, k, _ in posted] == [(5, "blocked"), (6, "blocked")]
+    assert "`5-x`" in posted[0][2] and "/w/" not in posted[0][2] and "r1" in posted[0][2]      # the folder's name, never the owner's path
+    assert auto.read_record() is None
+    assert "#5 commented as blocked" in capsys.readouterr().out
+
+
+def test_the_watcher_leaves_alone_the_issues_the_session_parked_itself(world, tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
+    monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $0.00")
+    monkeypatch.setattr(auto, "fetch", lambda: None)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {5: ("/w/5-x", "a"), 6: ("/w/6-y", "b"), 7: ("/w/7-z", "c")})
+    monkeypatch.setattr(auto, "landed_issues", lambda rec: [])
+    posted = []
+    monkeypatch.setattr(comments, "try_post", lambda n, kind, **kw: posted.append(n) or True)
+    (world.root / "build").mkdir(exist_ok=True)
+    (world.root / "build" / "saani-auto-r1.md").write_text("mine", encoding="utf-8")           # the session wrote its own report
+    def on(env):
+        record(world, started=auto.utc_now(), watch=env[auto.WATCH_VAR])
+        guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
+        for n in (5, 6, 7):
+            auto.journal(n, "started")
+        auto.journal(5, "blocked")
+        auto.journal(6, "question")
+    auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=on))
+    assert posted == [7]                                                                        # #5 and #6 were parked by the session

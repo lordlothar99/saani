@@ -21,6 +21,7 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `full` | `[]` | everything: before a release, and the PC's CI |
 | | `check` | `[]` | quick checks before the full run on the PC |
 | | `timing_reports` | `[]` | files copied into a new worktree (the first is the newest timing report among worktrees) |
+| `[review]` | `always_whole` | Saani's own guard, landing, CI, merge and deploy code, its hooks, `bin/` and workflows | path globs (forward slashes, `*` also crosses folders): files a re-review (`saani review diff`) reads whole when the branch changes them, however little changed since the last review. A list replaces the default |
 | `[land]` | `generated` | `[]` | files rebuilt at landing, never by hand; a conflict there takes the integration copy |
 | | `rebuild` | `[]` | commands that rebuild them, in order (a list of command lists) |
 | | `frozen` | `{}` | `path = "mark"`: once the mark is in the first 2,000 characters of that file on the integration branch, no branch may change it |
@@ -73,5 +74,5 @@ production) next to the status (In review), and the others still mark what the o
 | `saani-auto-<id>.log`, `saani-auto-<id>.pid` | `saani auto away`: the headless session's output and its process id |
 | `saani-deploy-<UTC>.log` | `saani deploy` |
 
-The guard's own files (an auto run's registry entries and `refusals.jsonl`) are in `~/.saani/auto/`; the map's project list is
+The guard's own files (an auto run's registry entries, its `<id>.pending` mark and `refusals.jsonl`) are in `~/.saani/auto/`; the map's project list is
 `~/.saani/projects.toml`.

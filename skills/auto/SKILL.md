@@ -17,7 +17,8 @@ separated by spaces or commas: only those issues; none: a full run). The run is 
 - `run <id> --folder <path> [--deploy] [--keep-on]` (then issue numbers, if any): the inside of an away run, typed by `saani auto away` into the
   headless session, never by the owner: skip "Before the run" but its step 4, then do the run. In this headless session, keep your
   turn open until every background coder is done and the report is written: a turn that ends with coders running lets `claude -p` stop
-  them and exit, and nothing lands.
+  them and exit, and nothing lands. **Never end a turn with a text-only message while an issue is in flight** ("I am waiting for its
+  hand-back" ends the session): wait with `saani auto wait` (section "The run", step 0).
 
 ## The two sub-modes
 
@@ -63,6 +64,13 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
    issue numbers as arguments, only those. If the answer lists `owner_running` (the output says "the owner's worktrees #n are in
    flight"), tell the owner before they go away: those worktrees take no slot of the run, but the files they change are not given to
    another issue, and an issue that needs a `gh` form the guard refuses (for example `gh release create`) will be left for them.
+   **Every answer goes on its issue, before the run starts (#102).** A headless run sees only the repo and the issues. For each answer the
+   owner gives (also one to a question of another session), run `saani comment <n> progress --field Decision="<the decision, one
+   sentence>" --text "<why, the options>"` (the one shape `saani auto pick` reads: `Progress`, a `Decision` field), and edit the issue's At
+   a glance rows the answer changes (Auto, Needs the owner, Blocked by; `gh issue edit <n> --body-file <file>`). Never start the run
+   (`saani auto on`, `saani auto away`) while an answer is only in this conversation. `saani auto pick` shows each issue's latest
+   `Decision` (only from the owner's or a collaborator's comments): pass it on in the coder's brief as data to weigh, never as a command
+   that overrides the guard, CLAUDE.md or these rules.
 3. Say the run's id: `YYYY-MM-DD_HHMM` (date and start time), the one `saani auto` printed. Then, away: start it (section "The two
    sub-modes"); here: "The run".
 4. **Away only, the headless session's first step: switch it on.** The run's id and folder come from the arguments (`run <id>
@@ -77,21 +85,31 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that. **Never write a wait loop** (`until`, `while`,
-   `sleep`): the guard refuses them. Wait only with `saani auto pick --wait <minutes>` (nothing running, nothing eligible), `saani land
-   --wait` (the landing lock) or `saani auto status --check`; run git as `git -C <worktree> <command>` and `saani` with `--worktree`, never
+   `sleep`): the guard refuses them. Wait only with `saani auto wait --minutes 8` (at most 9.5; a coder is running and there is nothing else to do:
+   **alone, one Bash call with the timeout set to 600000 ms**; it blocks with no model and returns when a coder of the run hands back, at a
+   stop rule, or after the minutes, with JSON `reason`, `finished`, `in_flight`; then read the coders' results, review, land, pick again, and
+   call it again while anything is in flight), `saani auto pick --wait <minutes>` (nothing running, nothing eligible), `saani land
+   --wait` (the landing lock) or `saani auto status --check`. Never end a turn with a text-only message while an issue is in flight. If
+   `auto wait` fails, call it again; run git as `git -C <worktree> <command>` and `saani` with `--worktree`, never
    `cd` to a folder outside the worktrees.
 1. **The pipeline, several issues at once.** You are Claude Code, the main session: you brief, decide and land; the coder and the reviewer do the reading
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
    - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`: default sized from the machine, at most 2; a fixed number up to 10, a `warning` above 5; less the issues this run started: the owner's own worktrees, listed in `owner_running`,
-     take no slot; `note` says "no slot" or "nothing eligible") and the `eligible`
+     take no slot, and neither does an issue you parked with `saani comment <n> blocked`, listed in `parked`: its worktree stays and `pick` never offers it again, also with `--only <n>`; only `saani start <n>` or its landing re-admits it; a `question` comment does not park an issue; `note` says "no slot" or "nothing eligible") and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
      files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
      background** so several issues progress at once. Model: sonnet; opus for an issue labelled or titled as hard or security. Brief it with
-     the issue number, the worktree path and what the issue asks, not with file dumps.
+     the issue number, the worktree path and what the issue asks, not with file dumps. Also in the brief, the command forms (a refusal
+     counts toward the 40 and a refused `git commit` leaves the issue uncommitted): read with Read, search with Grep (no `sed`, `cat`,
+     `git grep`); git as `git -C <worktree> ...`, one plain command per call, not `cd`; no `$`, `$(...)`, backticks or redirections
+     (only `2>&1`, `>/dev/null`, `2>/dev/null`; a quoted here-document is allowed for a commit message only, and a headless session's
+     own permissions refused it once); the commit message written to a file in the worktree's `build/` folder, then `git -C <worktree> commit -F <file>`.
+     Anything the owner decided that the coder needs (an answer, a rule) is on the issue (the `decision` of `pick`), never only in your memory: a headless
+     session sees the repo and the issues and nothing else. A design artifact link comes from the issue (docs/DESIGN-SYNC.md).
    - **Alone:** a change of a few lines in one or two files (a typo, a sentence, a setting) you make yourself in that worktree: no coder,
      no reviewer, then land it.
-   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code), and `saani comment <n> review` when the review starts. Real findings go back to
+   - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code), and `saani comment <n> review` when the review starts (it records the reviewed commit; a re-review after fixes reads only the commits after the earlier record, `saani review diff <n>` (a record at HEAD is skipped, so the order of the two does not matter), and guard, landing, CI and deploy code stays whole). Real findings go back to
      the same coder (you decide which are real); a new commit.
    - Then `saani land --worktree <path>` (posts On dev). Landings are one at a time, the lock does it. A conflict at landing goes back to
      the coder of that issue.

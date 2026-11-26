@@ -9,7 +9,8 @@ disable-model-invocation: true
 
 **Arguments:** `$ARGUMENTS` (`--local-only` leaves GitHub alone).
 
-1. Run `saani prune --dry-run $ARGUMENTS` and show the list of branches it would delete.
+1. Run `saani prune --dry-run $ARGUMENTS` and show the list of branches it would delete (and the leftover worktree folders: folders git
+   no longer knows, holding only git-ignored generated files; `saani start`, `land` and `status` remove those on their own too).
 2. Nothing to delete: say so and stop. Otherwise ask the owner to confirm; deleted branches are gone from GitHub too.
 3. On a yes, run `saani prune $ARGUMENTS` and say what was deleted.
 

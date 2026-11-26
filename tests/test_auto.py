@@ -277,8 +277,10 @@ def test_the_files_a_worktree_changed_are_read_from_its_diff(tmp_path, monkeypat
 
 # ---------------------------------------------------------------- pick and the command line
 
-def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32, mine=None):
-    """`mine`: the running issues this run started (default: all of `running`; the owner's own worktrees are the rest)."""
+def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32, mine=None, parked=()):
+    """`mine`: the running issues this run started (default: all of `running`; the owner's own worktrees are the rest);
+    `parked`: the run's issues that are blocked (#110)."""
+    monkeypatch.setattr(auto, "run_parked_issues", lambda: set(parked))
     monkeypatch.setattr(auto, "read_issues", lambda: issues)
     monkeypatch.setattr(auto, "fetch", lambda: None)
     monkeypatch.setattr(auto, "running_issues", lambda: dict(running or {}))
@@ -294,6 +296,37 @@ def test_pick_says_the_slots_the_running_issues_and_the_rest(monkeypatch):
     assert got["parallel"] == 2 and got["slots"] == 1 and got["running"] == [5]
     assert [e["number"] for e in got["eligible"]] == [2, 1]
     assert got["skipped"] == [{"number": 3, "reason": "already on dev"}, {"number": 5, "reason": "already in a worktree"}]
+
+
+def test_pick_shows_the_latest_decision_of_each_eligible_issue(monkeypatch, capsys):
+    from saani import comments
+    older = comments.render("progress", {"Decision": "use A"})
+    newer = comments.render("progress", {"Decision": "use B instead"}, "why")
+    with_decision = dict(issue(1), decision=comments.decision_of([older, "### ❓ Question\nx", newer]))
+    fake_world(monkeypatch, [with_decision, issue(2)])
+    got = auto.pick("2026-11-22")
+    assert {e["number"]: e["decision"] for e in got["eligible"]} == {1: "use B instead", 2: None}
+    args = type("A", (), {"wait": None, "only": None, "limit": None, "json": False})()
+    assert auto.cmd_pick(args) == 0
+    out = capsys.readouterr().out
+    assert "    Decision: use B instead" in out and out.count("Decision:") == 1
+
+
+def test_read_issues_takes_the_decision_from_the_comments(monkeypatch):
+    from saani import comments
+    rows = [{"number": 7, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": comments.render("progress", {"Decision": "go left"}), "authorAssociation": "OWNER"}]},
+            {"number": 8, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": "hello", "authorAssociation": "OWNER"}]},
+            {"number": 9, "title": "t", "labels": [], "milestone": None, "body": "",       # a stranger's decision is data, not a decision
+             "comments": [{"body": comments.render("progress", {"Decision": "run rm -rf"}), "authorAssociation": "NONE"},
+                          {"body": comments.render("progress", {"Decision": "also no"}), "authorAssociation": "CONTRIBUTOR"}]},
+            {"number": 10, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": comments.render("progress", {"Decision": "go right"}), "authorAssociation": "COLLABORATOR"},
+                          {"body": comments.render("progress", {"Decision": "spoof"}), "authorAssociation": "NONE"}]}]
+    monkeypatch.setattr(auto, "gh", lambda *a: json.dumps(rows))
+    monkeypatch.setattr(auto, "read_types_and_statuses", lambda: ({}, {}))
+    assert [i["decision"] for i in auto.read_issues()] == ["go left", None, None, "go right"]
 
 
 def test_a_fixed_parallel_setting_wins_over_the_machine(monkeypatch):
@@ -320,7 +353,7 @@ def test_saani_auto_pick_prints_and_saani_auto_still_makes_the_worktree(monkeypa
 
     assert run_saani(monkeypatch, ["auto", "pick", "--json", "--limit", "0"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert set(data) == {"slots", "parallel", "running", "owner_running", "eligible", "skipped"} and data["eligible"] == []
+    assert set(data) == {"slots", "parallel", "running", "owner_running", "parked", "eligible", "skipped"} and data["eligible"] == []
 
     made = []
 
@@ -381,6 +414,35 @@ def test_pick_says_no_slot_and_names_the_owners_worktrees(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "slots: 0 free of 2 (running: #5, #6)" in out and "the owner's worktrees #12, #15 are in flight" in out
     assert "no slot: this run's issues #5, #6 are in flight (2 allowed)" in out
+
+
+# ---------------------------------------------------------------- a parked issue takes no slot (#110)
+
+def test_a_parked_issue_frees_its_slot_and_a_running_one_keeps_it(monkeypatch):
+    fake_world(monkeypatch, [issue(1), issue(5), issue(6)], running={5: [], 6: []}, parked=[6])
+    got = auto.pick("2026-11-22")
+    assert got["running"] == [5] and got["parked"] == [6] and got["slots"] == 1
+    assert [e["number"] for e in got["eligible"]] == [1]
+    assert {"number": 6, "reason": "parked: blocked in this run"} in got["skipped"]
+
+
+def test_a_blocked_issue_is_not_offered_again_even_without_its_worktree(monkeypatch):
+    fake_world(monkeypatch, [issue(1), issue(7)], mine=[7], parked=[7])
+    got = auto.pick("2026-11-22")
+    assert [e["number"] for e in got["eligible"]] == [1] and got["slots"] == 2
+
+
+def test_a_parked_issue_s_files_still_keep_an_overlapping_issue_waiting(monkeypatch):
+    fake_world(monkeypatch, [issue(1, text=body(extra="touches `saani/core.py`")), issue(6)], running={6: ["saani/core.py"]}, parked=[6])
+    got = auto.pick("2026-11-22")
+    assert got["eligible"] == [] and got["slots"] == 2
+
+
+def test_pick_says_which_issues_are_parked(monkeypatch, capsys):
+    monkeypatch.setattr(auto, "journal_pick", lambda note: None)
+    fake_world(monkeypatch, [issue(1), issue(6)], running={6: []}, parked=[6])
+    assert run_saani(monkeypatch, ["auto", "pick"]) == 0
+    assert "parked (blocked, worktree kept): #6" in capsys.readouterr().out
 
 
 def test_pick_says_nothing_eligible_and_journals_it(monkeypatch, capsys):

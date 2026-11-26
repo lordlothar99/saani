@@ -7,7 +7,7 @@
   merge [PR] [--deploy [--skip-ci WHY]]        merge the green integration -> production pull request, then relabel and clean up (saani/merge.py)
   deploy [--dry-run] [--skip-ci WHY]            the checks, the deploy, the log read, the prod tag moved, the issues closed (saani/deploy.py)
   kpis                                          the numbers over a window of days (saani/kpis.py)
-  release notes <milestone> | --pr N [--short] [--post] the release notes from the GitHub issues; release create <version>: a GitHub release (saani/notes.py)
+  release notes <milestone> | --pr N [--short] [--post] the release notes from the GitHub issues; release create <version>: a GitHub release; release pr [--dry-run]: the integration -> production pull request (saani/notes.py)
   ui (aliases: map, board)                      the local status page and the isometric map (saani/board_server.py)
   progress                                      a progress bar for a test run in the background (saani/progress.py)
   guard                                         the plugin's Claude Code hook (PreToolUse, PostToolUse): JSON on stdin (saani/guard.py)
@@ -51,7 +51,7 @@ if __name__ == "__main__" and sys.argv[1:2] == ["guard"]:
 
 import argparse  # noqa: E402
 
-from saani import __version__, board_server, ci, comments, core, deploy, guard, kpis, merge, notes, progress  # noqa: E402
+from saani import __version__, board_server, ci, comments, core, deploy, guard, kpis, merge, notes, progress, review  # noqa: E402
 
 
 def main(argv=None):
@@ -59,7 +59,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="saani", description="Saani: GitHub issues from idea to production")
     parser.add_argument("--version", action="version", version=f"saani {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for module in (core, ci, comments, merge, deploy, kpis, notes, board_server, progress, guard):
+    for module in (core, ci, comments, merge, deploy, kpis, notes, board_server, progress, review, guard):
         module.add_parsers(sub)
     args = parser.parse_args(argv)
     return args.run(args)

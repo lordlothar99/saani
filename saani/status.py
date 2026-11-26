@@ -10,7 +10,7 @@ Saani's steps (the decision of #72), the status only ever moving forward:
   the review starts, land, merge          -> review   (In review); `in-dev` / `in-main` say where the change waits
   deploy closes the issue as completed    -> Done (GitHub sets it on close)
 `saani auto pick` takes every ready issue except those in `backlog` (Backlog) when the repo has statuses. `[status] enabled = "off"`, or a repo without statuses:
-nothing here does anything, and Saani works from its labels alone. `gh` has no status flag (2.92): reads and writes go through `gh api`.
+nothing here does anything (a step says so in one line), and Saani works from its labels alone. `gh` has no status flag (2.92): reads and writes go through `gh api`.
 
   saani status sync [--apply]    give each open issue the status its state implies (a dry run without --apply)
 """
@@ -116,23 +116,34 @@ def plan(current, step, statuses):
 
 def advance(number, step, io=None):
     """Move issue `number` to the step's status, only forward (an In review issue is never put back In progress, a closed one never
-    reopened). Never fails the calling command: a refusal is printed. Returns the status name set, or None."""
+    reopened). Never fails the calling command: a refusal, and a no-op (statuses off, not available, unreadable, or the `plan()` reason),
+    is printed as one line. In a dry run it prints the status it would set and writes nothing. Returns the status name set, or None."""
     io = io or io_default()
     statuses = available(io)
     if not statuses:
+        if not enabled():
+            why = "issue statuses are off in saani.toml ([status] enabled)"
+        elif cfg().repo in _cache:
+            why = "the repo has no issue statuses"
+        else:
+            why = "the repo's issue statuses could not be read"
+        print(f"status of #{number} unchanged ({step}): {why}")
         return None
     owner, name = cfg().repo.split("/", 1)
     try:
         issue = (graphql(io, QUERY_ISSUE, o=owner, r=name, n=int(number)).get("repository") or {}).get("issue") or {}
         if not issue.get("id"):
+            print(f"status of #{number} unchanged ({step}): the issue was not found")
             return None
         current = issue.get("status") and {"name": issue["status"]["name"], "category": (issue["status"].get("category") or {}).get("key")}
         target, why = plan(current, step, statuses)
         if not target:
+            print(f"status of #{number} unchanged ({step}): {why}")
             return None
-        io.write("gh", "api", "graphql", "-f", "query=" + MUTATION, "-f", f"i={issue['id']}", "-f", f"s={target['id']}")
         if getattr(io, "dry", False):
             print(f"dry-run: #{number} status -> {target['name']}")
+        else:
+            io.write("gh", "api", "graphql", "-f", "query=" + MUTATION, "-f", f"i={issue['id']}", "-f", f"s={target['id']}")
         return target["name"]
     except (SystemExit, OSError, ValueError) as e:
         print(f"could not set the status of #{number} ({step}): {e}")

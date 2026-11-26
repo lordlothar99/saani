@@ -137,7 +137,7 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
     `statuses`: the repo's GitHub issue statuses (saani/status.py): every ready issue is taken except those in Backlog (no status, Todo and the
     others are eligible; also with `only`); None (the repo has none, or they are off): no status filter.
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
-    Returns (eligible, skipped): eligible [{number, title, milestone, type, flags}] in the run's order, skipped [{number, reason}]."""
+    Returns (eligible, skipped): eligible [{number, title, milestone, type, flags, decision}] (`decision`: the issue's latest `Decision`, #102) in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
     types = cfg().types if types is None else types
     owner_labels = {labels["answer"], labels["act"], labels["idea"]}
@@ -189,7 +189,8 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
             skipped.append({"number": n, "reason": f"overlaps #{hit[0]} ({hit[1]})"})
             continue
         named[n] = paths
-        eligible.append({"number": n, "title": i.get("title", ""), "milestone": i.get("milestone"), "type": i.get("type"), "flags": flags})
+        eligible.append({"number": n, "title": i.get("title", ""), "milestone": i.get("milestone"), "type": i.get("type"), "flags": flags,
+                         "decision": i.get("decision")})
     return eligible, sorted(skipped, key=lambda s: s["number"])
 
 
@@ -235,13 +236,15 @@ def read_issues():
     """The open issues (up to ISSUE_LIMIT) with their body and Type."""
     try:
         rows = json.loads(gh("issue", "list", "--repo", cfg().repo, "--state", "open", "--limit", str(ISSUE_LIMIT), "--json",
-                             "number,title,labels,milestone,body") or "[]")
+                             "number,title,labels,milestone,body,comments") or "[]")
     except json.JSONDecodeError:
         raise SystemExit("saani auto pick: gh issue list gave an answer that is not JSON")
     types, statuses = read_types_and_statuses()
+    from . import comments
     return [{"number": r["number"], "title": r["title"], "labels": [x["name"] for x in r.get("labels", [])],
              "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"]),
-             "status": statuses.get(r["number"])}
+             "status": statuses.get(r["number"]),
+             "decision": comments.decision_of(comments.trusted_bodies(r.get("comments")))}
             for r in rows]
 
 
@@ -296,6 +299,21 @@ def run_started_issues():
     return {int(r["issue"]) for r in read_journal(rec["id"]) if r.get("kind") == "started" and r.get("issue") is not None} if rec else set()
 
 
+def run_parked_issues():
+    """The issues the run that is on has parked (#110): the issue's latest `started`, `blocked` or `landed` journal line is `blocked`
+    (`saani comment <n> blocked`). They keep their worktree but take no slot and are not offered again; a later `started` (the issue
+    was started again) or `landed` clears it. Empty when no run is on."""
+    try:
+        rec = read_record()
+    except SystemExit:
+        rec = None
+    last = {}
+    for r in read_journal(rec["id"]) if rec else []:
+        if r.get("issue") is not None and r.get("kind") in ("started", "blocked", "landed"):
+            last[int(r["issue"])] = r["kind"]
+    return {n for n, kind in last.items() if kind == "blocked"}
+
+
 def pick_note(got):
     """One sentence for why a pick gives nothing to start (no slot, or nothing eligible), else None."""
     if got.get("eligible") and got["slots"] > 0:
@@ -326,11 +344,18 @@ def pick(today=None, only=None):
     # The owner's worktrees stay in `running` for the overlap rule above (their files still count) but not for the slots: the run's slots
     # are [auto] parallel less the issues this run started. The memory check reads the machine's free memory, which already shows
     # the owner's work, so the machine is not overloaded by this choice.
-    own = sorted(n for n in running if n in mine)
+    # An issue the run parked (blocked) keeps its worktree (and its files still count above) but takes no slot, and is not offered again.
+    parked = run_parked_issues() & mine
+    own = sorted(n for n in running if n in mine and n not in parked)
     owner = sorted(n for n in running if n not in mine)
+    if parked:
+        eligible = [e for e in eligible if e["number"] not in parked]
+        skipped = sorted([s for s in skipped if s["number"] not in parked]
+                         + [{"number": n, "reason": "parked: blocked in this run"} for n in parked
+                            if any(i["number"] == n for i in issues)], key=lambda s: s["number"])
     parallel = parallel_size(c.parallel, os.cpu_count(), free_ram_gb(), len(own))
     got = {"slots": free_slots(parallel, len(own)), "parallel": parallel, "running": own, "owner_running": owner,
-           "eligible": eligible, "skipped": skipped}
+           "parked": sorted(parked), "eligible": eligible, "skipped": skipped}
     warning = parallel_warning(parallel)
     if warning:
         got["warning"] = warning
@@ -407,17 +432,86 @@ def cmd_pick(args):
         owner = ", ".join(f"#{n}" for n in got["owner_running"])
         print(f"the owner's worktrees {owner} are in flight: they take no slot (slots = [auto] parallel less this run's own running issues), "
               "but a file they change is not given to another issue")
+    if got.get("parked"):
+        print("parked (blocked, worktree kept): " + ", ".join(f"#{n}" for n in got["parked"]) + ": they take no slot and are not offered again")
     if note:
         print(note)
     print(f"eligible ({len(got['eligible'])}), in the run's order:")
     for e in got["eligible"]:
         extra = [e["type"] or "no Type", e["milestone"] or "no milestone"] + e["flags"]
         print(f"  #{e['number']} {e['title']} [{'; '.join(extra)}]")
+        if e.get("decision"):
+            print(f"    Decision: {e['decision']}")
     if not got["eligible"]:
         print("  none")
     print(f"skipped ({len(got['skipped'])}):")
     for s in got["skipped"]:
         print(f"  #{s['number']} {s['reason']}")
+    return 0
+
+
+# ---------------------------------------------------------------- saani auto wait: keep the headless session's turn open (#111)
+
+WAIT_DEFAULT_MINUTES = 8          # `auto wait` without --minutes (a Bash call lasts 10 minutes at most)
+WAIT_MAX_MINUTES = 9.5            # the most `auto wait --minutes` accepts
+WAIT_LOOK_SECONDS = 15           # `auto wait` looks at the run's branches this often (local git only, no model, no gh)
+
+
+def flight_marks(rec_id):
+    """{issue: (worktree path, the branch's commit or None)} of the issues this run started whose worker worktree still exists."""
+    c = cfg()
+    started = {int(r["issue"]) for r in read_journal(rec_id) if r.get("kind") == "started" and r.get("issue") is not None}
+    out = {}
+    for path, branch in core.worktrees():
+        m = c.worker_branch.match(branch)
+        if m and core.in_wt_dir(path) and int(m.group(2)) in started:
+            head = core.git("rev-parse", branch, check=False)
+            out[int(m.group(2))] = (str(path), head.stdout.strip() or None if head.returncode == 0 else None)
+    return out
+
+
+def wait_coder(minutes, rec_id, marks_fn=None, stop_fn=None, every=WAIT_LOOK_SECONDS, clock=None, sleep=None):
+    """`saani auto wait`: blocks, with no model, until a worktree of this run gets a new commit (its coder handed back) or goes away, a
+    stop rule is reached, or `minutes` pass; at once when nothing of this run is in flight. Returns {"in_flight": [issues now],
+    "finished": [issues that handed back], "reason": "none in flight" | "handed back" | "stop" | "time limit", "waited_minutes", "stop"?}.
+    It starts no loop of its own in the session: the loop is here, which is why the guard allows this command."""
+    marks_fn = marks_fn or (lambda: flight_marks(rec_id))
+    stop_fn = stop_fn or stop_rules_hit
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    start = clock()
+    deadline = start + minutes * 60
+    first = marks_fn()
+
+    def done(reason, now, **extra):
+        finished = sorted(n for n, m in first.items() if n not in now or now[n][1] != m[1])
+        return {"reason": reason, "in_flight": sorted(n for n in now if n not in finished), "finished": finished,
+                "waited_minutes": round((clock() - start) / 60, 1), **extra}
+    if not first:
+        return done("none in flight", {})
+    while True:
+        hit = stop_fn()
+        if hit:
+            return done("stop", marks_fn(), stop=[{"rule": k, "value": v, "limit": limit} for k, v, limit in hit])
+        now = marks_fn()
+        if any(n not in now or now[n][1] != m[1] for n, m in first.items()):
+            return done("handed back", now)
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return done("time limit", now)
+        sleep(min(every, remaining))
+
+
+def cmd_wait(args):
+    minutes = getattr(args, "minutes", None)
+    minutes = WAIT_DEFAULT_MINUTES if minutes is None else minutes
+    if not math.isfinite(minutes) or minutes <= 0:
+        raise SystemExit("saani auto wait: --minutes needs a number more than 0, e.g. --minutes 8")
+    if minutes > WAIT_MAX_MINUTES:
+        raise SystemExit(f"saani auto wait: --minutes is at most {WAIT_MAX_MINUTES:g} (a Bash call lasts 10 minutes at most)")
+    rec = read_record()
+    if not rec:
+        raise SystemExit("saani auto wait: no run is on")
+    print(json.dumps(wait_coder(minutes, rec["id"]), indent=1, ensure_ascii=False))
     return 0
 
 
@@ -625,10 +719,81 @@ def valid_id(text):
 
 # ---- on
 
+PENDING = ".pending"
+
+
+def mark_pending(run_id):
+    """Leaves `<run_id>.pending` in the guard's registry (~/.saani/auto) before `saani auto on` prints its marker line. bin/saani starts
+    Python for the guard hook only when the registry holds an entry, an over mark or such a mark, so the PostToolUse hook of this call
+    gets to register the session. The mark turns nothing on: the guard's rules for the switch are unchanged. It stays until `saani auto
+    off` (end_guard_entries; with no record, clear_stale_pending). The registry gets the refusal log too, so it is never empty (bin/saani reads an empty registry as one it
+    cannot list)."""
+    from . import guard
+    folder = guard.registry()
+    try:
+        os.makedirs(folder, exist_ok=True)
+        open(os.path.join(folder, guard.REFUSALS), "a", encoding="utf-8").close()
+        with open(os.path.join(folder, run_id + PENDING), "w", encoding="utf-8") as f:
+            f.write("saani auto on: waiting for the guard's PostToolUse hook; removed by saani auto off\n")
+    except OSError as e:
+        raise SystemExit(f"saani auto on: cannot write the guard's mark in {folder}: {e}")
+
+
+def clear_pending(run_id):
+    """Removes the mark of `mark_pending`, if there is one."""
+    from . import guard
+    if valid_id(run_id):
+        try:
+            os.remove(os.path.join(guard.registry(), run_id + PENDING))
+        except OSError:
+            pass
+
+
+PENDING_GRACE = 10 * 60      # seconds: a younger .pending mark may be a `saani auto on` whose PostToolUse hook has not run yet
+
+
+def clear_stale_pending(now=None):
+    """Removes the `.pending` marks of runs the guard holds no entry of (over marks included), whatever the project, once they are older
+    than PENDING_GRACE (by the file's time): a `saani auto on` that wrote its mark but not its record, or whose session never registered.
+    Only the plain `saani auto off` with no record calls it. A younger mark stays: it may be another project's `saani auto on` waiting
+    for its hook, and without the mark bin/saani would not start Python for that hook, so an away session would never be registered and
+    would run with no guard. A mark whose time cannot be read, or lies in the future, counts as young. Returns (the run ids removed, how
+    many marks were kept as recent), the ids sorted."""
+    import time
+    from . import guard
+    folder = guard.registry()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return [], 0
+    now = time.time() if now is None else now
+    held = {e.get("id") for _, e in entries()}
+    removed, recent = [], 0
+    for name in names:
+        run_id = name[:-len(PENDING)]
+        if not name.lower().endswith(PENDING) or run_id in held:
+            continue
+        path = os.path.join(folder, name)
+        try:
+            age = now - os.stat(path).st_mtime
+        except OSError:
+            age = -1
+        if not 0 <= age or age < PENDING_GRACE:
+            recent += 1
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            continue
+        removed.append(run_id)
+    return sorted(removed), recent
+
+
 def end_guard_entries(run_id):
     """Removes the guard's registry entries of this run made for this repository (every session that registered it), through the guard's
-    `turn_off`; the entries of another project's run with the same id stay. Returns how many."""
+    `turn_off`; the entries of another project's run with the same id stay; and the run's `.pending` mark. Returns how many entries."""
     from . import guard
+    clear_pending(run_id)
     mine = own_entries(run_id)
     if len(mine) == len([1 for _, e in entries() if e.get("id") == run_id]):      # no other project holds this id: the guard's own call
         return guard.turn_off_run(run_id) or 0
@@ -681,6 +846,10 @@ def cmd_on(args):
     token = os.environ.get(WATCH_VAR)
     if token and not here_mode:
         rec["watch"] = token          # the watcher that started this session (#67): only it ends this record; written here and nowhere else
+    if not here_mode:
+        # The guard's mark before the record: when it cannot be written, no record is left to block the next `saani auto on`. Without it
+        # bin/saani would not start Python for the PostToolUse hook of this call when no other run is registered.
+        mark_pending(run_id)
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
     warning = parallel_warning(parallel_size(cfg().parallel, os.cpu_count(), None))
     if warning:
@@ -694,7 +863,8 @@ def cmd_on(args):
         print(f"saani auto: here {run_id} folder={folder} (interactive: the guard stays in present mode)")
         return 0
     # The guard's PostToolUse hook registers the session after this process exits 0 and printed this line: the last line of stdout, on
-    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both).
+    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both); the
+    # .pending mark is written above.
     print(f"saani auto: on {run_id} folder={folder}")
     return 0
 
@@ -770,10 +940,18 @@ def guard_live(session):
 
 def cmd_off(args):
     """The owner's end of the run, from a terminal (the guard refuses it inside the run): the guard's entries of the run, then the record.
-    `--run ID` ends that run even when the record is gone or another."""
+    `--run ID` ends that run even when the record is gone or another. With neither, it removes the stale `.pending` marks of the guard
+    (clear_stale_pending)."""
     rec = read_record()
     run_id = args.run_id or (rec or {}).get("id")
     if not run_id:
+        stale, recent = clear_stale_pending()
+        if stale:
+            print(f"removed {len(stale)} .pending mark{'' if len(stale) == 1 else 's'} of the guard with no run registered: "
+                  + ", ".join(stale))
+        if recent:
+            print(f"left {recent} .pending mark{'' if recent == 1 else 's'} of the guard younger than {PENDING_GRACE // 60} minutes "
+                  "(a `saani auto on` may be waiting for its hook): run `saani auto off` again later")
         print("no auto run is on")
         return 0
     if not valid_id(run_id):
@@ -1194,6 +1372,37 @@ def watch_note(text):
     print(f"saani auto watch {stamp(utc_now())}: {text}", flush=True)
 
 
+def cut_off_issues(rec):
+    """[(issue, worktree path)] of the issues this run started that still have a worker worktree and did not land: what a session that
+    ended left in flight. Reads git and the journal only; empty when it cannot tell."""
+    try:
+        landed = {n for n, _ in landed_issues(rec)}
+        parked = set()                       # the session itself parked these: a blocked or question comment after the started line
+        for r in read_journal(rec["id"]):
+            if r.get("issue") is None:
+                continue
+            if r.get("kind") == "started":
+                parked.discard(int(r["issue"]))
+            elif r.get("kind") in ("blocked", "question"):
+                parked.add(int(r["issue"]))
+        return sorted((n, p) for n, (p, _) in flight_marks(rec["id"]).items() if n not in landed and n not in parked)
+    except (Exception, SystemExit):
+        return []
+
+
+def park_cut_off(rec, what):
+    """The watcher comments each cut-off issue as blocked, with where it stands (its worktree). A refusal by gh only prints a warning."""
+    from . import comments
+    for n, path in cut_off_issues(rec):
+        text = (f"The away run {rec['id']} ended ({what}) while this issue was in flight. Its work stands in the worktree folder "
+                f"`{pathlib.Path(path).name}`, possibly with uncommitted changes. Nothing was landed for it.")
+        try:
+            if comments.try_post(n, "blocked", text=text, once=rec["id"]):
+                watch_note(f"#{n} commented as blocked (worktree {path})")
+        except Exception as e:                 # the watcher always goes on to switch the run off
+            watch_note(f"#{n} could not be commented ({e})")
+
+
 def fallback_report(rec, what):
     """The watcher's safety net: a session that ended without writing its report (it died, was stopped, or never got a slot) still leaves
     one for the owner, in build/saani-auto-<id>.md, with why (the stop rules, else the last pick's reason, else how the session ended).
@@ -1205,8 +1414,12 @@ def fallback_report(rec, what):
         now = utc_now()
         rows = read_journal(rec["id"])
         landed = [(n, "", subject) for n, subject in landed_issues(rec)]
+        cut = cut_off_issues(rec)
+        reason = None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})"
+        if cut:
+            reason = (reason or f"the session ended ({what})") + "; cut off while in flight: " + ", ".join(f"#{n} ({p})" for n, p in cut)
         text = render_report(rec, now, landed, {}, refusals_by_reason(rec["id"]), rows, cost_text(rec, now), None, reached(rec, now),
-                             end=end_or_error(len(landed)), reason=None if (reached(rec, now) or idle_reason(rows)) else f"the session ended without writing its report ({what})")
+                             end=end_or_error(len(landed)), reason=reason)
         path.write_text(text, encoding="utf-8")
         watch_note(f"no report was written by the session: written for it, {path}")
     except (Exception, SystemExit) as e:
@@ -1254,6 +1467,7 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
         return 0
     watch_note("token matched")
     fallback_report(rec, what)
+    park_cut_off(rec, what)
     try:
         cmd_off(type("Args", (), {"run_id": run_id})())
     except SystemExit as e:
@@ -1266,4 +1480,4 @@ def cmd_watch(args, which=None, popen=subprocess.Popen):
 def cmd_run(args):
     """`saani auto on|off|status|report|away`."""
     return {"on": cmd_on, "off": cmd_off, "status": cmd_status, "report": cmd_report, "end": cmd_end, "away": cmd_away,
-            "watch": cmd_watch}[args.action](args)
+            "watch": cmd_watch, "wait": cmd_wait}[args.action](args)

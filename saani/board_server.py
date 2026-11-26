@@ -42,7 +42,7 @@ import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import config, core, glance, progress
+from . import config, core, glance, progress, queue
 from . import status as issue_status
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -62,6 +62,8 @@ COLUMNS = [
     ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. Claude Code can start it. Command: /saani:start <issue>."),
     ("building", "Building", "An agent works on it in its own folder (a worktree). Command: /saani:land when it is committed."),
     ("testing", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a slow run)."),
+    ("tested", "Ready to land", "Committed, clean, and its landing tests are green for this very commit: it only waits to land. A new commit sends "
+                                "it back to Building. Command: /saani:land."),
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
     ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy. Command: /saani:ci merged <pr>."),
     ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it. Command: /saani:ci merged <pr>."),
@@ -291,6 +293,8 @@ def column_for(issue, worktree=None, testing=(), closing=()):
         return None
     if issue["number"] in testing:
         return "testing"
+    if worktree and worktree.get("green") and worktree.get("ahead") and not worktree.get("dirty"):
+        return "tested"
     if worktree and (worktree.get("ahead") or worktree.get("dirty")):
         return "building"
     if issue.get("state") == "CLOSED":
@@ -311,7 +315,8 @@ def prompt_for(number, column, need=None):
                 if need == "answer" else f"#{number} waits for me to act: tell me exactly what to do, step by step, with ready-to-paste commands.")
     return {"ready": f"Start #{number}: saani start, implement it, test it and land it.",
             "building": f"Where is #{number}? What is done, what is left, and is anything blocked?",
-            "testing": f"How are the tests of #{number} going?"}.get(column)
+            "testing": f"How are the tests of #{number} going?",
+            "tested": f"Land #{number}: its landing tests are green, run saani land from its worktree."}.get(column)
 
 
 def column_prompt(column, numbers, pr=None):
@@ -455,9 +460,10 @@ KANBAN_SECTIONS = {
     "done": [("deployed", "Closed", "Deployed or closed after the merge."),
              ("notplanned", "Not planned and duplicates", "Closed as not planned or as a duplicate.")],
 }
-KANBAN_FLOOR = {"building": "started", "testing": "started", "dev": "review", "main": "review", "close": "review"}   # a card's place on this PC
+KANBAN_FLOOR = {"building": "started", "testing": "started", "tested": "started", "dev": "review", "main": "review",
+                "close": "review"}                                                             # a card's place on this PC
 KANBAN_STEPS = ("backlog", "todo", "started", "review")
-KANBAN_SECTION_OF = {"building": "branch", "testing": "branch", "main": "main", "close": "close"}
+KANBAN_SECTION_OF = {"building": "branch", "testing": "branch", "tested": "branch", "main": "main", "close": "close"}
 
 
 def kanban_place(card, col, carried=()):
@@ -512,6 +518,8 @@ def build_kanban(board, statuses_on, landing=None):
             badges = kanban_why(card) if col in ("backlog", "todo") else []
             if column["id"] == "testing":
                 badges.append({"text": "testing", "kind": "info"})
+            if column["id"] == "tested":
+                badges.append({"text": "ready to land", "kind": "info"})
             if landing is not None and card["number"] == landing:
                 badges.append({"text": "landing", "kind": "info"})
             if col == "backlog" and not card.get("need"):                # not released: the prompt is to get it ready, not to start it
@@ -709,6 +717,23 @@ def saani_version(code=None, runner=None):
     return {"label": "v" + __version__, "kind": "version"}
 
 
+def landing_green(path, now=None):
+    """True when the worktree at `path` is clean and the test queue holds a green landing-tests result for its tree (saani/queue.py), so
+    `saani land` would reuse it: the work is tested and only waits to land. No landing tests set, a dirty checkout, no result or anything
+    unclear: False. A new commit changes the tree, so the answer follows the worktree by itself."""
+    c = cfg()
+    if not c.landing:
+        return False
+    status = run("git", "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", cwd=path)
+    tree = run("git", "rev-parse", "HEAD^{tree}", cwd=path)
+    common = run("git", "rev-parse", "--git-common-dir", cwd=path)
+    if status or not tree or not common:
+        return False
+    folder = pathlib.Path(common)
+    folder = (folder if folder.is_absolute() else pathlib.Path(path) / folder) / queue.QUEUE_DIR
+    return queue.find_green(folder, tree, c.command("landing"), "landing", now) is not None
+
+
 def tasks():
     rows = []
     for path, branch in core.worktrees():
@@ -717,7 +742,9 @@ def tasks():
         ahead = run("git", "rev-list", "--count", f"origin/{cfg().integration}..HEAD", cwd=path) or "0"
         dirty = len([x for x in run("git", "--no-optional-locks", "status", "--porcelain", cwd=path).splitlines() if x.strip()])
         last = run("git", "log", "-1", "--format=%s%x1f%cr", cwd=path).split("\x1f")
-        rows.append(worktree_row(path, branch, int(ahead), dirty, last[0][:100], last[1] if len(last) > 1 else ""))
+        row = worktree_row(path, branch, int(ahead), dirty, last[0][:100], last[1] if len(last) > 1 else "")
+        row["green"] = bool(int(ahead) and not dirty and safe(lambda: landing_green(path), default=False) is True)
+        rows.append(row)
     return rows
 
 
@@ -865,6 +892,12 @@ def milestones(rows, open_issues):
     return sorted(out, key=lambda m: milestone_key(m["title"]))
 
 
+def closed_milestones(rows):
+    """The titles of the closed milestones, from the same list of GitHub's milestones as the strip: the map leaves the done issues of
+    these out of its Citadel (a milestone not named here is kept)."""
+    return [m["title"] for m in rows if m.get("state") == "closed" and m.get("title")]
+
+
 def hygiene(open_issues, closed_issues, landed, labels):
     """What needs tidying: [{kind, issues}] without the empty ones. closed_labelled: closed but still labelled in-dev / in-main;
     no_milestone: open (not an idea) with no milestone; landed_unlabelled: commits between production and the integration branch name
@@ -986,9 +1019,11 @@ def state():
     testing = testing_issues(trees, tst["runs"], int(m.group(2)) if m else None)
     titles = {i["number"]: i["title"] for i in iss.get("open", []) + iss.get("closed", [])}
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
-    strips = safe(lambda: cached("strips", 120, lambda: {
-        "milestones": milestones(milestone_rows(), iss.get("open", [])),
-        "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}), default={"milestones": [], "hygiene": []})
+    def strips_of():
+        rows = milestone_rows()                                              # one fetch for the strip and the closed ones
+        return {"milestones": milestones(rows, iss.get("open", [])), "closed_milestones": closed_milestones(rows),
+                "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}
+    strips = safe(lambda: cached("strips", 120, strips_of), default={"milestones": [], "closed_milestones": [], "hygiene": []})
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
@@ -996,7 +1031,8 @@ def state():
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],
-            "milestones": strips.get("milestones", []), "hygiene": strips.get("hygiene", []),
+            "milestones": strips.get("milestones", []), "closed_milestones": strips.get("closed_milestones", []),
+            "hygiene": strips.get("hygiene", []),
             "board": board, "kanban": safe(lambda: build_kanban(board, has_statuses(iss.get("board", [])), int(m.group(2)) if m else None), default=False),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci)),
