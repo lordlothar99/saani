@@ -1,6 +1,5 @@
 """saani/guard.py, Grep's walk below a link (#94): a symlink or a Windows junction below the search root that leads to a .git or a .ssh
-folder must not hide it. The tests are marked xfail until the guard judges each walked entry by its resolved path (or refuses a tree that
-holds a link leaving the root); the owner applies that patch and removes the marks."""
+folder must not hide it. The guard judges each walked entry by its resolved path as well as its path below the root."""
 import os
 import pathlib
 
@@ -23,7 +22,6 @@ def make_link(src, target, kind):
         pytest.skip(f"no {kind} can be made here")
 
 
-@pytest.mark.xfail(reason="#94: the walk judges entries below a link by their unresolved path", strict=True)
 @pytest.mark.parametrize("kind", ["symlink", "junction"])
 @pytest.mark.parametrize("folder,name", [(".git", "config"), (".ssh", "known_hosts")])
 def test_grep_of_a_tree_with_a_link_to_a_secret_folder(ctx, tmp_path, kind, folder, name):
