@@ -6,7 +6,7 @@ import pytest
 
 from saani import auto, ci, comments, core, status
 from test_auto_run import land_args, stub_landing, world  # noqa: F401  (world is a fixture)
-from test_comments import MergeGh, merged_env  # noqa: F401  (merged_env is a fixture)
+from test_comments import MergeGh, Result, merged_env  # noqa: F401  (merged_env is a fixture)
 from test_deploy import FakeGh as DeployGh
 from test_deploy import world as deploy_world  # noqa: F401  (a fixture)
 from test_merge import FakeGh as MergeFake
@@ -47,7 +47,7 @@ def start(monkeypatch, tmp_path, no_comment):
     def git(*args, cwd=None, check=True):
         if args[:2] == ("worktree", "add"):
             folder.mkdir(parents=True, exist_ok=True)
-        return ""
+        return "" if check else Result(0)
     monkeypatch.setattr(core, "git", git)
     core.cfg().worktree_folder = str(tmp_path / "wt")
     core.cfg().owner = ""

@@ -147,6 +147,74 @@ def test_off_run_ends_a_run_without_a_record(world, capsys):
         auto.cmd_off(args(run_id="a b"))
 
 
+def test_on_leaves_the_pending_mark_for_bin_saani_and_off_removes_it(world, capsys):
+    """bin/saani starts Python for the guard hook only when ~/.saani/auto holds an entry, an over mark or a .pending mark (#63): `saani auto
+    on` leaves one before its marker line, so the PostToolUse hook of that call registers the session; the registry is never empty."""
+    pending = pathlib.Path(guard.registry()) / "2026-11-22_0800.pending"
+    assert auto.cmd_on(args()) == 0
+    assert pending.is_file() and (pathlib.Path(guard.registry()) / guard.REFUSALS).is_file()
+    assert guard.state("sess-1") is None                                                     # the mark turns nothing on
+    assert auto.cmd_off(args(run_id=None)) == 0
+    assert not pending.exists()
+
+
+def test_on_here_leaves_no_pending_mark(world):
+    assert auto.cmd_on(args(here=True)) == 0
+    assert not (pathlib.Path(guard.registry()) / "2026-11-22_0800.pending").exists()
+
+
+def test_on_stops_before_its_marker_when_the_pending_mark_cannot_be_written(world, capsys):
+    (world.home / ".saani").mkdir()
+    (world.home / ".saani" / "auto").write_text("not a folder", encoding="utf-8")
+    with pytest.raises(SystemExit, match="cannot write the guard's mark"):
+        auto.cmd_on(args())
+    assert not guard.MARKER.search(capsys.readouterr().out)
+    assert auto.read_record() is None and not (world.git / auto.RECORD).exists()       # nothing blocks the next `saani auto on`
+
+
+def test_plain_off_with_no_record_removes_the_stale_pending_marks(world, capsys, monkeypatch):
+    """A `saani auto on` that wrote its mark but not its record: `off` says no run is on and removes the marks older than the grace
+    period of runs the guard holds no entry of; a fresh mark (another `saani auto on` waiting for its hook: without its mark that session
+    would never be registered) and the mark of a registered run stay."""
+    real = pathlib.Path.write_text
+
+    def fail_on_the_record(self, *a, **kw):
+        if self.name == auto.RECORD:
+            raise OSError("disk full")
+        return real(self, *a, **kw)
+    with monkeypatch.context() as m, pytest.raises(OSError):
+        m.setattr(pathlib.Path, "write_text", fail_on_the_record)
+        auto.cmd_on(args())
+    reg = pathlib.Path(guard.registry())
+    stale = reg / "2026-11-22_0800.pending"
+    assert stale.is_file() and auto.read_record() is None
+    guard.turn_on("sess-1", "held", world.root, world.wt, folder=world.run)
+    old = os.stat(stale).st_mtime - auto.PENDING_GRACE - 1
+    for name in ("held", "other", "fresh"):
+        (reg / f"{name}.pending").write_text("", encoding="utf-8")
+    for p in (stale, reg / "held.pending", reg / "other.pending"):
+        os.utime(p, (old, old))
+    assert auto.cmd_off(args(run_id=None)) == 0
+    out = capsys.readouterr().out
+    assert "removed 2 .pending marks of the guard with no run registered: 2026-11-22_0800, other" in out and "no auto run is on" in out
+    assert "left 1 .pending mark of the guard younger than 10 minutes" in out
+    assert not stale.exists() and not (reg / "other.pending").exists()
+    assert (reg / "held.pending").is_file() and (reg / "fresh.pending").is_file()
+    assert guard.state("sess-1")["id"] == "held"
+    (reg / "fresh.pending").unlink()
+    assert auto.cmd_off(args(run_id=None)) == 0 and capsys.readouterr().out == "no auto run is on\n"
+
+
+def test_a_pending_mark_from_the_future_or_just_at_the_grace_edge_counts_as_young(world):
+    reg = pathlib.Path(guard.registry())
+    reg.mkdir(parents=True)
+    (reg / "r.pending").write_text("", encoding="utf-8")
+    t = os.stat(reg / "r.pending").st_mtime
+    assert auto.clear_stale_pending(now=t - 5) == ([], 1)                                # a clock behind the file's time
+    assert auto.clear_stale_pending(now=t + auto.PENDING_GRACE - 1) == ([], 1)
+    assert auto.clear_stale_pending(now=t + auto.PENDING_GRACE + 1) == (["r"], 0)
+
+
 def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):
     os.makedirs(guard.registry(), exist_ok=True)
     pathlib.Path(guard.registry(), "sess-9.over").write_text("{broken", encoding="utf-8")
@@ -646,6 +714,20 @@ def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(w
     assert "next: journal the landing of #12" in out and "next: comment the commit on #12" in out and order == ["remove"]
 
 
+def test_landing_deletes_the_branch_the_start_pushed_to_origin_unless_the_worktree_is_kept(world, monkeypatch, capsys):
+    record(world)
+    calls = stub_landing(world, monkeypatch, on_git=lambda a: subprocess.CompletedProcess(a, 0, stdout="abc\trefs/heads/task/12-cart\n", stderr="")
+                         if a[:2] == ("ls-remote", "--heads") else None)
+    monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: True)
+    monkeypatch.setattr(auto, "journal", lambda *a, **k: None)
+    monkeypatch.setattr(core, "remove_landed_worktree", lambda *a, **k: None)
+    assert core.cmd_land(land_args(keep=True)) == 0
+    assert ("push", "origin", "--delete", "task/12-cart") not in calls
+    assert core.cmd_land(land_args()) == 0
+    assert ("push", "origin", "--delete", "task/12-cart") in calls
+    assert "removed: the branch task/12-cart on origin" in capsys.readouterr().out
+
+
 def failing_removal(world, monkeypatch, listed=None, name="task-12-cart", error="in use"):
     """A landed worktree's folder whose `git worktree remove` fails; `listed` is how `git worktree list` spells that folder (None: it is
     not registered any more). Returns (folder, the git calls)."""
@@ -727,11 +809,12 @@ def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_regi
     assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
 
 
-def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
+def test_a_folder_in_use_is_left_for_the_next_start_land_or_status_with_nothing_to_do_by_hand(world, monkeypatch, capsys):
     folder, _ = failing_removal(world, monkeypatch, name="it's a folder", error="busy")
     monkeypatch.setattr(core, "force_remove_folder", lambda p: False)
     core.remove_landed_worktree(folder, "task/12-cart")
-    assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "next `saani start`, `land` or `status` removes it" in out and "Remove-Item" not in out
 
 
 def test_git_exiting_during_the_post_push_steps_still_prints_every_next_step(world, monkeypatch, capsys):

@@ -359,12 +359,45 @@ def cmd_auto(args):
     print(f"branch:    {name} (from origin/{c.integration}; never landed; `saani prune` removes it once the run is off, it started more than 2 hours ago and it has no commit of its own, `saani ci merged` once it is merged)")
 
 
+def remote_branches():
+    """The branch names on origin right now (`git ls-remote`, not the remote-tracking refs, which may be stale). Stops when origin cannot
+    be reached."""
+    r = git("ls-remote", "--heads", "origin", check=False)
+    if r.returncode != 0:
+        raise SystemExit(f"cannot read the branches on origin, so the issue cannot be claimed: {(r.stderr or '').strip()[-300:]}")
+    return [line.split("refs/heads/", 1)[1] for line in r.stdout.splitlines() if "refs/heads/" in line]
+
+
+def claim_push(name, source, issue):
+    """Claims the issue by pushing its branch to origin. Origin makes the branch once: the lease with an empty expectation refuses a
+    branch that exists at another commit, and the porcelain report refuses one that exists at this very commit (two starts from the
+    same base push the same commit, and git calls that second push "up to date", not a failure). Stops with the reason on a refusal."""
+    done = git("push", "--porcelain", f"--force-with-lease=refs/heads/{name}:", "origin", f"{source}:refs/heads/{name}", check=False)
+    if done.returncode == 0 and any(line.startswith("=") for line in done.stdout.splitlines()):
+        done.returncode, done.stderr = 1, "the branch already exists on origin at this commit"
+    if done.returncode != 0:
+        raise SystemExit(f"cannot claim #{issue}: pushing {name} to origin failed (offline, refused, or the issue was claimed "
+                         f"meanwhile); no worktree was made: {(done.stderr or '').strip()[-300:]}")
+
+
 def cmd_start(args):
     c = cfg()
     info = issue_info(args.issue)
     git("fetch", "-q", "origin", c.integration)
     base, warning = hotfix_base() if args.hotfix else (f"origin/{c.integration}", None)
-    branches = git("branch", "-a", "--format=%(refname:short)").splitlines()
+    branches = git("branch", "--format=%(refname:short)").splitlines()      # local only: a remote-tracking ref may be stale
+    on_origin = remote_branches()
+    taken = existing_branch(args.issue, on_origin, hotfix=args.hotfix)
+    if taken:                                           # the claim is a branch on origin (#100): a second one is refused
+        home = next((p for p, b in worktrees() if b == taken), None)
+        if home:
+            more = f", its worktree is {home}: work there"
+        elif taken in branches:
+            more = (f" and is a local branch of this clone with no worktree: `git worktree add {c.wt_dir / taken.split('/', 1)[1]} {taken}` resumes it "
+                    f"(run `git worktree prune` first if git says the folder is still registered)")
+        else:
+            more = f" (not a worktree of this clone: another clone holds it; if it is abandoned, delete it: git push origin --delete {taken})"
+        raise SystemExit(f"issue #{args.issue} is already claimed: branch {taken} is on origin" + more)
     name = existing_branch(args.issue, branches, hotfix=args.hotfix)
     if not name:
         prefix = branch_type(info.get("type"))
@@ -377,17 +410,20 @@ def cmd_start(args):
         words = slug(args.slug or info["title"])
         name = hotfix_name(prefix, args.issue, words) if args.hotfix else dev_name(prefix, args.issue, words)
     folder = c.wt_dir / name.split("/", 1)[1]
+    clean_leftovers()
     if folder.exists():
         raise SystemExit(f"{folder} already exists: work there, or land or remove it first")
-    folder.parent.mkdir(parents=True, exist_ok=True)
     local = name in branches
-    remote = f"origin/{name}" in branches
-    if local:
-        git("worktree", "add", str(folder), name)
-    elif remote:
-        git("worktree", "add", "-b", name, str(folder), f"origin/{name}")
-    else:
-        git("worktree", "add", "--no-track", "-b", name, str(folder), base)
+    claim_push(name, name if local else git("rev-parse", f"{base}^{{commit}}"), args.issue)     # the claim: before any worktree exists
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if local:
+            git("worktree", "add", str(folder), name)
+        else:
+            git("worktree", "add", "--no-track", "-b", name, str(folder), base)
+    except SystemExit:
+        git("push", "origin", "--delete", name, check=False)      # no worktree: the claim goes too
+        raise
     (folder / "build").mkdir(exist_ok=True)
     report = latest_timing_report()
     if report:
@@ -402,7 +438,7 @@ def cmd_start(args):
         from . import auto
         auto.journal(args.issue, "started")                # the comment journals it itself; inside a run this marks the issue as the run's (#56)
     print(f"worktree: {folder}")
-    print(f"branch:   {name} ({'existing' if local or remote else 'from ' + base})")
+    print(f"branch:   {name} ({'existing' if local else 'from ' + base}; pushed to origin: the issue is claimed)")
     print(f"timing:   {report or 'none found: the landing tests estimate is rougher'}")
     need = " and ".join(t + ":" for t in c.trailers)
     if args.hotfix:
@@ -498,6 +534,7 @@ def land_hotfix(args, cwd, branch, number):
     if args.dry_run:
         print(f"would run the landing tests against origin/{c.production}, push {branch} and open its pull request into {c.production}")
         return 0
+    clean_leftovers(cwd)
     if c.landing and queued_run("land", [*c.command("landing"), "--base", f"origin/{c.production}"], cwd) != 0:
         print("HOTFIX STOPPED: the landing tests are red: fix it on the branch, commit, land again")
         return 1
@@ -578,6 +615,7 @@ def cmd_land(args):
         status.advance(m.group(2), "review", comments.Direct(True))
         return 0
 
+    clean_leftovers(cwd)
     lock = lock_path(cwd)
     deadline = time.time() + args.wait * 60
     while not take_lock(lock, branch):
@@ -641,6 +679,13 @@ def cmd_land(args):
         status.advance(n, "review")             # the comment sets it; without one (--no-comment, or refused), set it here
     if not args.keep:
         try:
+            if branch in remote_branches():            # the claim made at the start (#100) goes with the local branch
+                gone = git("push", "origin", "--delete", branch, cwd=cwd, check=False)
+                print(f"removed: the branch {branch} on origin" if gone.returncode == 0 else
+                      f"next: delete the branch on origin: git push origin --delete {branch} ({(gone.stderr or '').strip()[-200:]})")
+        except (Exception, SystemExit) as e:   # noqa: BLE001
+            print(f"next: delete the branch on origin: git push origin --delete {branch} ({e})")
+        try:
             remove_landed_worktree(cwd, branch)
         except (Exception, SystemExit) as e:   # noqa: BLE001
             print(f"next: remove the worktree: git worktree remove {cwd}; git branch -D {branch} ({e})")
@@ -688,11 +733,87 @@ def remove_landed_worktree(cwd, branch):
     if not same_path(cwd, home) and force_remove_folder(cwd):          # git unregistered it but kept the folder: finish the job
         print(f"removed: {cwd} and the local branch {branch} (the folder git left behind)")
         return
-    quoted = str(cwd).replace("'", "''")
     exists = pathlib.Path(cwd).exists()
     left = f"the folder {cwd} is left" if exists else "nothing is left"
     print(f"the worktree is unregistered but git could not delete its folder: the local branch {branch} is deleted; {left}"
-          + (f", remove it yourself (e.g. Remove-Item -LiteralPath '{quoted}' -Recurse -Force)" if exists else ""))
+          + ("; it is in use, and the next `saani start`, `land` or `status` removes it (nothing to do by hand)" if exists else ""))
+
+
+LEFTOVER_PROBLEM = "cannot be checked"
+LEFTOVER_NAME = re.compile(r"\d+-.+|auto-.+")      # the names Saani gives a worktree folder: `<n>-<slug>` and `auto-<id>`; no other folder is ever touched
+LEFTOVER_MIN_AGE = 60                              # seconds: an empty folder younger than this may be a `saani start` that is still making its worktree
+
+
+def leftover_folders(cwd=None, own=()):
+    """([folder, ...], [(folder, why), ...]): the folders in the worktrees folder, named as Saani names a worktree folder, that git does not
+    know as a worktree. The first list holds the leftovers: only git-ignored generated files (build/, __pycache__...), or nothing (an
+    empty folder only once it is a minute old). The second holds the ones left alone, with the reason (a file git does not ignore:
+    tracked or new). Never a registered worktree, never a folder the run is in (`cwd`, `own`, the auto run's folder), never a link, and
+    nothing at all when the worktrees folder is or holds the main checkout."""
+    from . import auto
+    wt = cfg().wt_dir
+    if not wt.is_dir():
+        return [], []
+    known = [p for p, _ in worktrees(cwd)]
+    if _within(known[0].resolve(), wt.resolve()):
+        return [], []
+    here = [pathlib.Path(cwd) if cwd else pathlib.Path.cwd(), *map(pathlib.Path, own)]
+    rec = auto.read_record()
+    if rec and rec.get("folder"):
+        here.append(pathlib.Path(rec["folder"]))
+    leftovers, kept = [], []
+    for d in sorted(wt.iterdir()):
+        if (not LEFTOVER_NAME.fullmatch(d.name) or d.is_symlink() or not d.is_dir() or any(same_path(d, p) for p in known)
+                or any(_within(p.resolve(), d.resolve()) for p in here)):
+            continue
+        files = []
+        for root, dirs, names in os.walk(d):
+            files += [pathlib.Path(root, n).relative_to(d).as_posix() for n in names]
+            files += [pathlib.Path(root, n).relative_to(d).as_posix() for n in dirs if pathlib.Path(root, n).is_symlink()]
+        if not files:
+            if time.time() - d.stat().st_mtime >= LEFTOVER_MIN_AGE:
+                leftovers.append(d)
+            continue
+        # the main checkout's ignore rules, asked as if the files lay in it (no index: a tracked file of this name does not hide)
+        r = subprocess.run(["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=known[0], input="\0".join(files) + "\0",
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode not in (0, 1):
+            kept.append((d, LEFTOVER_PROBLEM))
+            continue
+        ignored = {p for p in r.stdout.split("\0") if p}
+        rest = [f for f in files if f not in ignored]
+        if rest:
+            kept.append((d, f"it holds {len(rest)} file(s) git does not ignore, e.g. {rest[0]}"))
+        else:
+            leftovers.append(d)
+    return leftovers, kept
+
+
+def remove_leftover_folders(dry=False, cwd=None, own=()):
+    """Removes the leftover folders (`leftover_folders`) with shutil, never a shell command; says what it removed and what it left alone.
+    A folder still in use is not an error: it is tried again at the next call. Returns the number removed (or that would be)."""
+    leftovers, kept = leftover_folders(cwd, own)
+    for d, why in kept:
+        print(f"left alone, not a worktree but not only generated files: {d} ({why})")
+    done = 0
+    for d in leftovers:
+        if dry:
+            print(f"would remove the leftover folder {d}")
+            done += 1
+        elif force_remove_folder(d, tries=1, pause=0):
+            print(f"removed the leftover folder {d}")
+            done += 1
+        else:
+            print(f"the leftover folder {d} is in use: the next `saani start`, `land`, `status` or `prune` removes it")
+    return done
+
+
+def clean_leftovers(cwd=None):
+    """`remove_leftover_folders` for `start`, `land` and `status`: the owner never types it. It never stops the command it runs in."""
+    try:
+        remove_leftover_folders(cwd=cwd)
+    except (Exception, SystemExit) as e:   # noqa: BLE001 (git() exits on a failed command)
+        print(f"leftover worktree folders not checked: {e}")
 
 
 def landing_fields(row):
@@ -732,7 +853,22 @@ def prune_candidates(cwd=None):
     for base in (f"origin/{c.production}", f"origin/{c.integration}"):
         local |= set(git("branch", "--format=%(refname:short)", "--merged", base, cwd=cwd).splitlines())
     remote = git("branch", "-r", "--format=%(refname:short)", "--merged", f"origin/{c.production}", cwd=cwd).splitlines()
-    return prunable(local, held), prunable([r for r in remote if r.startswith("origin/")], held)
+    remote = [r for r in remote if r.startswith("origin/") and not is_fresh_claim(r, cwd)]
+    return prunable(local, held), prunable(remote, held)
+
+
+def is_fresh_claim(ref, cwd=None):
+    """True for a remote branch that looks like a claim (#100) rather than finished work: a worker branch whose tip commit does not
+    mention its own issue (`#<n>`), so it has no commit of its own, it still sits at the commit it was started from, which can already be
+    inside production (a claim made right after a release, a hotfix claim at the prod tag). Merged work always ends in a commit that
+    names its issue. When the tip cannot be read the branch counts as a claim: prune never guesses toward deleting."""
+    m = cfg().worker_branch.match(ref.removeprefix("origin/"))
+    if not m:
+        return False
+    tip = git("log", "-1", "--format=%B", ref, cwd=cwd, check=False)
+    if tip.returncode != 0:
+        return True
+    return re.search(rf"#0*{int(m.group(2))}(?!\d)", tip.stdout or "") is None
 
 
 RUN_BRANCHES = ("auto/", "longrun/")      # "longrun/" is the old name of "auto/": runs made before the rename are still recognised and removed
@@ -857,6 +993,7 @@ def remove_auto_runs(found, dry=False, cwd=None):
 
 
 def cmd_prune(args):
+    leftovers = remove_leftover_folders(args.dry_run)
     local, remote = prune_candidates()
     runs = finished_auto_runs()
     unused, kept = unused_auto_runs()
@@ -866,7 +1003,7 @@ def cmd_prune(args):
         print(f"kept the auto run {branch}: {why}")
     removed = remove_auto_runs(runs, args.dry_run) if runs else 0
     if not local and (args.local_only or not remote):
-        if not removed:
+        if not removed and not leftovers:
             print("nothing to prune: every merged branch is already gone")
         return 0
     if local:
@@ -945,6 +1082,7 @@ def worktrees_warning(c, files=None):
 def cmd_status(args):
     if getattr(args, "action", None) == "sync":
         return status.cmd_sync(args)
+    clean_leftovers()
     warning = worktrees_warning(cfg())
     if warning:
         print(warning)
