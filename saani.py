@@ -4,8 +4,8 @@
   status sync [--apply]                         the issues' GitHub statuses from what Saani knows (saani/status.py)
   comment                                       a status comment on an issue and its label (saani/comments.py)
   ci                                            hybrid CI: GitHub Actions within the free minutes, the PC for the rest (saani/ci.py)
-  merge [PR] [--deploy]                         merge the green integration -> production pull request, then relabel and clean up (saani/merge.py)
-  deploy [--dry-run]                            the checks, the deploy, the log read, the prod tag moved, the issues closed (saani/deploy.py)
+  merge [PR] [--deploy [--skip-ci WHY]]        merge the green integration -> production pull request, then relabel and clean up (saani/merge.py)
+  deploy [--dry-run] [--skip-ci WHY]            the checks, the deploy, the log read, the prod tag moved, the issues closed (saani/deploy.py)
   kpis                                          the numbers over a window of days (saani/kpis.py)
   release notes <milestone> | --pr N [--short] [--post] the release notes from the GitHub issues; release create <version>: a GitHub release (saani/notes.py)
   ui (aliases: map, board)                      the local status page and the isometric map (saani/board_server.py)
@@ -22,7 +22,18 @@ if sys.version_info < (3, 11):
 # -I leaves the script's folder off sys.path: put Saani's own folder there, and nothing else.
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
+def utf8_output():
+    """Write UTF-8 on stdout and stderr, whatever the console or pipe code page is (cp1252 in a pipe on Windows): headings and issue titles
+    carry non-ASCII characters. The wrapper runs python with -I, which ignores PYTHONIOENCODING, so it is set here."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass    # not a text stream that can be reconfigured (replaced by a test, say)
+
+
 if __name__ == "__main__" and sys.argv[1:2] == ["guard"]:
+    utf8_output()
     # The hook runs before every tool call. No auto run registered at all (~/.saani/auto holds no entry, no `.over` mark of a run that
     # is over) and not a `saani auto on` call: present mode, nothing to print, before any import. Else load the guard alone (argparse and
     # the other modules cost more).
@@ -44,6 +55,7 @@ from saani import __version__, board_server, ci, comments, core, deploy, guard, 
 
 
 def main(argv=None):
+    utf8_output()
     parser = argparse.ArgumentParser(prog="saani", description="Saani: GitHub issues from idea to production")
     parser.add_argument("--version", action="version", version=f"saani {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)

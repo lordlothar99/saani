@@ -21,6 +21,7 @@ class FakeGh:
         self.prs = [{"number": 7}] if prs is None else prs
         self.written = []
         self.after = "MERGED"                                            # the state read back after gh pr merge
+        self.annotations = []                                            # every check run's annotations
 
     def json(self, *cmd):
         if cmd[:3] == ("gh", "pr", "list"):
@@ -29,6 +30,8 @@ class FakeGh:
             return {"state": self.after, "mergeCommit": {"oid": "m" * 40}} if cmd[-1] == "state,mergeCommit" else self.pr
         if cmd[2].endswith("/status"):
             return self.status
+        if cmd[2].endswith("/annotations"):
+            return self.annotations
         if "/check-runs" in cmd[2]:
             return self.checks
         raise AssertionError(cmd)
@@ -53,8 +56,8 @@ def world(monkeypatch):
     return state
 
 
-def args(pr=None, deploy=False, dry=False):
-    return argparse.Namespace(pr=pr, deploy=deploy, dry_run=dry)
+def args(pr=None, deploy=False, dry=False, skip_ci=None):
+    return argparse.Namespace(pr=pr, deploy=deploy, dry_run=dry, skip_ci=skip_ci)
 
 
 def test_the_one_open_integration_to_production_pull_request_is_found(world):
@@ -174,6 +177,49 @@ def test_deploy_hands_over_to_the_deployer_when_there_is_one(world, monkeypatch)
     monkeypatch.setattr(merge, "deployer", lambda: lambda a: given.append(a) or 0)
     a = args(deploy=True)
     assert merge.run_command(a) == 0 and given == [a] and world.merged
+
+
+def test_skip_ci_goes_to_the_deployer_with_the_merge(world, monkeypatch):
+    given = []
+    monkeypatch.setattr(merge, "deployer", lambda: lambda a: given.append(a.skip_ci) or 0)
+    assert merge.run_command(args(deploy=True, skip_ci="no minutes")) == 0
+    assert given == ["no minutes"] and world.merged
+
+
+def test_skip_ci_without_deploy_is_refused_before_anything(world, capsys):
+    assert merge.run_command(args(skip_ci="no minutes")) == 1
+    assert "goes with --deploy" in capsys.readouterr().out
+    assert world.gh.written == [] and not world.merged
+
+
+def test_skip_ci_does_not_skip_the_pull_requests_own_ci(world, capsys):
+    world.gh = FakeGh(status={"statuses": [{"context": "saani/ci", "state": "failure"}]})
+    assert merge.run_command(args(deploy=True, skip_ci="no minutes")) == 1
+    assert "CI is red" in capsys.readouterr().out and world.gh.written == []
+
+
+def test_a_dry_run_says_the_deploy_skips_its_gate(world, monkeypatch, capsys):
+    monkeypatch.setattr(merge, "deployer", lambda: lambda a: 0)
+    assert merge.run_command(args(deploy=True, dry=True, skip_ci="no minutes")) == 0
+    assert "then the deploy without its CI gate (--skip-ci)" in capsys.readouterr().out
+
+
+def test_a_check_run_github_never_started_does_not_refuse_the_merge(world, capsys):
+    billing = "The job was not started because recent account payments have failed or your spending limit needs to be increased."
+    refused = {"id": 5, "name": "Images build", "status": "completed", "conclusion": "failure", "output": {"annotations_count": 1}}
+    world.gh = FakeGh(checks={"check_runs": [refused, *CHECKS["check_runs"]]})
+    world.gh.annotations = [{"message": billing}]
+    assert merge.run_command(args()) == 0
+    assert "not run on aaaaaaa (Images build)" in capsys.readouterr().out
+    world.gh = FakeGh(checks={"check_runs": [refused]})
+    world.gh.annotations = [{"message": "Process completed with exit code 2."}]
+    assert merge.run_command(args()) == 1                                  # any other annotation: a real failure
+
+
+def test_the_merge_command_line_takes_skip_ci():
+    parser = argparse.ArgumentParser()
+    merge.add_parsers(parser.add_subparsers())
+    assert parser.parse_args(["merge", "--deploy", "--skip-ci", "why"]).skip_ci == "why"
 
 
 def test_the_deployer_lookup_is_none_while_there_is_no_deploy_module(monkeypatch):

@@ -64,6 +64,16 @@ h2 i{white-space:normal;font:400 11px/1.3 var(--body);letter-spacing:.04em;text-
 .cards{display:flex;flex-direction:column;gap:9px;padding:0 9px 10px;max-height:68vh;overflow-y:auto;scrollbar-color:var(--faint) transparent}
 .c-you{--accent:var(--ember)}.c-ready{--accent:var(--sand)}.c-building{--accent:var(--ochre)}.c-testing{--accent:#f0b25a}
 .c-dev{--accent:var(--blue)}.c-main{--accent:var(--sage)}.c-live{--accent:var(--dust)}
+.c-backlog{--accent:var(--dust)}.c-todo{--accent:var(--sand)}.c-started{--accent:var(--ochre)}.c-review{--accent:var(--blue)}.c-done{--accent:var(--sage)}
+.badge.warn{color:var(--ochre);border-color:rgba(208,138,60,.55)}.badge.info{color:var(--blue);border-color:rgba(143,180,201,.55)}
+.sec{position:relative;display:flex;justify-content:space-between;align-items:baseline;padding:10px 2px 0;font:400 9.5px/1.3 var(--display);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.sec em{font:500 12px/1 var(--mono);font-style:normal;letter-spacing:0;color:var(--bone)}
+.fold{opacity:.72}.fold summary{cursor:pointer;padding:10px 2px 6px;font:400 9.5px/1.3 var(--display);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.fold[open]>summary{margin-bottom:4px}.fold .card{margin-bottom:9px}
+.pinned{margin:0 0 14px;padding:10px 12px 12px;border:1px solid var(--ember);background:linear-gradient(180deg,rgba(226,85,63,.10),rgba(20,13,8,.4))}
+.pinned h3{display:flex;gap:10px;align-items:baseline;margin:0 0 9px;font:400 10px/1.35 var(--display);letter-spacing:.2em;text-transform:uppercase;color:var(--ember)}
+.pinned h3 em{font:500 16px/1 var(--mono);font-style:normal;letter-spacing:0;color:var(--bone)}
+.pinned[hidden]{display:none}.pinned-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:9px}
 .card{position:relative;padding:11px 12px 11px 14px;background:var(--slab-hi);border:1px solid var(--edge)}
 .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)}
 .card.live{border-color:rgba(240,178,90,.55);box-shadow:0 0 0 1px rgba(240,178,90,.15),0 10px 30px rgba(208,138,60,.12)}
@@ -175,6 +185,7 @@ body.pg-leave{animation:pgFadeOut .25s ease-in both}
 </div>
 <h2>Tasks <i>one card per issue · the agent on it · click a column's title to fold it</i></h2>
 <div class="search"><input id="q" type="search" placeholder="Search tasks: a number, a word, a label, a branch, an agent…   ( / )" aria-label="Search tasks" autocomplete="off"><span id="found"></span></div>
+<div class="pinned" id="pinned" hidden></div>
 <div class="board" id="board"></div>
 <h2>Subagents <i>who exists, what each is for, where it is defined, what runs now</i></h2><div class="roster" id="roster"></div>
 <div class="road" id="road" hidden></div>
@@ -206,19 +217,33 @@ function card(c){const live=c.agents.some(a=>a.state==="working");const w=c.work
  return el("div",{class:"card"+(live?" live":"")},
   el("div",{class:"num"},link(c.number),c.milestone?el("span",{class:"chip ms"},c.milestone):null),
   el("div",{class:"title"},c.title),
-  el("div",{class:"chips"},c.need?el("span",{class:"need "+c.need},c.need==="answer"?"your answer":"your action"):null,(c.labels||[]).filter(l=>!lifecycleLabel(l)).map(l=>el("span",{class:"chip"},l))),
+  el("div",{class:"chips"},c.need?el("span",{class:"need "+c.need},c.need==="answer"?"your answer":"your action"):null,(c.badges||[]).map(b=>el("span",{class:"chip badge "+b.kind},b.text)),
+   live?el("span",{class:"chip badge info"},"agent working"):null,(c.labels||[]).filter(l=>!lifecycleLabel(l)).map(l=>el("span",{class:"chip"},l))),
   w?el("div",{class:"wt"},"folder ",el("b",{},w.folder),el("br"),`${w.ahead} commit${w.ahead===1?"":"s"} not on dev yet · ${w.dirty} file${w.dirty===1?"":"s"} being edited`):null,
   (c.runs||[]).map(r=>{const p=pct(r.line);return el("div",{},p!=null?el("div",{class:"bar"},el("i",{style:"width:"+p+"%"})):null,el("div",{class:"runline"},r.line))}),
   c.agents.map(agentLine),btn)}
 // Columns of closed tasks start folded; a click on a column's title folds or unfolds it, remembered here.
-const FOLDED_BY_DEFAULT=["live"];let lastCols=[];
+const FOLDED_BY_DEFAULT=["live","done"];let lastCols=[],lastPinned=[];
 function folded(){try{const v=JSON.parse(localStorage.getItem("saani.folded.v2"));if(Array.isArray(v))return v}catch(e){}return FOLDED_BY_DEFAULT}
 function toggle(id){const f=folded();const n=f.includes(id)?f.filter(x=>x!==id):f.concat(id);try{localStorage.setItem("saani.folded.v2",JSON.stringify(n))}catch(e){}drawBoard()}
 // The search: every word must appear in the card's number, title, labels, milestone, need, branch, folder or agents.
 let query="";
 function haystack(c){const w=c.worktree||{};return["#"+c.number,c.title,(c.labels||[]).join(" "),c.milestone,c.need==="answer"?"your answer":c.need==="act"?"your action":"",
- w.branch,w.folder,...(c.agents||[]).map(a=>[a.name,a.branch,a.model,...a.subagents.map(s=>s.type+" "+s.description)].join(" "))].join(" ").toLowerCase()}
+ w.branch,w.folder,...(c.badges||[]).map(b=>b.text),...(c.agents||[]).map(a=>[a.name,a.branch,a.model,...a.subagents.map(s=>s.type+" "+s.description)].join(" "))].join(" ").toLowerCase()}
 function matches(c){const words=query.toLowerCase().split(/\s+/).filter(Boolean);if(!words.length)return true;const h=haystack(c);return words.every(x=>h.includes(x))}
+// A column with sections (In review: where the code is; Done: closed, not planned) draws a small heading before each one; the release PR is
+// its own section and keeps its card; not planned and duplicates are a closed <details>.
+function sectionBody(c,hits){const out=hits.filter(k=>!k.section).map(card);
+ for(const s of c.sections){const mine=hits.filter(k=>k.section===s.id);if(!mine.length&&!(s.pr&&!query))continue;
+  if(s.id==="notplanned"){out.push(el("details",{class:"fold"},el("summary",{},s.title+" · "+mine.length),mine.map(card)));continue}
+  out.push(el("div",{class:"sec","data-tip":s.hint},el("span",{},s.title),el("em",{},String(mine.length))));
+  if(s.prompt&&!s.pr){const b=el("button",{class:"copy colcopy",type:"button",title:s.prompt},"Copy prompt · all "+s.count);b.onclick=()=>copy(s.prompt,b,"Copy prompt · all "+s.count);out.push(b)}
+  out.push(...(s.pr?prCard({pr:s.pr,prompt:s.prompt},mine):mine.map(card)))}
+ return out}
+// The cards that wait for you, at any status, in a row above the columns (each also stays in its own column).
+function drawPinned(){const p=$("pinned"),hits=lastPinned.filter(matches);p.hidden=!lastPinned.length;
+ p.replaceChildren(el("h3",{},"Waiting for you",el("em",{},query?hits.length+"/"+lastPinned.length:String(lastPinned.length))),
+  el("div",{class:"pinned-cards"},hits.length?hits.map(card):[el("div",{class:"empty"},"No match.")]))}
 function drawBoard(){const cols=lastCols,f=folded(),open=matchMedia("(max-width:640px)").matches?"84%":"minmax(190px,1fr)";
  $("board").style.gridTemplateColumns=cols.map(c=>f.includes(c.id)?"46px":open).join(" ");
  let shown=0,total=0;
@@ -230,8 +255,8 @@ function drawBoard(){const cols=lastCols,f=folded(),open=matchMedia("(max-width:
   const all=c.prompt&&!shut&&!c.pr?el("button",{class:"copy colcopy",type:"button",title:c.prompt},"Copy prompt · all "+c.cards.length):null;
   if(all)all.onclick=()=>copy(c.prompt,all,"Copy prompt · all "+c.cards.length);
   return el("section",{class:"col c-"+c.id+(shut?" shut":"")},head,all,
-   shut?null:el("div",{class:"cards"},...(()=>{const body=c.pr?prCard(c,hits):hits.map(card);return body.length?body:[el("div",{class:"empty"},query?"No match.":"Nothing here.")]})()))}));
- $("found").textContent=query?`${shown} of ${total} cards match`:"";}
+   shut?null:el("div",{class:"cards"},...(()=>{const body=c.sections&&c.sections.length?sectionBody(c,hits):c.pr?prCard(c,hits):hits.map(card);return body.length?body:[el("div",{class:"empty"},query?"No match.":"Nothing here.")]})()))}));
+ drawPinned();$("found").textContent=query?`${shown} of ${total} cards match`:"";}
 function ring(value,color){const s=sv("svg",{width:78,height:78,viewBox:"0 0 78 78"});
  s.append(sv("circle",{cx:39,cy:39,r:32,fill:"none",stroke:"rgba(224,197,151,.14)","stroke-width":6}));
  const c=2*Math.PI*32;s.append(sv("circle",{cx:39,cy:39,r:32,fill:"none",stroke:color,"stroke-width":6,"stroke-linecap":"butt","stroke-dasharray":`${c*Math.min(value,100)/100} ${c}`,transform:"rotate(-90 39 39)"}));return s}
@@ -285,7 +310,7 @@ function render(s){
  if(L.lock){lk.textContent="joining dev · "+L.lock.branch;lk.className="pill hot"}else{lk.textContent="no task joining dev";lk.className="pill"}
  const cols=s.board||[];const cnt=id=>(cols.find(c=>c.id===id)||{cards:[]}).cards.length;
  $("counts").textContent=`${cnt("you")} wait for you · ${cnt("building")+cnt("testing")} in work`;
- LABELS=(s.project&&s.project.labels)||{};projects(s.projects,s.project);lastCols=cols;drawBoard();drawPC(s.resources);
+ LABELS=(s.project&&s.project.labels)||{};projects(s.projects,s.project);const k=s.kanban&&s.kanban.columns?s.kanban:null;lastCols=k?k.columns:cols;lastPinned=k?k.pinned:[];drawBoard();drawPC(s.resources);
  const crew=Array.isArray(s.crew)?s.crew:[];$("crew-n").textContent=`Claude Code chats in this project's folders · ${crew.length} · ${crew.filter(a=>a.state==="working").length} working now`;
  $("crew").replaceChildren(...(crew.length?crew.map(a=>{const running=a.subagents.filter(x=>x.state!=="done");
   return el("div",{class:"unit "+a.state},el("b",{},el("span",{class:"dot"}),a.name),el("span",{class:"state"},a.state),

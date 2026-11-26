@@ -211,7 +211,7 @@ def test_every_open_issue_is_on_the_board_assigned_to_the_owner_or_not(monkeypat
 def test_the_column_of_closed_tasks_starts_folded():
     """the columns showing closed tasks are folded by default; a click on the header unfolds them."""
     closed = [key for key, _, _ in fp.COLUMNS if key == "live"]
-    assert closed and f'FOLDED_BY_DEFAULT=["{closed[0]}"]' in fp.page()
+    assert closed and 'FOLDED_BY_DEFAULT=["live","done"]' in fp.page()          # the board's closed column, and the kanban's Done
     assert "aria-expanded" in fp.page()
 
 
@@ -354,7 +354,7 @@ def test_a_refresh_button_asks_everything_again_and_the_pull_request_tasks_start
     assert "issues" not in fp._cache
 
 
-STEPS = {"inbox", "backlog", "you", "started", "building", "testing", "landing", "dev", "pr", "deploy", "close", "checks", "done"}
+STEPS = {"backlog", "todo", "you", "started", "building", "testing", "landing", "dev", "pr", "deploy", "close", "checks", "done"}
 
 
 def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
@@ -405,17 +405,19 @@ def test_one_board_shows_the_listed_projects_and_the_selector_picks_one(monkeypa
     assert fp.cfg() is home                                   # the settings are put back after every request
 
 
-def test_a_ready_issue_with_no_agent_is_in_the_backlog_not_the_workshops():
-    """the map page puts a Ready card in the backlog until an agent works on it, then in the Workshops."""
+def test_a_ready_issue_with_no_agent_waits_in_the_tents_or_the_granary_not_the_workshops():
+    """the map page puts a Ready card in the Wayfarers' Tents (queue backlog) or the Granary (queue todo, also when it has none) until an
+    agent works on it, then in the Workshops."""
     source = fp.MAP_FILE.read_text(encoding="utf-8")
-    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "backlog"' in source
+    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "todo"' in source
+    assert 'col.id === "ready" && c.queue === "backlog" ? "backlog"' in source
 
 
 def test_the_sample_shows_every_zone_and_keeps_out_private_text():
     """The sample is synthetic, every step is a known one, and it holds no session text or path."""
     mock = json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))
     steps = {c["step"] for c in mock["cards"]}
-    assert steps <= STEPS and {"backlog", "you", "started", "testing", "pr", "deploy", "close", "checks", "done"} <= steps
+    assert steps <= STEPS and {"backlog", "todo", "you", "started", "testing", "pr", "deploy", "close", "checks", "done"} <= steps
     assert set(mock["sample"]["staged"]) == {c["number"] for c in mock["cards"] if c.get("staged")}
     raw = json.dumps(mock)
     assert "C:\\Users" not in raw and "/Users/" not in raw and "@" not in raw.replace("@pytest", "")
@@ -687,3 +689,241 @@ def test_the_map_names_the_saani_it_runs_a_release_tag_a_commit_or_the_package_v
     assert fp.saani_version(code, lambda *a: answers.get(a[1], "")) == {"label": "abc1234", "kind": "commit"}
     page = (pathlib.Path(fp.__file__).parent / "map.html").read_text(encoding="utf-8")
     assert 'id="legend-ver"' in page and "DATA.saani" in page
+
+
+# ---------------------------------------------------------------- the Wayfarers' Tents are Backlog, the Granary is Todo (#83)
+
+def ready(issue_list):
+    """{number: queue} of the Ready column of a board built from `issue_list`."""
+    board = {c["id"]: c for c in fp.build_board(issue_list, [], set(), [], [])}
+    return {c["number"]: c.get("queue") for c in board["ready"]["cards"]}
+
+
+def listed(number, status=None, milestone=None, labels=()):
+    return {"number": number, "title": f"t{number}", "labels": list(labels), "state": "OPEN", "milestone": milestone,
+            "status": {"name": status[0], "category": status[1]} if status else None}
+
+
+TODO, BACKLOG = ("Todo", "planned"), ("Backlog", "backlog")
+
+
+def test_with_statuses_a_ready_card_waits_by_its_github_status():
+    assert ready([listed(1, TODO), listed(2, BACKLOG), listed(3)]) == {1: "todo", 2: "backlog", 3: "backlog"}
+    assert ready([listed(1, ("In progress", "started")), listed(2, ("In review", "started")), listed(3, TODO)]) == {1: "todo", 2: "todo", 3: "todo"}
+    # an open issue marked Done, Not planned or Duplicate is not taken by a run: it waits with the Backlog
+    assert ready([listed(1, ("Done", "completed")), listed(2, ("Not planned", "not_planned")), listed(3, ("Duplicate", "duplicate")),
+                  listed(4, TODO)]) == {1: "backlog", 2: "backlog", 3: "backlog", 4: "todo"}
+
+
+def test_with_statuses_the_milestone_does_not_decide():
+    assert ready([listed(1, BACKLOG, "v1.0.0"), listed(2, TODO), listed(3, None, "v1.0.0"), listed(4, TODO, "v1.0.0")]) == {
+        1: "backlog", 2: "todo", 3: "backlog", 4: "todo"}
+
+
+def test_without_statuses_the_milestone_decides_as_status_sync_does():
+    assert ready([listed(1, None, "v1.0.0"), listed(2), listed(3, None, "Later")]) == {1: "todo", 2: "backlog", 3: "todo"}
+
+
+def test_a_repo_with_statuses_off_in_saani_toml_is_read_as_without(monkeypatch, cfg):
+    issues = [listed(1, BACKLOG, "v1.0.0"), listed(2, TODO)]
+    assert ready(issues) == {1: "backlog", 2: "todo"}
+    cfg.status_enabled = "off"
+    assert ready(issues) == {1: "todo", 2: "backlog"}
+
+
+def test_a_renamed_status_is_still_read_by_its_category():
+    assert ready([listed(1, ("Icebox", "backlog")), listed(2, ("Ready to go", "planned"))]) == {1: "backlog", 2: "todo"}
+
+
+def test_only_cards_without_a_place_on_this_pc_carry_a_queue():
+    issues = [listed(1, TODO), listed(2, ("In review", "started"), labels=["in-dev"]), listed(3, TODO, labels=["help wanted"])]
+    board = {c["id"]: c for c in fp.build_board(issues, [], set(), [], [])}
+    assert [c["number"] for c in board["ready"]["cards"]] == [1] and [c["number"] for c in board["you"]["cards"]] == [3]
+    assert board["ready"]["cards"][0]["queue"] == "todo" and board["you"]["cards"][0]["queue"] == "todo"
+    assert all("queue" not in c for c in board["dev"]["cards"])
+
+
+def test_the_map_names_the_zones_and_their_subtitles_after_the_statuses():
+    source = fp.MAP_FILE.read_text(encoding="utf-8")
+    assert '{id: "backlog", stage: "Backlog",' in source and "name: \"Wayfarers' Tents\"" in source
+    assert '{id: "todo",    cmd: "/saani:start <issue>", stage: "Todo",' in source and 'name: "The Granary"' in source
+    assert 'id: "inbox"' not in source and "Inbox" not in source and "stage: \"Backlog\",         name: \"The Granary\"" not in source
+
+
+def test_the_old_step_ids_are_gone_from_the_map_the_contract_and_the_sample():
+    source = fp.MAP_FILE.read_text(encoding="utf-8")
+    assert 'case "inbox"' not in source and "inbox:" not in source
+    mock = json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))
+    assert "inbox" not in {c["step"] for c in mock["cards"]}
+    # the sample shows both zones, with the statuses that put a card there
+    by_step = {step: {(c.get("status") or {}).get("name") for c in mock["cards"] if c["step"] == step} for step in ("backlog", "todo")}
+    assert by_step["todo"] == {"Todo"} and by_step["backlog"] <= {None, "Backlog"} and by_step["backlog"]
+    contract = (fp.MAP_FILE.parent.parent / "docs" / "map-data-contract.md").read_text(encoding="utf-8")
+    assert "`backlog` (the Wayfarers' Tents" in contract and "`todo` (the Granary" in contract and "`queue`" in contract
+
+
+# ---------------------------------------------------------------- the kanban: the columns are the GitHub statuses (#103)
+
+PROGRESS, REVIEW, DONE_ST = ("In progress", "started"), ("In review", "started"), ("Done", "completed")
+
+
+def tree(n, ahead=1):
+    return {"issue": n, "branch": f"feat/{n}-x", "folder": f"C:/wt/{n}-x", "ahead": ahead, "dirty": 0}
+
+
+def kanban(issues, trees=(), testing=(), pr=None, landing=None, closed=()):
+    """{column id: {section id or None: [numbers]}} of the kanban built from `issues` (the open ones, then the `closed` ones)."""
+    board = fp.build_board(list(issues) + list(closed), list(trees), set(testing), [], [], pr)
+    built = fp.build_kanban(board, fp.has_statuses(list(issues) + list(closed)), landing)
+    return built, {c["id"]: sorted((x["number"], x["section"]) for x in c["cards"]) for c in built["columns"]}
+
+
+def closed_issue(n, status):
+    return {**listed(n, status), "state": "CLOSED"}
+
+
+def test_the_columns_are_the_github_statuses_in_order():
+    built, _ = kanban([listed(1, TODO)])
+    assert [c["id"] for c in built["columns"]] == ["backlog", "todo", "started", "review", "done"]
+    assert [c["title"] for c in built["columns"]] == ["Backlog", "Todo", "In progress", "In review", "Done"]
+
+
+def test_each_status_puts_its_issue_in_its_column():
+    _, got = kanban([listed(1, BACKLOG), listed(2), listed(3, TODO), listed(4, ("Done", "completed"))])
+    assert got["backlog"] == [(1, None), (2, None), (4, None)] and got["todo"] == [(3, None)]     # an open issue marked Done is not taken: Backlog
+    assert got["started"] == got["review"] == got["done"] == []
+
+
+def test_a_worktree_is_at_least_in_progress_and_review_at_least_in_review():
+    issues = [listed(1, TODO), listed(2, PROGRESS), listed(3, REVIEW), listed(4, BACKLOG)]
+    _, got = kanban(issues, trees=[tree(1), tree(2), tree(3)])
+    assert got["started"] == [(1, None), (2, None)] and got["review"] == [(3, "branch")]
+    assert got["backlog"] == [(4, None)] and got["todo"] == []
+
+
+def test_dev_and_production_are_in_review_with_their_own_sections():
+    on_dev = listed(1, REVIEW, labels=["in-dev"])
+    stale = listed(2, TODO, labels=["in-dev"])                                  # the status lags behind the label: the place on dev wins
+    to_deploy, to_close = listed(3, REVIEW, labels=["in-main"]), listed(4, REVIEW, labels=["in-main"])
+    board = fp.build_board([on_dev, stale, to_deploy, to_close], [], set(), [], [], None, closing={4})
+    built = fp.build_kanban(board, True)
+    review = next(c for c in built["columns"] if c["id"] == "review")
+    assert sorted((c["number"], c["section"]) for c in review["cards"]) == [(1, "dev"), (2, "dev"), (3, "main"), (4, "close")]
+    assert [s["id"] for s in review["sections"]] == ["dev", "main", "close"] and [s["count"] for s in review["sections"]] == [2, 1, 1]
+    assert all(s["prompt"] for s in review["sections"])                         # one prompt per section, as the Merged / To deploy / To close columns had
+
+
+def test_the_release_pull_request_is_a_section_of_in_review_with_the_issues_it_carries():
+    issues = [listed(n, REVIEW, labels=["in-dev"]) for n in (530, 538, 540)]
+    pr = fp.pr_row({"number": 539, "title": "dev into main", "headRefOid": "x", "statusCheckRollup": [],
+                    "commits": [{"oid": "a" * 40, "messageHeadline": "x (refs #530)"}, {"oid": "b" * 40, "messageHeadline": "y (refs #538)"}]}, {})
+    built, got = kanban(issues, pr=pr)
+    assert got["review"] == [(530, "pr"), (538, "pr"), (540, "dev")]
+    review = next(c for c in built["columns"] if c["id"] == "review")
+    sections = {s["id"]: s for s in review["sections"]}
+    assert sections["pr"]["pr"]["number"] == 539 and sections["pr"]["pr"]["inside"] == [530, 538] and "539" in sections["pr"]["prompt"]
+    assert sections["dev"]["pr"] is None and sections["dev"]["count"] == 1
+
+
+def test_an_open_release_pull_request_with_no_card_still_shows_its_section():
+    pr = {"number": 7, "url": "u", "title": "t", "ci": {"state": "green"}, "inside": []}
+    built, got = kanban([listed(1, TODO)], pr=None)
+    assert all(s["id"] != "pr" for c in built["columns"] for s in c["sections"])
+    board = fp.build_board([listed(1, REVIEW, labels=["in-dev"])], [], set(), [], [], pr)
+    review = next(c for c in fp.build_kanban(board, True)["columns"] if c["id"] == "review")
+    assert [s["id"] for s in review["sections"]] == ["dev", "pr"] and review["sections"][1]["count"] == 0
+
+
+def test_closed_issues_are_done_and_not_planned_ones_are_apart():
+    _, got = kanban([listed(1, TODO)], closed=[closed_issue(2, DONE_ST), closed_issue(3, ("Not planned", "not_planned")),
+                                               closed_issue(4, ("Duplicate", "duplicate")), closed_issue(5, None)])
+    assert got["done"] == [(2, "deployed"), (3, "notplanned"), (4, "notplanned"), (5, "deployed")] and got["todo"] == [(1, None)]
+
+
+def test_waiting_for_you_is_a_pinned_row_and_the_card_stays_in_its_column():
+    issues = [listed(1, TODO, labels=["help wanted"]), listed(2, BACKLOG, labels=["owner-action"]), listed(3, REVIEW, labels=["in-dev", "help wanted"]),
+              listed(4, TODO)]
+    built, got = kanban(issues)
+    assert [c["number"] for c in built["pinned"]] == [1, 2, 3]
+    assert got["todo"] == [(1, None), (4, None)] and got["backlog"] == [(2, None)] and got["review"] == [(3, "dev")]
+    assert {c["number"]: c["need"] for c in built["pinned"]} == {1: "answer", 2: "act", 3: "answer"}
+    assert built["pinned"] == sorted(built["pinned"], key=lambda c: c["number"])
+
+
+def test_a_closed_issue_with_a_leftover_label_is_not_pinned():
+    stale = {**listed(9, DONE_ST, labels=["help wanted"]), "state": "CLOSED"}
+    built, got = kanban([listed(1, TODO, labels=["help wanted"])], closed=[stale])
+    assert [c["number"] for c in built["pinned"]] == [1] and got["done"] == [(9, "deployed")]
+
+
+def test_a_backlog_card_is_prompted_to_get_ready_not_to_start():
+    built, _ = kanban([listed(1, BACKLOG), listed(2, TODO), listed(3, BACKLOG, labels=["help wanted"])])
+    prompts = {c["number"]: c["prompt"] for col in built["columns"] for c in col["cards"]}
+    assert prompts[1].startswith("Get #1 ready") and "Todo" in prompts[1]
+    assert prompts[2].startswith("Start #2") and "waits for my answer" in prompts[3]          # a card that waits for you keeps its own prompt
+
+
+def glance_body(**rows):
+    return {"glance": rows}
+
+
+def test_a_todo_card_says_why_a_run_would_not_take_it():
+    typed = {"type": "Task"}
+    cards = [{**listed(1, TODO), "type": "Task", "glance": {"auto": {"fit": "no", "why": "x"}}},
+             {**listed(2, TODO), "type": "Task", "glance": {"auto": {"fit": "partly", "why": "x"}}},
+             {**listed(3, TODO), "type": "Task", "glance": {"blocked_by": {"issues": [61, 99], "date": None, "text": "#61, #99"}}},
+             {**listed(4, TODO), "type": "Task", "glance": {"needs_owner": {"kind": "answer", "what": "x"}}},
+             {**listed(5, TODO), "type": "Task", "glance": {"auto": {"fit": "yes", "why": ""}}},
+             {**listed(6, TODO), "glance": {}}]
+    for card in cards:
+        card["labels"] = []
+    board = fp.build_board(cards + [listed(61), listed(99)], [], set(), [], [])
+    built = fp.build_kanban(board, True)
+    todo = {c["number"]: [b["text"] for b in c["badges"]] for c in next(col for col in built["columns"] if col["id"] == "todo")["cards"]}
+    assert todo == {1: ["Auto: no"], 2: ["Auto: partly"], 3: ["blocked by #61, #99"], 4: ["needs the owner"], 5: [], 6: ["no Type"]}
+    assert all(b["kind"] == "warn" for col in built["columns"] for c in col["cards"] for b in c["badges"])
+
+
+def test_in_progress_and_review_cards_carry_no_pick_badges_but_testing_and_landing_show():
+    issues = [{**listed(1, PROGRESS), "glance": {"auto": {"fit": "no", "why": "x"}}}, listed(2, PROGRESS), listed(3, PROGRESS)]
+    built, _ = kanban(issues, trees=[tree(1), tree(2), tree(3)], testing={2}, landing=3)
+    started = {c["number"]: [b["text"] for b in c["badges"]] for c in next(col for col in built["columns"] if col["id"] == "started")["cards"]}
+    assert started == {1: [], 2: ["testing"], 3: ["landing"]}
+
+
+def test_without_statuses_the_page_keeps_the_board_as_it_was():
+    board = fp.build_board([listed(1, None, "v1.0.0")], [], set(), [], [])
+    assert fp.build_kanban(board, fp.has_statuses([listed(1, None, "v1.0.0")])) is None
+    assert [c["id"] for c in board] == [k for k, _, _ in fp.COLUMNS]
+
+
+def test_statuses_off_in_saani_toml_keeps_the_board_as_it_was(cfg):
+    cfg.status_enabled = "off"
+    issues = [listed(1, TODO), listed(2, BACKLOG)]
+    assert fp.build_kanban(fp.build_board(issues, [], set(), [], []), fp.has_statuses(issues)) is None
+
+
+def test_the_state_carries_the_kanban_beside_the_board(monkeypatch, tmp_path):
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    listing = {"board": [listed(1, TODO)], "open": [listed(1, TODO)], "closed": []}
+    monkeypatch.setattr(fp, "cached", lambda key, seconds, fn: listing if key == "issues" else fn())
+    monkeypatch.setattr(fp, "tasks", lambda: [])
+    monkeypatch.setattr(fp, "landing", lambda: None)
+    monkeypatch.setattr(fp, "agents", lambda: [])
+    monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
+    state = fp.state()
+    assert [c["id"] for c in state["board"]] == [k for k, _, _ in fp.COLUMNS]
+    assert [c["id"] for c in state["kanban"]["columns"]] == ["backlog", "todo", "started", "review", "done"]
+    assert [c["number"] for c in state["kanban"]["columns"][1]["cards"]] == [1]
+    listing["board"] = [listed(1, None, "v1.0.0")]                             # a repo without statuses: no kanban, the page draws the board
+    assert fp.state()["kanban"] is None
+
+
+def test_the_page_draws_the_kanban_with_a_pinned_row_sections_and_badges():
+    page = fp.page()
+    assert 'id="pinned"' in page and "function drawPinned()" in page and "function sectionBody(c,hits)" in page
+    assert 's.kanban&&s.kanban.columns?s.kanban:null' in page and "lastPinned=k?k.pinned:[]" in page
+    assert '(c.badges||[]).map(b=>el("span",{class:"chip badge "+b.kind},b.text))' in page and '"agent working"' in page
+    assert 'FOLDED_BY_DEFAULT=["live","done"]' in page and 'class:"fold"' in page and "Waiting for you" in page
+    for col in ("backlog", "todo", "started", "review", "done"):
+        assert f".c-{col}{{--accent:" in page

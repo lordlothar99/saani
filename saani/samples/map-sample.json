@@ -34,7 +34,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "inbox",
+   "step": "backlog",
    "detail": {
     "summary": "Sample issue. Dark mode for the settings screen: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
     "criteria": [
@@ -74,7 +74,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "inbox",
+   "step": "backlog",
    "status": {
     "name": "Backlog",
     "category": "backlog"
@@ -118,7 +118,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -164,7 +164,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -210,7 +210,7 @@
    "need": "act",
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -256,7 +256,7 @@
    "need": "act",
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -303,7 +303,7 @@
    "need": "act",
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -354,7 +354,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -398,7 +398,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -442,7 +442,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -488,7 +488,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"
@@ -532,7 +532,7 @@
    "need": null,
    "prompt": null,
    "runs": [],
-   "step": "backlog",
+   "step": "todo",
    "status": {
     "name": "Todo",
     "category": "planned"

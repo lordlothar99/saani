@@ -1,16 +1,22 @@
-"""saani merge [PR] [--deploy] [--dry-run]: the owner's one word at the end of an auto run (docs/SAANI.md, "Two modes").
+"""saani merge [PR] [--deploy [--skip-ci WHY]] [--dry-run]: the owner's one word at the end of an auto run (docs/SAANI.md, "Two modes").
 
 Merges the green integration -> production pull request with a merge commit (never squash or rebase: the trailers stay; the head branch is
 never deleted: it is the integration branch), then does what `saani ci merged <PR>` does (relabel, remove the finished auto runs). With
-`--deploy` it then runs the deployer (`saani.deploy.run`); without one it stops after the merge and exits 2.
+`--deploy` it then runs the deployer (`saani.deploy.run`, with `--skip-ci` if given: it skips the deploy's CI gate, never this pull
+request's); without one it stops after the merge and exits 2.
 Standard library only; the checks are pure functions (tests/test_merge.py).
 """
 import importlib
 import json
+import re
 
 from . import ci, config, notes
 
 PASSED_CHECKS = ("success", "neutral", "skipped")      # any other conclusion (failure, cancelled, timed_out, action_required, stale...) refuses
+MAYBE_NOT_RUN = ("failure", "startup_failure", "cancelled")   # the conclusions a run GitHub never started ends with
+# GitHub's annotation on a job it refused to start: "The job was not started because recent account payments have failed or your spending
+# limit needs to be increased." Only these words make a failed run "not run"; any other annotation is a real failure.
+REFUSED_JOB = re.compile(r"job was not started|spending limit needs|account payments have failed", re.I)
 
 
 def cfg():
@@ -38,9 +44,9 @@ def ci_state(status):
     return mine[0].get("state") if mine else None
 
 
-def refusal(pr, status, checks):
+def refusal(pr, status, checks, skipped=()):
     """Why this pull request must not be merged, or None when it may. `pr`: gh pr view; `status`: the commit's combined status;
-    `checks`: its check runs."""
+    `checks`: its check runs; `skipped`: the ids of those that never started (not_run)."""
     c = cfg()
     n = pr.get("number")
     if pr.get("state") != "OPEN":
@@ -61,13 +67,53 @@ def refusal(pr, status, checks):
         return f"CI still running on {sha} ({c.ci_status_context} is pending): wait for it, then run saani merge again"
     if state != "success":
         return f"CI is red on {sha} ({c.ci_status_context}: {state}): fix it, land, then run saani ci pr"
-    return check_runs_problem(checks, sha)
+    return check_runs_problem(checks, sha, skipped)
 
 
-def check_runs_problem(checks, sha):
+def never_started(check, annotations=(), steps=None):
+    """True when a completed check run that did not pass never ran: GitHub refused the job (an annotation in REFUSED_JOB: billing or the
+    spending limit), or it ended `startup_failure` or `cancelled` without a single step (`steps`: the job's steps, [] none; None unknown).
+    Such a run tested nothing: it is "not run", not "failed"."""
+    if check.get("status") != "completed" or check.get("conclusion") in PASSED_CHECKS:
+        return False
+    if any(REFUSED_JOB.search(str(a.get("message") or "")) for a in annotations or ()):
+        return True
+    return check.get("conclusion") in ("startup_failure", "cancelled") and steps == []
+
+
+def not_run(run, checks):
+    """The ids of the check runs of `checks` that never started (never_started), read with gh: a run's annotations when it has some, and for
+    a GitHub Actions run that ended startup_failure or cancelled, its job's steps (an Actions check run's id is its job's id). A read that
+    fails leaves the run failed."""
+    repo, ids = cfg().repo, set()
+    for check in (checks or {}).get("check_runs", []):
+        if check.get("id") is None or check.get("status") != "completed" or check.get("conclusion") not in MAYBE_NOT_RUN:
+            continue
+        annotations, steps = [], None
+        try:
+            if ((check.get("output") or {}).get("annotations_count") or 0) > 0:
+                annotations = run.json("gh", "api", f"repos/{repo}/check-runs/{check.get('id')}/annotations") or []
+            if (not never_started(check, annotations) and check.get("conclusion") != "failure"
+                    and (check.get("app") or {}).get("slug") == "github-actions"):
+                steps = (run.json("gh", "api", f"repos/{repo}/actions/jobs/{check.get('id')}") or {}).get("steps")
+        except (SystemExit, ValueError):
+            pass
+        if never_started(check, annotations, steps):
+            ids.add(check.get("id"))
+    return ids
+
+
+def not_run_note(checks, skipped, sha):
+    """The line that names the check runs of `sha` GitHub never started, or None."""
+    names = [str(r.get("name")) for r in (checks or {}).get("check_runs", []) if r.get("id") in skipped]
+    return f"not run on {sha} ({', '.join(names)}): GitHub never started them; they count as not run, not failed" if names else None
+
+
+def check_runs_problem(checks, sha, skipped=()):
     """Why the check runs of a commit (`gh api .../check-runs`) forbid going on: one failed, or one has not finished. None when all passed.
-    Shared by saani merge and saani deploy."""
-    runs = (checks or {}).get("check_runs", [])
+    `skipped`: the ids of runs that never started (not_run): they are left out, neither passed nor failed. Shared by saani merge and saani
+    deploy."""
+    runs = [r for r in (checks or {}).get("check_runs", []) if r.get("id") is None or r.get("id") not in skipped]
     bad = [r.get("name") for r in runs if r.get("status") == "completed" and r.get("conclusion") not in PASSED_CHECKS]
     if bad:
         return f"a check run did not pass on {sha} ({', '.join(map(str, bad))}): fix it, land, then run saani ci pr"
@@ -118,6 +164,9 @@ def release_step(number, merge_sha):
 
 def merge_it(args):
     c = cfg()
+    if getattr(args, "skip_ci", None) is not None and not args.deploy:
+        print("refused: --skip-ci skips the CI gate of the deploy: it goes with --deploy (saani merge --deploy --skip-ci \"<why>\")")
+        return 1
     gh = ci.Run(args.dry_run)
     n = find_pr(gh, args.pr)
     pr = gh.json("gh", "pr", "view", str(n), "--repo", c.repo, "--json",
@@ -126,7 +175,11 @@ def merge_it(args):
     sha = pr.get("headRefOid", "")
     status = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/status")
     checks = gh.json("gh", "api", f"repos/{c.repo}/commits/{sha}/check-runs?per_page=100", "--paginate")
-    why = refusal(pr, status, checks)
+    skipped = not_run(gh, checks)
+    note = not_run_note(checks, skipped, sha[:7])
+    if note:
+        print(note)
+    why = refusal(pr, status, checks, skipped)
     if why:
         print(f"refused: {why}")
         return 1
@@ -137,7 +190,8 @@ def merge_it(args):
         if c.version_file:
             print(f"dry-run: then, when the pull request changes the version in {c.version_file}, the GitHub release v<version> with the notes of its issues")
         if args.deploy:
-            print("dry-run: then the deploy" + ("" if deployer() else " (not available yet: saani/deploy.py is missing)"))
+            print("dry-run: then the deploy" + ("" if deployer() else " (not available yet: saani/deploy.py is missing)")
+                  + (" without its CI gate (--skip-ci)" if getattr(args, "skip_ci", None) is not None else ""))
         return 0
     gh.write("gh", "pr", "merge", str(n), "--repo", c.repo, "--merge", "--match-head-commit", sha)
     after = gh.json("gh", "pr", "view", str(n), "--repo", c.repo, "--json", "state,mergeCommit") or {}
@@ -167,5 +221,6 @@ def add_parsers(sub):
     p = sub.add_parser("merge", help="merge the green integration -> production pull request, then relabel and clean up")
     p.add_argument("pr", nargs="?", type=int, help="the pull request number (default: the open integration -> production one)")
     p.add_argument("--deploy", action="store_true", help="then deploy (saani deploy)")
+    p.add_argument("--skip-ci", metavar="WHY", help="with --deploy: the deploy skips its CI gate (saani deploy --skip-ci); the owner's, never an auto run's")
     p.add_argument("--dry-run", action="store_true", help="all the checks, print what would happen, merge nothing")
     p.set_defaults(run=run_command)

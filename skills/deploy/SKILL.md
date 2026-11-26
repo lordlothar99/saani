@@ -1,7 +1,7 @@
 ---
 name: deploy
 description: 'Deploy production: CI green, no issue says do not deploy, the checks, the dry run, the deploy, the log, then the prod tag moved and the issues closed. Use when the owner types /saani:deploy or says "deploy" in their own words.'
-argument-hint: "[--dry-run]"
+argument-hint: "[--dry-run] [--skip-ci WHY]"
 disable-model-invocation: true
 ---
 
@@ -19,6 +19,9 @@ prepares and explains.
    (each command that uses the key may ask). The deploy's output is shown as it comes and kept in `build/saani-deploy-<UTC>.log`; on a success
    the prod tag moves (the one force push Saani does) and the issues in the range labelled `in-main` get `✔ Deployed` and are closed.
 3. A failure: show the message, read the log, say what it means. Never touch the key, never work around a refusal.
+4. `--skip-ci "<why>"` skips only step 1, the CI gate, and writes the reason into the log. It is in `$ARGUMENTS` only when the owner
+   typed it: never add it yourself. When step 1 refuses because GitHub never ran the jobs (billing, spending limit) and the content
+   is known green, you may tell the owner that the command exists; the owner decides and types it.
 
 ## Running saani
 Run `saani` with the Bash tool: the plugin's `bin/` puts it on that shell's PATH. If it is not found, run

@@ -1,7 +1,7 @@
 ---
 name: merge
 description: Merge the green integration -> production pull request, then relabel and clean up; optionally deploy. Use when the owner types /saani:merge or /saani:merge --deploy, or says "merge" or "merge and deploy" in their own words.
-argument-hint: "[PR] [--deploy] [--dry-run]"
+argument-hint: "[PR] [--deploy [--skip-ci WHY]] [--dry-run]"
 disable-model-invocation: true
 ---
 
@@ -20,7 +20,8 @@ Only the owner starts it; an auto run never does.
    with the notes of the pull request's issues (nothing otherwise; it says so). If that release step fails, the merge stands: show the
    `next: saani release create ...` line and tell the owner to run it; never run it yourself.
 2. `--deploy`: after the merge (and the release step), `saani deploy` (the checks, the deploy, the log, the prod tag, the issues; `/saani:deploy`). If it refuses
-   or fails, the merge stands; say that, and what the deploy's message says to do.
+   or fails, the merge stands; say that, and what the deploy's message says to do. `--skip-ci "<why>"` goes to the deploy (it skips
+   the deploy's CI gate only, never the pull request's CI): only when the owner typed it, never added by you.
 3. Merged: say the pull request, that the issues were relabelled and which auto runs were removed. Refused: show the reason and the step it
    names (usually `saani ci pr`); never merge by another route, never force, never weaken a check.
 

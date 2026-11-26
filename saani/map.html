@@ -491,9 +491,9 @@ function mastDish(x, y, h) {
 // ------------------------------------------------------------------ the zones: one per step, laid out as a pipeline from START (left) to END (right)
 // Flow runs along x (screen: left and up to right and down); branches spread along y. The road graph (EDGES) shows every move an issue can make.
 const ZONES = [
-  {id: "inbox",   stage: "Inbox",           name: "Wayfarers' Tents",  cx: 11,  cy: 15, hint: "New issues waiting for triage: Type, milestone, labels."},
-  {id: "backlog", cmd: "/saani:start <issue>", stage: "Backlog",         name: "The Granary",       cx: 28,  cy: 24, hint: "Open and not started: in a milestone, nobody on it yet."},
-  {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 7,  hint: "Waits for your answer or your action. Work comes here from the backlog or from the workshops, and goes back."},
+  {id: "backlog", stage: "Backlog",         name: "Wayfarers' Tents",  cx: 11,  cy: 15, hint: "Filed, not released: status Backlog or none. Set its Type and milestone, then move it to Todo when a run may take it."},
+  {id: "todo",    cmd: "/saani:start <issue>", stage: "Todo",            name: "The Granary",       cx: 28,  cy: 24, hint: "Released: status Todo, nobody on it yet. The next auto run takes it when it is ready."},
+  {id: "you",     stage: "Waiting for you", name: "Council Rock",      cx: 37,  cy: 7,  hint: "Waits for your answer or your action. Work comes here from the Granary or from the workshops, and goes back."},
   {id: "works", cmd: "/saani:land when it is committed",   stage: "In progress",     name: "The Workshops",     cx: 46,  cy: 17, hint: "Started or being built in its own worktree."},
   {id: "camp",    stage: "Camp",            name: "The Hollow",        cx: 47,  cy: 36, hint: "Where workers rest when they are not on a task."},
   {id: "proving", cmd: "/saani:test (/saani:progress for a long test run)", stage: "Testing",         name: "Proving Ground",    cx: 58,  cy: 28, hint: "Tests running, or the last check before landing. A failure goes back to the workshops."},
@@ -507,7 +507,7 @@ const ZONES = [
 // The owner, 2026-11-22: a wider landscape (length about 1.8 times the width), areas sized by how many issues they usually hold,
 // more room between Council Rock and the Workshops. Each zone: [flow, across, size]; size is the half-side of its sand patch.
 const PLACE = {
-  inbox: [14, 10, 5], backlog: [26, 32, 8], you: [34, 60, 6.5], works: [46, 16, 5.5], camp: [68, 5, 5],
+  backlog: [14, 10, 5], todo: [26, 32, 8], you: [34, 60, 6.5], works: [46, 16, 5.5], camp: [68, 5, 5],
   proving: [60, 36, 4.8], depot: [72, 58, 5], tower: [86, 35, 7], pad: [93, 12, 4.5], outpost: [114, 10, 4.5], archive: [99, 60, 4.8], citadel: [114, 40, 8.5],
 };
 ZONES.forEach(z => { const p = PLACE[z.id]; if (p) [z.cx, z.cy, z.s] = p; });
@@ -515,12 +515,12 @@ const SIZE = z => z.s || z.r || 5.6;                     // the sand patch
 const NATIVE = z => z.r || 5.6;                          // the size its buildings were drawn for
 const BOARD_W = 70, BOARD_D = 126;                       // after the turn below: x across the flow, y along it
 const ZONE = Object.fromEntries(ZONES.map(z => [z.id, z]));
-const STEP_ZONE = {inbox: "inbox", backlog: "backlog", you: "you", started: "works", building: "works", testing: "proving", landing: "proving",
+const STEP_ZONE = {backlog: "backlog", todo: "todo", you: "you", started: "works", building: "works", testing: "proving", landing: "proving",
                    dev: "depot", pr: "tower", deploy: "pad", close: "archive", checks: "outpost", done: "citadel"};
-const STEP_LABEL = {inbox: "Inbox · to triage", backlog: "Backlog", you: "Waiting for you", started: "Started", building: "Building", testing: "Testing",
+const STEP_LABEL = {backlog: "Backlog", todo: "Todo", you: "Waiting for you", started: "Started", building: "Building", testing: "Testing",
                     landing: "Landing", dev: "Integrated", pr: "In the release pull request", deploy: "Released · to deploy", close: "Released · to close",
                     checks: "Live checks", done: "Done"};
-const NEXT = {backlog: "started", started: "building", building: "testing", testing: "dev", dev: "pr", pr: "close", close: "done"};
+const NEXT = {todo: "started", started: "building", building: "testing", testing: "dev", dev: "pr", pr: "close", close: "done"};
 // a block's top is its issue Type (GitHub issue types: Bug, Task, Feature); its sides are the same brown for every block
 const TYPE = {bug: {word: "Bug", color: "#d8614a"}, task: {word: "Task", color: "#e29f42"}, feature: {word: "Feature", color: "#6b9bd6"}};
 const TYPE_NONE = {word: "No type", color: "#d8c6a4"}, SIDE_L = "#6e4a2c", SIDE_R = "#53361f";
@@ -553,10 +553,10 @@ function buildZone(z) {
   const B = []; const add = (depth, svg) => B.push([depth, svg]);
   seed = 100 + cx * 7 + cy;
   switch (z.id) {
-    case "inbox":
+    case "backlog":
       add(0, stripedTent(cx - 5, cy - 5, 2.6, 2.6, 2.1, "#c9a77a")); add(1, stripedTent(cx - 1.8, cy - 5.4, 3.2, 2.8, 2.6, "#b7895a")); add(2, stripedTent(cx + 2, cy - 4.8, 2.6, 2.6, 2, "#d3b48a"));
       add(3, brazier(cx - .2, cy - 1.6)); add(3, crates(cx + 4, cy - 2, 4)); add(3, banner(cx - 5.2, cy - 1.8, 2, C.water)); add(3.5, barrels(cx - 4.6, cy - 1.4, 3)); break;
-    case "backlog":
+    case "todo":
       add(0, building(cx - 5.4, cy - 5.4, 10.8, 3.2, .7, "#9c7048", {windows: false}));
       for (let i = 0; i < 4; i++) add(1 + i * .1, `<g transform="translate(0,${-.7 * TH})">${ribDome(cx - 4 + i * 2.7, cy - 3.8, 1.2, 2 + (i % 2) * .5, "#c89c66")}</g>`);
       add(2, building(cx + 2.8, cy - 2, 2.4, 1.2, 1.4, "#a77a4c", {door: true, rows: 1})); add(3, crates(cx - 5, cy - 1.6, 6)); add(3, lamp(cx + 5.2, cy - 1.4)); break;
@@ -827,11 +827,12 @@ ROUTE.splice(0, ROUTE.length, ...ROUTE.map(TURN));
 let DATA = null, LIVE = false, PREV = {}, demoTimer = null;
 function normalize(d) {
   if (d.cards) return d;
-  // "Ready" (open, nothing blocks it) is the backlog's until an agent session works on it: the Workshops hold only work that is going on
-  const map = {you: "you", ready: "backlog", building: "building", testing: "testing", dev: "dev", main: "deploy", close: "close", live: "done"};
+  // "Ready" (open, nothing blocks it) waits in the Wayfarers' Tents (Backlog) or the Granary (Todo), as the card's `queue` says (Todo when it
+  // says nothing), until an agent session works on it: the Workshops hold only work that is going on
+  const map = {you: "you", ready: "todo", building: "building", testing: "testing", dev: "dev", main: "deploy", close: "close", live: "done"};
   const cards = []; let pr = null;
   for (const col of d.board || []) {
-    for (const c of col.cards) cards.push({...c, step: col.id === "ready" && (c.agents || []).length ? "started" : map[col.id] || "backlog"});
+    for (const c of col.cards) cards.push({...c, step: col.id === "ready" && (c.agents || []).length ? "started" : col.id === "ready" && c.queue === "backlog" ? "backlog" : map[col.id] || "todo"});
     if (col.pr) pr = col.pr;
   }
   if (pr) for (const c of cards) if ((pr.inside || []).includes(c.number)) c.step = "pr";
@@ -865,8 +866,8 @@ function hintOf(z) {
 function promptFor(c) {
   const n = c.number, pr = DATA.pr;
   switch (c.step) {
-    case "inbox": return `Triage #${n}: set its Type, milestone and labels, and rewrite it in the issue template.`;
-    case "backlog": return `Start #${n}: saani start, implement it, test it and land it.`;
+    case "backlog": return `Release #${n}: set its Type and milestone, rewrite it in the issue template, then move it to Todo.`;
+    case "todo": return `Start #${n}: saani start, implement it, test it and land it.`;
     case "pr": return pr ? `How is pull request #${pr.number} going? It carries #${n}. Tell me what to check before I merge it.` : `Prepare the ${INT()} into ${PROD()} pull request (it carries #${n}).`;
     case "deploy": return c.prompt || `Give me the deploy command for what is on ${PROD()} (it carries #${n}): read the issues for deploy warnings first.`;
     case "close": return `#${n} is merged on ${PROD()} and has nothing to deploy: close it citing the merge commit.`;
@@ -948,7 +949,7 @@ function sampleRelease(d) {
 function layout() {
   POS = {}; GROUPS = []; HARV = null;
   const byZone = {};
-  for (const c of DATA.cards) (byZone[STEP_ZONE[c.step] || "backlog"] ||= []).push(c);
+  for (const c of DATA.cards) (byZone[STEP_ZONE[c.step] || "todo"] ||= []).push(c);
   const msKey = m => { const p = (m || "").match(/\d+/g); return p ? p.map(Number).reduce((a, v) => a * 100 + v, 0) : 1e9; };
   for (const [zid, list] of Object.entries(byZone)) {
     if (zid === "tower" && DATA.pr && list.length) { harvesterLayout(ZONE[zid], list); continue; }
@@ -1049,7 +1050,7 @@ function placeWorkers(list) {
 }
 
 // ------------------------------------------------------------------ render the moving layer
-// The owner, 2026-11-22: the Status panel, bottom left: agents working and the release PR's CI light
+// The owner, 2026-11-22: the Status panel, top right under the search bar: agents working and the release PR's CI light
 function statusPanel(ws) {
   // the help's last line: which Saani this is, its release tag when it sits on one, else its commit
   const v = DATA.saani || {};
@@ -1332,8 +1333,8 @@ function zonePrompt(z, cards) {
   // one short instruction for the whole stage, the issues listed once
   const ns = cards.map(c => "#" + c.number), many = ns.length > 1, list = many ? ns.slice(0, -1).join(", ") + " and " + ns[ns.length - 1] : ns[0];
   const say = {
-    inbox: `Triage ${list}: set ${many ? "each one's" : "its"} Type, milestone and labels, and rewrite ${many ? "them" : "it"} in the issue template.`,
-    backlog: `Work through ${list} by milestone priority, one at a time: saani start, implement, test and land each.`,
+    backlog: `Release ${list}: set ${many ? "each one's" : "its"} Type and milestone, rewrite ${many ? "them" : "it"} in the issue template, then move ${many ? "them" : "it"} to Todo.`,
+    todo: `Work through ${list} by milestone priority, one at a time: saani start, implement, test and land each.`,
     you: `${list} ${many ? "wait" : "waits"} for me: tell me what ${many ? "each" : "it"} needs from me${many ? ", one at a time" : ""}.`,
     works: `Where ${many ? "are" : "is"} ${list}? For ${many ? "each" : "it"}: what is done, what is left, anything blocked.`,
     proving: `/saani:progress (the test run of ${list})`,
@@ -1348,7 +1349,7 @@ function zonePrompt(z, cards) {
   return say && (z.cmd && z.id !== "proving" ? `${say} (${z.cmd})` : say);
 }
 function zonePanel(z) {
-  const cards = DATA.cards.filter(c => (STEP_ZONE[c.step] || "backlog") === z.id).sort((a, b) => a.number - b.number);
+  const cards = DATA.cards.filter(c => (STEP_ZONE[c.step] || "todo") === z.id).sort((a, b) => a.number - b.number);
   const f = cards.length ? folderFor(cards[0]) : folderFor({step: ""}), prompt = cards.length ? zonePrompt(z, cards) : null;
   const items = cards.length ? el("ul", {class: "zlist"}, cards.map(c => { const li = el("li", {}, el("span", {class: "zdot", style: `background:${typeInfo(c).color}`}), el("b", {}, "#" + c.number), " ", c.title, el("span", {class: "muted"}, " · " + (c.milestone || "no milestone")));
       li.addEventListener("click", () => { openPanel(issuePanel(c)); if (LIVE && !DETAILS[c.number] && !c.detail) fetchDetail(c); }); return li; }))
@@ -1580,8 +1581,8 @@ function demoStep() {
   if (document.hidden) return;
   const inPR = DATA.cards.filter(c => c.step === "pr");
   if (inPR.length > 1 && Math.random() < .2) { mergeSamplePR(); return; }
-  // now and then an issue gets stuck in the backlog and waits for you: a long move, so it flies
-  const stuck = DATA.cards.filter(c => c.step === "backlog");
+  // now and then an issue gets stuck in the Granary and waits for you: a long move, so it flies
+  const stuck = DATA.cards.filter(c => c.step === "todo");
   if (stuck.length && Math.random() < .3) { const c = stuck[Math.floor(Math.random() * stuck.length)]; setData({...DATA, cards: DATA.cards.map(x => x.number === c.number ? {...x, step: "you", need: "answer", staged: true} : x)}, false); return; }
   const movable = DATA.cards.filter(c => NEXT[c.step]); if (!movable.length) return;
   const c = movable[Math.floor(Math.random() * movable.length)];
