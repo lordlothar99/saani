@@ -499,8 +499,19 @@ def cmd_create(args):
 # ---------------------------------------------------------------- the release pull request (integration -> production)
 
 def version_key(version):
-    """The numbers of a version, to compare (1.10.0 > 1.9.0); () when it has none."""
-    return tuple(int(n) for n in re.findall(r"\d+", version or ""))
+    """A key to compare versions: the numeric core with trailing zeros ignored (1.10 > 1.9, 1.3 == 1.3.0), a pre-release (1.3.0-rc.1,
+    1.3.0rc1, 1.3.0a2) below its final version, `+build` ignored; () when it has no number."""
+    m = re.match(r"\s*v?(\d+(?:\.\d+)*)(.*)", version or "")
+    if not m:
+        return ()
+    core = [int(n) for n in m.group(1).split(".")]
+    while core and core[-1] == 0:
+        core.pop()
+    rest = m.group(2).split("+", 1)[0]
+    letters = "".join(re.findall(r"[A-Za-z]+", rest)).lower()
+    if not letters:
+        return (tuple(core), 1, "", ())
+    return (tuple(core), 0, letters, tuple(int(n) for n in re.findall(r"\d+", rest)))
 
 
 def check_version():
@@ -584,7 +595,7 @@ def cmd_pr(args):
     path = via_file(body, ".md")
     try:
         if existing:
-            extra = ["--milestone", milestone] if milestone else []
+            extra = ["--milestone", milestone] if milestone else ["--remove-milestone"]     # an old milestone must not stay
             gh("pr", "edit", str(existing[0]["number"]), "--repo", c.repo, "--title", title, "--body-file", path, *extra)
             print(f"updated pull request #{existing[0]['number']}: {title}")
         else:

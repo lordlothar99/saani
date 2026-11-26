@@ -96,6 +96,24 @@ def test_refuses_unless_the_version_is_higher_than_productions(world, versions):
     assert not any(c[:2] in (("pr", "create"), ("pr", "edit")) for c in fake.calls)
 
 
+@pytest.mark.parametrize("new,old,ok", [("1.3.0", "1.3.0-rc.1", True), ("1.3.0-rc.2", "1.3.0-rc.1", True), ("1.3.0rc1", "1.3.0", False),
+                                        ("1.3.0", "1.3", False), ("1.3", "1.3.0", False), ("1.3.1", "1.3", True),
+                                        ("1.3.0+build5", "1.3.0", False), ("1.3.0-rc.1", "1.3.0-rc.1", False), ("1.10.0", "1.9.0", True)])
+def test_version_order(new, old, ok):
+    assert (notes.version_key(new) > notes.version_key(old)) is ok
+
+
+def test_updating_sets_or_removes_the_milestone(world):
+    fake = world(open_pr=7)
+    run()
+    edit = next(c for c in fake.calls if c[:2] == ("pr", "edit"))
+    assert edit[edit.index("--milestone") + 1] == "v1.3" and "--remove-milestone" not in edit
+    fake = world(open_pr=7, milestones=("v1.3", "v1.4"))
+    run()
+    edit = next(c for c in fake.calls if c[:2] == ("pr", "edit"))
+    assert "--remove-milestone" in edit and "--milestone" not in edit
+
+
 def test_a_version_compares_by_its_numbers(world):
     world(versions=("1.10.0", "1.9.0"))
     assert run("--dry-run") == 0
