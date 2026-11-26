@@ -712,6 +712,10 @@ def cmd_on(args):
     token = os.environ.get(WATCH_VAR)
     if token and not here_mode:
         rec["watch"] = token          # the watcher that started this session (#67): only it ends this record; written here and nowhere else
+    if not here_mode:
+        # The guard's mark before the record: when it cannot be written, no record is left to block the next `saani auto on`. Without it
+        # bin/saani would not start Python for the PostToolUse hook of this call when no other run is registered.
+        mark_pending(run_id)
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8")
     warning = parallel_warning(parallel_size(cfg().parallel, os.cpu_count(), None))
     if warning:
@@ -725,9 +729,8 @@ def cmd_on(args):
         print(f"saani auto: here {run_id} folder={folder} (interactive: the guard stays in present mode)")
         return 0
     # The guard's PostToolUse hook registers the session after this process exits 0 and printed this line: the last line of stdout, on
-    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both). The mark
-    # first: without it bin/saani would not start Python for that hook when no other run is registered.
-    mark_pending(run_id)
+    # success only, and no other line like it. The id is --id's and the folder --folder's when given (the guard checks both); the
+    # .pending mark is written above.
     print(f"saani auto: on {run_id} folder={folder}")
     return 0
 

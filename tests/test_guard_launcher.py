@@ -54,10 +54,19 @@ def launch(tmp_path, home):
             mark.unlink()
         env = {**{k: v for k, v in os.environ.items() if k.upper() != "PATH"}, "PATH": str(fakes), "HOME": str(home),
                "USERPROFILE": str(home), "SAANI_TEST_MARK": fwd(mark), "SAANI_TEST_PYTHON": fwd(sys.executable), **env_more}
-        r = subprocess.run([BASH, fwd(ROOT) + "/bin/saani", "guard"], input=json.dumps(event).encode(), capture_output=True, cwd=cwd,
-                           env=env, timeout=60)
-        assert r.returncode == 0, r.stderr
-        out = r.stdout.decode().strip()
+        # Written by hand, not through communicate(), which hides a broken pipe: the event must be read to its end, as Claude Code
+        # writes all of it.
+        p = subprocess.Popen([BASH, fwd(ROOT) + "/bin/saani", "guard"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, cwd=cwd, env=env)
+        try:
+            p.stdin.write(json.dumps(event).encode())
+            p.stdin.close()
+            out, err = p.stdout.read(), p.stderr.read()
+            assert p.wait(timeout=60) == 0, err
+        finally:
+            if p.poll() is None:
+                p.kill()
+        out = out.decode().strip()
         return (json.loads(out)["hookSpecificOutput"] if out else None), mark.exists()
     return run
 
@@ -87,6 +96,21 @@ def test_no_auto_run_registered_no_python_started_and_no_output(tmp_path, home, 
     assert launch(work, pre(work, "git push --force")) == (None, False)
     assert launch(work, after(work, "ls", ran("x"))) == (None, False)
     assert launch(work, after(work, AUTO_ON, ran("auto"))) == (None, False)      # no `saani auto on` waiting: nothing to register
+
+
+def test_a_big_event_is_read_to_its_end_on_the_fast_path(tmp_path, launch):
+    """Over 64 KB, more than a pipe holds: bin/saani reads it all before it exits, so the writer never meets a closed pipe."""
+    main, work = fake_repo(tmp_path)
+    big = _event(work, "Write", "s-1", "PreToolUse", None, {"file_path": str(work / "a.txt"), "content": "x" * 200_000})
+    assert launch(work, big) == (None, False)
+
+
+def test_an_empty_home_starts_python(tmp_path, home, launch):
+    """A home folder that lists nothing may be one bash cannot read: Python decides."""
+    main, work = fake_repo(tmp_path)
+    empty = tmp_path / "empty-home"
+    empty.mkdir()
+    assert launch(work, pre(work, "git status"), HOME=str(empty), USERPROFILE=str(empty))[1] is True
 
 
 def test_an_auto_run_registered_the_guard_runs_and_decides_as_before(tmp_path, launch):

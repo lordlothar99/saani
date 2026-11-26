@@ -256,7 +256,8 @@ and after every Bash call, PostToolUse, each with a 15 s timeout; `saani/guard.p
 the workers are covered too); nothing the model can write or the folder it is in turns auto mode on.
 - **Present** (no entry for the session in `~/.saani/auto/`): the guard prints nothing, so Claude Code's normal permissions apply, to
   `saani auto on` too: the owner is asked unless their own rules allow it. A present session never switches itself into auto mode. With no
-  auto run registered at all, `bin/saani` returns before starting Python (bash builtins only, no process): when each home Python could use
+  auto run registered at all, `bin/saani` reads the event to its end and returns before starting Python (bash builtins only, no
+  process): when each home Python could use
   (`HOME`; on Windows `USERPROFILE` too) lists files but no `.saani`, `~/.saani` lists files but no `auto`, or `~/.saani/auto` lists files
   but no entry (`*.json`), no over mark (`*.over`) and no `*.pending` mark (names in any case). It judges by what a folder lists, never by
   a lookup that fails: an empty or unreadable folder, or no home, starts Python, which decides (and fails closed). `saani auto on` leaves

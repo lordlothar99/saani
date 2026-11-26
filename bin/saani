@@ -31,7 +31,12 @@ if [ "$#" -eq 1 ] && [ "$1" = guard ]; then
   for h in "${homes[@]}"; do
     { [ -n "$h" ] && quiet "$h"; } || fast=0
   done
-  [ "$fast" = 1 ] && exit 0
+  if [ "$fast" = 1 ]; then
+    # Read the event to its end, so Claude Code's write never meets a closed pipe: -N reads a pipe in blocks (-d '' would read it a byte
+    # per system call, about 1 s for a 200 KB Write on Windows).
+    while IFS= read -r -N 65536 _; do :; done
+    exit 0
+  fi
   shopt -u nullglob dotglob nocaseglob
 fi
 

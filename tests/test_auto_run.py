@@ -169,6 +169,7 @@ def test_on_stops_before_its_marker_when_the_pending_mark_cannot_be_written(worl
     with pytest.raises(SystemExit, match="cannot write the guard's mark"):
         auto.cmd_on(args())
     assert not guard.MARKER.search(capsys.readouterr().out)
+    assert auto.read_record() is None and not (world.git / auto.RECORD).exists()       # nothing blocks the next `saani auto on`
 
 
 def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):
