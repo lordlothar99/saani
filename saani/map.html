@@ -295,6 +295,13 @@ a{color:var(--amber)}
  .panel header{grid-template-columns:1fr auto}.panel .big{grid-column:1}
  .panel footer{grid-template-columns:minmax(0,1fr)}.copy{grid-row:auto;grid-column:1}
 }
+.compass{flex:none;display:block}
+.cmp-n{font:700 8px var(--mono);fill:var(--bone)}
+.sv-r{display:grid;gap:5px;min-width:150px}
+.scale{display:flex;align-items:center;gap:8px;font:600 11px/1 var(--mono);color:var(--bone)}
+#sc-bar{display:inline-block;height:6px;border:1.5px solid var(--bone);border-top:none;box-sizing:border-box;background:repeating-linear-gradient(90deg,var(--bone) 0 50%,transparent 50% 100%) bottom/100% 2px no-repeat}
+.sv-xy{font:500 10px/1 var(--mono);color:var(--dust);letter-spacing:.04em;white-space:nowrap}
+@media (max-width:760px){.survey{display:none}}
 </style>
 
 <div id="notice" class="hud notice" role="status" hidden></div><div id="storm" aria-hidden="true"></div><div id="wind" aria-hidden="true"></div><div id="stage"><svg id="mapGround" aria-hidden="true"><g id="world0"><g id="ground"></g></g></svg><svg id="map" role="img" aria-label="Saani map: each block is an issue, each figure a worker"><defs>
@@ -322,6 +329,12 @@ a{color:var(--amber)}
 <div class="hud summary" id="summary" aria-label="At a glance" hidden></div>
 
 
+<div class="hud survey" id="survey" aria-label="Compass and scale">
+ <svg class="compass" viewBox="-22 -22 44 44" width="44" height="44" aria-hidden="true"><circle r="20" fill="none" stroke="currentColor" stroke-opacity=".35"/>
+  <path d="M0 -17L4 0L0 3L-4 0Z" fill="var(--ember)"/><path d="M0 17L4 0L0 -3L-4 0Z" fill="currentColor" fill-opacity=".55"/><path d="M-17 0L0 -2.5L0 2.5ZM17 0L0 -2.5L0 2.5Z" fill="currentColor" fill-opacity=".35"/>
+  <text y="-9" text-anchor="middle" class="cmp-n">N</text></svg>
+ <div class="sv-r"><div class="scale"><span id="sc-bar"></span><b id="sc-txt">50 m</b></div><div class="sv-xy" id="sv-xy" title="Where the pointer is: metres east of the board's west corner, metres north of its south corner">E — · N —</div></div>
+</div>
 <div class="hud zoom"><button class="btn" id="zout" type="button" aria-label="Zoom out">−</button><span class="pct" id="pct">100%</span><button class="btn" id="zin" type="button" aria-label="Zoom in">+</button><button class="btn" id="zfit" type="button">Fit</button><details class="legend" id="legend"><summary class="btn" aria-label="What the map shows" title="What the map shows">?</summary><div class="hud legend-pop"><button class="x" type="button" aria-label="Close the signs">×</button><h3 class="legend-h">Signs</h3><ul id="legend-list"></ul><p class="legend-ver" id="legend-ver"></p></div></details></div>
 
 <div id="tip" hidden></div>
@@ -507,12 +520,14 @@ const ZONES = [
 ];
 // The owner, 2026-11-22: a wider landscape (length about 1.8 times the width), areas sized by how many issues they usually hold,
 // more room between Council Rock and the Workshops. Each zone: [flow, across, size]; size is the half-side of its sand patch.
-// The owner, 2026-11-26 (#108): the Loading Yard between the Proving Ground and the Caravan Depot; the places after it moved along the
+// The owner, 2026-11-26: the Workshops, Proving Ground, Loading Yard, Caravan Depot and Hollow placed by the owner in metres (the compass
+// and scale at the bottom right); before that the Loading Yard sat north of the Caravan Depot, west of the Launch Pad and the Far Outpost (#108 placed it first between
+// the Proving Ground and the Caravan Depot); the places after it moved along the
 // flow (the board is longer) so neighbours on the road stay 22 to 26 apart, as before.
 const PLACE = {
-  backlog: [14, 10, 5], todo: [26, 32, 8], you: [34, 60, 6.5], works: [46, 16, 5.5], camp: [68, 5, 5],
-  proving: [60, 36, 4.8], yard: [72, 58, 4.8], depot: [85, 38, 5], tower: [99, 58, 7], pad: [106, 35, 4.5], outpost: [120, 14, 4.5],
-  archive: [120, 60, 4.8], citadel: [130, 38, 8.5],
+  backlog: [19.8, 9.6, 5], todo: [24.5, 33.7, 8], you: [35.6, 58.1, 6.5], works: [50.5, 16, 5.5], camp: [72.8, 9.3, 5],
+  proving: [62.3, 38.9, 4.8], yard: [75.7, 55.4, 4.8], depot: [84.1, 27.7, 5], tower: [107.9, 12.1, 7], pad: [103.5, 36.7, 4.5], outpost: [99.8, 55.9, 4.5],
+  archive: [127.8, 23.6, 4.8], citadel: [126.3, 52.1, 8.5],
 };
 ZONES.forEach(z => { const p = PLACE[z.id]; if (p) [z.cx, z.cy, z.s] = p; });
 const SIZE = z => z.s || z.r || 5.6;                     // the sand patch
@@ -541,15 +556,15 @@ const typeInfo = c => TYPE[typeOf(c)] || TYPE_NONE;
 const EDGES = [
   // The owner, 2026-11-22: a natural, scattered layout; the road winds from zone to zone. After the Refinery it forks: something to
   // deploy goes Launch Pad > Far Outpost > Citadel, nothing to deploy goes Archive > Citadel. Pad and Archive are alternatives, not steps.
-  {k: "main", pts: [[8, 8], [14, 10], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [78, 48], [85, 38], [92, 48], [99, 58]]},
-  {k: "main", pts: [[99, 58], [101, 46], [106, 35], [112, 24], [120, 14], [127, 24], [130, 38]], label: "deploy", at: 0},
-  {k: "main", pts: [[99, 58], [110, 62], [120, 60], [125, 51]], label: "nothing to deploy", at: 1},
+  {k: "main", pts: [[12, 5], [19.8, 9.6], [24, 22], [24.5, 33.7], [38, 22], [50.5, 16], [57, 26], [62.3, 38.9], [69, 48], [75.7, 55.4], [82, 42], [84.1, 27.7], [96, 18], [107.9, 12.1]]},
+  {k: "main", pts: [[107.9, 12.1], [108, 25], [103.5, 36.7], [101, 46], [99.8, 55.9], [112, 55], [126.3, 52.1]], label: "deploy", at: 0},
+  {k: "main", pts: [[107.9, 12.1], [119, 17], [127.8, 23.6], [128, 33], [127, 40]], label: "nothing to deploy", at: 1},
   // The owner, 2026-11-22: no trails for the moves to and from Council Rock, the way back (tests failed, CI red) or the hotfix: they are static and add noise.
-  {k: "side", pts: [[30, 38], [34, 69], [100, 69], [134, 69], [136, 47]], label: "closed, not planned", at: 1},
-  {k: "camp", pts: [[50, 14], [63, 8]]},
-  {k: "trail", pts: [[28, 38], [31, 50], [34, 55]]},
-  {k: "trail", pts: [[37, 55], [43, 40], [46, 22]]},
-  {k: "trail", pts: [[110, 35], [116, 36], [122, 37]]},
+  {k: "side", pts: [[29, 40], [34, 69], [100, 69], [134, 69], [136, 47]], label: "closed, not planned", at: 1},
+  {k: "camp", pts: [[58, 13], [67, 10]]},
+  {k: "trail", pts: [[27, 40], [31, 49], [34, 52]]},
+  {k: "trail", pts: [[38, 53], [44, 36], [50, 20]]},
+  {k: "trail", pts: [[107.5, 39], [116, 43], [122, 46]]},
 ];
 
 function buildZone(z) {
@@ -819,8 +834,7 @@ function drawGround() {
   $("#ground").innerHTML = g.join("");
   cacheDeco();
 }
-const ROUTE = [[8, 8], [14, 10], [18, 22], [26, 32], [36, 26], [46, 16], [53, 26], [60, 36], [66, 48], [72, 58], [78, 48], [85, 38], [92, 48], [99, 58],
-               [101, 46], [106, 35], [112, 24], [120, 14], [127, 24], [130, 38]];
+const ROUTE = [[12, 5], [19.8, 9.6], [24, 22], [24.5, 33.7], [38, 22], [50.5, 16], [57, 26], [62.3, 38.9], [69, 48], [75.7, 55.4], [82, 42], [84.1, 27.7], [96, 18], [107.9, 12.1], [108, 25], [103.5, 36.7], [101, 46], [99.8, 55.9], [112, 55], [126.3, 52.1]];
 // The layout above is written as (flow, across). The owner, 2026-11-22: START at the bottom left, END at the top right. On screen that
 // is the -y direction, so each point turns: x = across, y = BOARD_D - flow.
 // The owner, 2026-11-22: the milestones written in front of a zone must not reach the next building, so consecutive zones on the
@@ -1065,6 +1079,9 @@ function placeWorkers(list) {
 // ------------------------------------------------------------------ render the moving layer
 // The owner, 2026-11-22: the Status panel, top right under the search bar: agents working and the release PR's CI light
 function statusPanel(ws) {
+  // The owner, 2026-11-26: the compass and the scale are a design tool: shown in the design preview (sample data) or with ?design in the
+  // address, hidden on the live map
+  $("#survey").hidden = LIVE && !/[?&]design\b/.test(location.search);
   // the help's last line: which Saani this is, its release tag when it sits on one, else its commit
   const v = DATA.saani || {};
   $("#legend-ver").textContent = v.label ? (v.kind === "commit" ? `Saani · commit ${v.label}` : `Saani ${v.label}`) : LIVE ? "Saani · version unknown" : "Saani · sample data (the live server shows its version)";
@@ -1167,11 +1184,23 @@ function clampView() {
   for (const z of ZONES) { const p = iso(z.cx, z.cy), R = SIZE(z) * TW * .45, d = Math.hypot(c[0] - p[0], c[1] - p[1]), gap = d - R; if (!best || gap < best.gap) best = {p, R, d, gap}; }
   if (best && best.gap > L) { const k = (best.R + L) / best.d; c[0] = best.p[0] + (c[0] - best.p[0]) * k; c[1] = best.p[1] + (c[1] - best.p[1]) * k; VIEW.tx = W / 2 - c[0] * s; VIEW.ty = H / 2 - c[1] * s; }
 }
+// The owner, 2026-11-26: a compass (north is up the screen) and a scale in metres, plus the pointer's position, so places can be moved
+// by a given distance in a given direction. 1 m = 3.2 px of the map at 100% zoom (10 m = 32 px, half a tile's width).
+const M_PER_PX = 10 / 32;
+function survey() {
+  const want = 110, m = want / VIEW.s * M_PER_PX, nice = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000].find(v => v >= m * .7) || 2000;
+  $("#sc-bar").style.width = (nice / M_PER_PX * VIEW.s).toFixed(1) + "px"; $("#sc-txt").textContent = nice >= 1000 ? nice / 1000 + " km" : nice + " m";
+}
+function pointerPlace(e) {
+  const r = $("#map").getBoundingClientRect(), wx = (e.clientX - r.left - VIEW.tx) / VIEW.s, wy = (e.clientY - r.top - VIEW.ty) / VIEW.s;
+  const west = iso(0, BOARD_D)[0], south = iso(BOARD_W, BOARD_D)[1];          // 0 m east at the board's west corner, 0 m north at its south corner
+  return [Math.round((wx - west) * M_PER_PX), Math.round((south - wy) * M_PER_PX)];
+}
 function applyView() {
   clampView();
   document.body.classList.add("moving"); clearTimeout(movingTimer); movingTimer = setTimeout(() => { document.body.classList.remove("moving"); clearTimeout(DETAIL_T_TIMER); DETAIL_T_TIMER = setTimeout(cacheDetail, 350); }, 180);
   if (viewRaf) return;
-  viewRaf = requestAnimationFrame(() => { viewRaf = 0; const tf = `translate(${VIEW.tx.toFixed(1)},${VIEW.ty.toFixed(1)}) scale(${VIEW.s.toFixed(4)})`; $("#world").setAttribute("transform", tf); $("#world0").setAttribute("transform", tf); $("#pct").textContent = Math.round(VIEW.s * 100) + "%"; });
+  viewRaf = requestAnimationFrame(() => { viewRaf = 0; const tf = `translate(${VIEW.tx.toFixed(1)},${VIEW.ty.toFixed(1)}) scale(${VIEW.s.toFixed(4)})`; $("#world").setAttribute("transform", tf); $("#world0").setAttribute("transform", tf); $("#pct").textContent = Math.round(VIEW.s * 100) + "%"; survey(); });
 }
 function bounds() { const a = iso(0, 0), b = iso(BOARD_W, 0), c = iso(BOARD_W, BOARD_D), d = iso(0, BOARD_D); return {x0: d[0] - 40, x1: b[0] + 40, y0: a[1] - 160, y1: c[1] + 1.6 * TH + 60}; }
 function fit() {
@@ -1232,7 +1261,7 @@ $("#map").addEventListener("pointerover", e => {
   else return hideTip();
   tip.hidden = false; moveTip(e);
 });
-$("#map").addEventListener("pointermove", e => { if (!tip.hidden) moveTip(e); });
+$("#map").addEventListener("pointermove", e => { if (!tip.hidden) moveTip(e); const [x, y] = pointerPlace(e); $("#sv-xy").textContent = `E ${x} m · N ${y} m`; });
 $("#map").addEventListener("pointerout", e => { if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest(".blk,.wkr,.plaque")) hideTip(); });
 function moveTip(e) { const r = tip.getBoundingClientRect(); let x = e.clientX + 16, y = e.clientY + 16; if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 16; if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 16; tip.style.left = x + "px"; tip.style.top = y + "px"; }
 function stateWord(w) {
