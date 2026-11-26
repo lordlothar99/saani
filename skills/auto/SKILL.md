@@ -83,7 +83,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 1. **The pipeline, several issues at once.** You are Claude Code, the main session: you brief, decide and land; the coder and the reviewer do the reading
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
    - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`: default sized from the machine, at most 2; a fixed number up to 10, a `warning` above 5; less the issues this run started: the owner's own worktrees, listed in `owner_running`,
-     take no slot, and neither does an issue you parked with `saani comment <n> blocked`, listed in `parked`: its worktree stays, `pick` does not offer it again; `note` says "no slot" or "nothing eligible") and the `eligible`
+     take no slot, and neither does an issue you parked with `saani comment <n> blocked`, listed in `parked`: its worktree stays and `pick` never offers it again, also with `--only <n>`; only `saani start <n>` or its landing re-admits it; a `question` comment does not park an issue; `note` says "no slot" or "nothing eligible") and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
      files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
