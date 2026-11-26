@@ -51,7 +51,7 @@ if __name__ == "__main__" and sys.argv[1:2] == ["guard"]:
 
 import argparse  # noqa: E402
 
-from saani import __version__, board_server, ci, comments, core, deploy, guard, kpis, merge, notes, progress  # noqa: E402
+from saani import __version__, board_server, ci, comments, core, deploy, guard, kpis, merge, notes, progress, review  # noqa: E402
 
 
 def main(argv=None):
@@ -59,7 +59,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="saani", description="Saani: GitHub issues from idea to production")
     parser.add_argument("--version", action="version", version=f"saani {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for module in (core, ci, comments, merge, deploy, kpis, notes, board_server, progress, guard):
+    for module in (core, ci, comments, merge, deploy, kpis, notes, board_server, progress, review, guard):
         module.add_parsers(sub)
     args = parser.parse_args(argv)
     return args.run(args)
