@@ -4,6 +4,49 @@
 # Store stubs (WindowsApps). saani.py itself refuses a Python older than 3.11.
 src="${BASH_SOURCE[0]}"                   # no subshell, no dirname process: the hook pays for every one
 case "$src" in */*) here="${src%/*}/.." ;; *) here=".." ;; esac
+
+# The guard hook with no auto run anywhere: present mode, so it prints nothing and no Python starts (docs/SAANI.md, The guard). Builtins
+# only, no process. Each home Python could use (HOME; on Windows USERPROFILE too) is looked at by listing folders, never by a failed
+# lookup: a folder that lists nothing may be unreadable. Quiet when the home lists files but no .saani, ~/.saani lists files but no
+# auto, or ~/.saani/auto lists files but no entry (*.json), no over mark (*.over) and no mark of a `saani auto on` waiting for its
+# PostToolUse hook (*.pending), names in any case. Anything else (an empty or unreadable folder, no home) starts Python, which decides
+# and fails closed.
+quiet() {
+  local all=("$1"/*) hit=("$1"/.[s]aani)
+  [ "${#all[@]}" -gt 0 ] || return 1
+  [ "${#hit[@]}" -gt 0 ] || return 0
+  all=("$1"/.saani/*) hit=("$1"/.saani/[a]uto)
+  [ "${#all[@]}" -gt 0 ] || return 1
+  [ "${#hit[@]}" -gt 0 ] || return 0
+  all=("$1"/.saani/auto/*) hit=("$1"/.saani/auto/*.json "$1"/.saani/auto/*.over "$1"/.saani/auto/*.pending)
+  [ "${#all[@]}" -gt 0 ] && [ "${#hit[@]}" -eq 0 ]
+}
+if [ "$#" -eq 1 ] && [ "$1" = guard ]; then
+  shopt -s nullglob dotglob nocaseglob
+  case "$OSTYPE" in
+    msys*|cygwin*) homes=("${HOME//\\//}" "${USERPROFILE//\\//}") ;;     # a Windows Python's home is USERPROFILE
+    *) homes=("$HOME") ;;
+  esac
+  fast=1
+  for h in "${homes[@]}"; do
+    { [ -n "$h" ] && quiet "$h"; } || fast=0
+  done
+  if [ "$fast" = 1 ]; then
+    # Read the event to its end, so Claude Code's write never meets a closed pipe; silent, and over at once when stdin is closed or empty.
+    # From bash 5.1 `read -N` reads a pipe in blocks (Git Bash 5.2: no cost over bash's own start; `read -d ''` reads a byte per system
+    # call, about 1 s for a 200 KB event on Windows). An older bash (macOS's 3.2 has no -N) uses cat, one more process (about 50 ms on
+    # Windows), and with no cat the byte-wise read. SAANI_TEST_DRAIN_CAT=1 takes that branch on any bash (the tests).
+    if [ -z "$SAANI_TEST_DRAIN_CAT" ] &&
+       { [ "${BASH_VERSINFO[0]}" -gt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; }; then
+      while IFS= read -r -N 65536 _; do :; done 2>/dev/null
+    else
+      cat >/dev/null 2>&1 || while IFS= read -r -d '' _; do :; done 2>/dev/null
+    fi
+    exit 0
+  fi
+  shopt -u nullglob dotglob nocaseglob
+fi
+
 if command -v py >/dev/null 2>&1; then
   exec py -3 -I "$here/saani.py" "$@"
 fi
