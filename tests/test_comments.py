@@ -119,7 +119,7 @@ def test_start_posts_started_with_the_folder_name_only_unless_no_comment(monkeyp
     def git(*args, cwd=None, check=True):
         if args[:2] == ("worktree", "add"):
             folder.mkdir(parents=True, exist_ok=True)
-        return ""
+        return "" if check else Result(0)
     monkeypatch.setattr(core, "git", git)
     core.cfg().worktree_folder = str(tmp_path / "wt")
     core.cfg().owner = ""
@@ -143,7 +143,7 @@ def test_start_journals_started_itself_only_when_the_comment_did_not(monkeypatch
     def git(*args, cwd=None, check=True):
         if args[:2] == ("worktree", "add"):
             folder.mkdir(parents=True, exist_ok=True)
-        return ""
+        return "" if check else Result(0)
     monkeypatch.setattr(core, "git", git)
     core.cfg().worktree_folder = str(tmp_path / "wt")
     core.cfg().owner = ""
