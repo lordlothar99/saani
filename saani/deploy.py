@@ -24,7 +24,7 @@ import subprocess
 import sys
 import threading
 
-from . import ci, comments, config, glance, kpis, merge
+from . import ci, comments, config, glance, kpis, merge, status
 
 
 class Stop(Exception):
@@ -316,6 +316,10 @@ def run(args):
         if getattr(args, "dry_run", False):
             print("dry-run: would deploy with: " + " ".join(expand(c.deploy_command, True, sha))
                   + (" (CI gate skipped: --skip-ci)" if skipped else ""))
+            dry = ci.Run(True)
+            for n, labels in found:                 # closing sets Done (GitHub does it by itself); shown here, set by no one
+                if c.labels["in_main"] in labels:
+                    status.advance(n, "done", dry)
             return 0
         log_name = step_deploy(gh, sha, skipped)
         code = step_after(gh, sha, found, log_name)

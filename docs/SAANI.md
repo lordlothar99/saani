@@ -400,7 +400,12 @@ the coder of that issue. **Whose issues count as running** (#56): only the issue
 parallel` less the run's own running issues. The sizing reads the machine's free memory, which already shows the owner's work, so the
 machine is not overloaded. `pick` still lists the owner's worktrees (`owner_running`, "the owner's worktrees #12, #15 are in flight"),
 keeps their changed files out of other issues, and says "no slot: ..." or "nothing eligible" (`note`, also journaled as a `pick` line when
-a run is on, once per change). The skill tells the owner about their worktrees before the run starts. Outside a run (no record) every
+a run is on, once per change). **A parked issue takes no slot** (#110): an issue the run blocked (its latest `started`, `blocked` or
+`landed` journal line is `blocked`, written by `saani comment <n> blocked`) keeps its worktree but is not counted against the slots, and
+is listed in `pick`'s `parked` (and by `saani status`, "parked: blocked, takes no slot"). Only the `blocked` kind parks an issue; a
+`question` comment does not. The run never re-picks a parked issue by itself, and `--only <n>` on it is skipped too: only `saani start
+<n>` (a new `started` line) or its landing re-admits it. Its changed files still keep overlapping issues waiting. The skill tells the
+owner about their worktrees before the run starts. Outside a run (no record) every
 worktree is the owner's. The record and the journal are per repository, so an owner's own `saani start` while a run is on counts as the
 run's and takes one of the run's slots. `saani kpis` gives the cost per issue, role and model.
 
@@ -432,6 +437,20 @@ asking after repeated blocks by its auto mode classifier; a background subagent'
 `--permission-prompts none` every such prompt is a refusal Claude reads and moves past, as the skill does with the guard's;
 `--permission-mode auto` lets Claude Code's classifier decide the calls the guard cannot (a hook that timed out). Neither can be set by the project: `defaultMode: "auto"` in a
 project's `.claude/settings.json` is ignored by Claude Code, and a plugin's agents cannot set a permission mode.
+
+**Waiting for a coder, and the cut-off fallback** (#111). `claude -p` exits when a turn ends without a tool call, even with the ceiling
+set to 0, which stops the coders and the run. While an issue is in flight and there is nothing else to do, the session therefore calls
+`saani auto wait [--minutes N]` (default 8, a finite number above 0 and at most 9.5, because a Bash call lasts 10 minutes at most), alone. It blocks in the
+standard library, with no model: every 15 seconds it reads the local branches of the issues this run started (the journal's `started`
+lines) that still have a worker worktree, and returns when one has a new commit (its coder handed back) or its worktree is gone, when a
+stop rule of the run is reached (`stop`, as in `pick --wait`), at its time limit, or at once when nothing of the run is in flight. It
+prints JSON: `reason` (`none in flight`, `handed back`, `stop`, `time limit`), `finished`, `in_flight`, `waited_minutes`. It reads no
+GitHub and starts no loop in the session, which is why the guard allows it (`("auto", "wait")` with `--minutes`). The skill says never to end
+a turn with a text-only message while an issue is in flight. If the session ends anyway, the watcher's fallback report says which issues
+were cut off, with their worktree paths ("cut off while in flight"), and the watcher comments each as blocked with the worktree folder's name
+where its work stands (uncommitted changes included; never the owner's full path; the local report keeps the full paths). An issue the session
+parked itself (a `blocked` or `question` journal line after its `started` line) gets no second comment, and a repeat never double-posts. The
+issue's label and milestone are not touched. A coder that hands back without a commit is seen only at the time limit.
 
 **Keep-on mode** (#70). `/saani:auto here|away --keep-on` (`saani auto away --keep-on`; `--wait` on `away` is refused) makes the run stay on
 and keep taking newly eligible issues (filed, relabelled or answered while it runs) instead of ending when its list is empty, until
@@ -503,7 +522,7 @@ between them. Saani moves an issue's status forward at its steps, next to the la
 | filed | Backlog (GitHub's default) or no status; an issue in Backlog is not taken by `auto`, so move it out when it may be | |
 | `saani start` (the `Started` comment; `--no-comment` sets it anyway) | In progress | |
 | the review starts (`saani comment <n> review`), through the fixes | In review | |
-| `saani land` (`On dev`) | In review | `in-dev` |
+| `saani land` (`On dev`; `--no-comment` sets it anyway) | In review | `in-dev` |
 | `saani ci merged` / `saani merge` (`On main`) | In review | `in-main` |
 | `saani deploy` closes the issue as completed | Done (GitHub sets it on close) | `in-main` removed |
 | you close it as not planned or duplicate | Not planned / Duplicate | |
@@ -512,8 +531,13 @@ between them. Saani moves an issue's status forward at its steps, next to the la
 The status never moves back: an issue In review stays there through the landing, the release pull request and main, until the deploy
 closes it; a closed issue is never reopened by Saani. `saani auto pick` takes every ready issue except those in Backlog, so Backlog is the
 place for what may not be taken yet (an issue with no status, Todo or In progress is taken when it is ready; an open issue still marked Done, Not planned or Duplicate is not). Statuses are matched by the names in `[status] names`, then by category (a renamed status still works). On a repo without
-statuses (`planningStatuses` is null), or with `[status] enabled = "off"`, none of this happens and Saani works from its labels alone.
+statuses (`planningStatuses` is null), or with `[status] enabled = "off"`, no status is set: each step prints a one-line `status of #n unchanged (...)` instead, and Saani works from its labels alone.
 `gh` has no status flag yet: Saani reads and sets statuses with `gh api` (GraphQL `setIssueStatus`, the REST `status` field).
+
+The `--dry-run` of `saani land`, `saani merge` and `saani deploy` (and of `saani comment` and `saani ci merged`) prints the status each
+issue would get (`dry-run: #12 status -> In review`; for `deploy`, Done, which GitHub sets when the issue is closed) and sets nothing. A step
+that leaves the status alone says why in one line (`status of #12 unchanged (review): already In review`, or: statuses are off in
+saani.toml, the repo has none, they could not be read, the issue was not found) and never fails the command.
 
 ## Deploy
 `saani deploy` (`saani merge --deploy` runs it after the merge; the `saani:deployer` agent runs only its `--dry-run`, reads the logs and

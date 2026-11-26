@@ -187,6 +187,10 @@ def merge_it(args):
     if args.dry_run:
         print(f"dry-run: gh pr merge {n} --merge")
         print(f"dry-run: then saani ci merged {n} (relabel, remove the finished auto runs)")
+        try:
+            ci.preview_status(gh, n)
+        except (SystemExit, OSError, ValueError) as e:
+            print(f"dry-run: could not read the issues of #{n} to show their status: {e}")
         if c.version_file:
             print(f"dry-run: then, when the pull request changes the version in {c.version_file}, the GitHub release v<version> with the notes of its issues")
         if args.deploy:

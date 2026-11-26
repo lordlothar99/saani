@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import time
 
-from . import comments, config, core
+from . import comments, config, core, status
 
 LOG_NAME = "saani-ci.json"
 
@@ -407,6 +407,18 @@ def relabel_issues(run, number, pr):
     if not run.dry:
         log({"job": "relabel", "pr": number, "place": "pc", "result": "failed" if failed else "passed"})
     return 1 if failed else 0
+
+
+def preview_status(run, number):
+    """A dry run of the merge: the status each issue the pull request names (and that carries in-dev or in-main) would get."""
+    c = cfg()
+    pr = run.json("gh", "pr", "view", str(number), "--repo", c.repo, "--json", "title,body,commits") or {}
+    for n in issues_named(pr):
+        if n == number:
+            continue
+        info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels") or {}
+        if {x["name"] for x in info.get("labels", [])} & {c.labels["in_dev"], c.labels["in_main"]}:
+            status.advance(n, "review", run)
 
 
 def run_command(args):

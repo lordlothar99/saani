@@ -1014,6 +1014,7 @@ SAANI_SPEC = {
     ("progress", "show"): ({}, [r".+"]),
     ("progress", "watch"): ({"--every": True}, [r".+"]),
     ("auto", "pick"): ({"--json": False, "--limit": True, "--only": "+", "--wait": True}, []),
+    ("auto", "wait"): ({"--minutes": True}, []),
     ("auto", "status"): ({"--check": False}, []),
     ("auto", "report"): ({"--pr": True, "--post": False, "--reason": True}, []),
     ("auto", "end"): ({"--json": False}, []),
