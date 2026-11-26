@@ -195,7 +195,8 @@ every 5 s, read-only.
   why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
   map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
   Ready to land, Merged, To deploy, To close, Deployed). `/api/state` carries both: `board` (the map's columns, unchanged) and `kanban` (`columns` with
-  `sections`, `pinned`; `null` without statuses); the open pull request with its CI in three colours; the Claude Code sessions of
+  `sections`, `pinned`; `null` without statuses); `closed_milestones` (the titles of the project's closed milestones, from the same fetch as the
+  milestone strip: the map's Citadel leaves out their done issues; `[]` when there are none or GitHub cannot be read); the open pull request with its CI in three colours; the Claude Code sessions of
   the project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in);
   the PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above.
