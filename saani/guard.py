@@ -1852,7 +1852,7 @@ def gh_command(args, ctx, cwd):
     if key in GH_ANY_REPO:
         if len(positional) > (1 if key == ("release", "view") else 0):
             return deny("gh option", f"gh {' '.join(key)} with other arguments", "gh")
-        if "repo" in values and not re.fullmatch(r"[\w.-]+/[\w.-]+", values["repo"]) or ".." in values.get("repo", ""):
+        if "repo" in values and not re.fullmatch(r"[\w-]+/[\w.-]+", values["repo"]) or ".." in values.get("repo", ""):
             return deny("another repository", "gh --repo other than OWNER/REPO", "gh")
     elif "repo" in values and values["repo"].lower() != ctx.repo.lower():
         return deny("another repository", f"gh on a repository other than {ctx.repo}", "gh")
@@ -1864,6 +1864,8 @@ def gh_command(args, ctx, cwd):
     for name, value, _ in flags + [(None, p, None) for p, _ in positional]:
         if value is None or name in ("title", "body", "jq", "template", "json"):
             continue
+        if name == "repo" and re.fullmatch(r"[\w-]+/[\w.-]+", value) and ".." not in value:
+            continue    # OWNER/REPO, already judged above: a repo named acme.github.io is a name, not a URL
         low = value.lower()
         if ("://" in low or "github." in low or re.fullmatch(r"[\w.-]+/[\w.-]+#\d+", value)) and (not own.match(value) or ".." in value or "@" in value):
             return deny("another repository", f"gh with a URL outside https://github.com/{ctx.repo}", "gh")
