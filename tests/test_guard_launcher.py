@@ -54,6 +54,8 @@ def launch(tmp_path, home):
             mark.unlink()
         env = {**{k: v for k, v in os.environ.items() if k.upper() != "PATH"}, "PATH": str(fakes), "HOME": str(home),
                "USERPROFILE": str(home), "SAANI_TEST_MARK": fwd(mark), "SAANI_TEST_PYTHON": fwd(sys.executable), **env_more}
+        if run.drop:
+            env.pop(run.drop, None)
         # Written by hand, not through communicate(), which hides a broken pipe: the event must be read to its end, as Claude Code
         # writes all of it.
         p = subprocess.Popen([BASH, fwd(ROOT) + "/bin/saani", "guard"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -70,6 +72,7 @@ def launch(tmp_path, home):
         out = out.decode().strip()
         return (json.loads(out)["hookSpecificOutput"] if out else None), mark.exists()
     run.fakes = fakes
+    run.drop = None                                                         # a variable the next run leaves out of the environment
     return run
 
 
@@ -190,6 +193,48 @@ def test_windows_looks_at_home_and_userprofile(tmp_path, home, launch):
     guard.turn_on("s-1", "run-1", main, tmp_path / "webshop-wt")                    # under USERPROFILE (the `home` fixture) only
     assert launch(work, pre(work, "git status"), HOME=str(other))[1] is True
     assert launch(work, pre(work, "git status"), HOME=str(home), USERPROFILE=str(other))[1] is True
+
+
+def test_globignore_in_the_environment_cannot_hide_the_entries(tmp_path, home, launch):
+    """GLOBIGNORE removes matches from every glob: the launcher unsets it, so a registered session still starts Python."""
+    main, work = fake_repo(tmp_path)
+    (home / ".saani").mkdir()
+    (registry() / "other-session.json").write_text("{}", encoding="utf-8")
+    assert launch(work, pre(work, "git status"), GLOBIGNORE="*.json:*.over:*.pending")[1] is True
+
+
+@pytest.mark.parametrize("which", ["HOME", "USERPROFILE"])
+@pytest.mark.parametrize("value", ["", None])
+def test_a_home_that_is_unset_or_empty_starts_python(tmp_path, home, launch, which, value):
+    """No home to look at is not 'nothing registered': Python decides (and fails closed)."""
+    main, work = fake_repo(tmp_path)
+    (home / ".saani").mkdir()
+    (registry() / "other-session.json").write_text("{}", encoding="utf-8")
+    if value is None:
+        launch.drop = which
+        try:
+            started = launch(work, pre(work, "git status"))[1]
+        finally:
+            launch.drop = None
+    else:
+        started = launch(work, pre(work, "git status"), **{which: value})[1]
+    assert started is True
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), reason="POSIX permissions, not as root")
+@pytest.mark.parametrize("folder", [".saani", ".saani/auto"])
+def test_a_folder_that_lists_but_cannot_be_searched_starts_python(tmp_path, home, launch, folder):
+    main, work = fake_repo(tmp_path)
+    (home / ".saani").mkdir()
+    reg = registry()
+    (reg / guard.REFUSALS).write_text("", encoding="utf-8")
+    target = home / folder
+    target.chmod(0o644)                                                # readable, not searchable
+    try:
+        started = launch(work, pre(work, "git status"))[1]
+    finally:
+        target.chmod(0o755)
+    assert started is True
 
 
 def test_saani_auto_on_still_registers_through_the_launcher(tmp_path, launch):

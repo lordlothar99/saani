@@ -155,7 +155,31 @@ def test_on_leaves_the_pending_mark_for_bin_saani_and_off_removes_it(world, caps
     assert pending.is_file() and (pathlib.Path(guard.registry()) / guard.REFUSALS).is_file()
     assert guard.state("sess-1") is None                                                     # the mark turns nothing on
     assert auto.cmd_off(args(run_id=None)) == 0
-    assert not pending.exists()
+    assert pending.is_file()                                           # younger than the grace: it may be another project's, same id
+    old = os.stat(pending).st_mtime - auto.PENDING_GRACE - 5
+    os.utime(pending, (old, old))
+    auto.end_guard_entries("2026-11-22_0800")
+    assert not pending.exists()                                        # older: the run's own, gone with it
+
+
+def test_ending_a_run_keeps_a_young_pending_mark_and_removes_an_old_one(world):
+    """Two projects started in the same minute share a run id, so one `.pending` file: ending the first run must not take the mark of the
+    second, whose PostToolUse hook has not run yet (that session would run with no guard)."""
+    reg = pathlib.Path(guard.registry())
+    reg.mkdir(parents=True, exist_ok=True)
+    mark = reg / "2026-11-22_0900.pending"
+    mark.write_text("", encoding="utf-8")
+    auto.end_guard_entries("2026-11-22_0900")
+    assert mark.is_file()
+    old = os.stat(mark).st_mtime - auto.PENDING_GRACE - 5
+    os.utime(mark, (old, old))
+    auto.end_guard_entries("2026-11-22_0900")
+    assert not mark.exists()
+    mark.write_text("", encoding="utf-8")
+    future = os.stat(mark).st_mtime + 3600
+    os.utime(mark, (future, future))
+    auto.end_guard_entries("2026-11-22_0900")
+    assert mark.is_file()                                              # a time in the future counts as young
 
 
 def test_on_here_leaves_no_pending_mark(world):

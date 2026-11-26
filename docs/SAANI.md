@@ -269,12 +269,12 @@ the workers are covered too); nothing the model can write or the folder it is in
   auto run registered at all, `bin/saani` returns before starting Python, when each home Python could use (`HOME`; on Windows
   `USERPROFILE` too) lists files but no `.saani`, `~/.saani` lists files but no `auto`, or `~/.saani/auto` lists files but no entry
   (`*.json`), no over mark (`*.over`) and no `*.pending` mark (names in any case). It judges by what a folder lists (bash builtins), never
-  by a lookup that fails: an empty or unreadable folder, or no home, starts Python, which decides (and fails closed). Before it returns it
+  by a lookup that fails: an empty or unreadable folder, a folder that lists but cannot be searched, or no home (unset or empty), starts Python, which decides (and fails closed). The launcher unsets `GLOBIGNORE`, which would hide entries from its globs. Before it returns it
   reads the event to its end, silently, so Claude Code's write never meets a closed pipe: with bash 5.1 or newer by `read -N`, which reads
   a pipe in blocks (no cost measured over bash's own start on Git Bash 5.2); with an older bash (macOS's 3.2 has no `-N`) by `cat`, one
   more process (about 50 ms on Windows). `saani auto on` leaves `<id>.pending` unless `--here` (and the refusal log, so a registry is never
   empty) before its run record and its marker line, so the PostToolUse hook of that call starts Python and registers the session; the
-  mark turns nothing on, and `saani auto off` removes it. A mark left with no run (a `saani auto on` that could not write its record) is
+  mark turns nothing on, and `saani auto off` removes it once it is older than 10 minutes (a younger one may be another project's run with the same id, a minute stamp, whose hook has not run yet). A mark left with no run (a `saani auto on` that could not write its record) is
   removed by a plain `saani auto off` with no record: it removes every `.pending` mark older than 10 minutes of a run the guard holds no
   entry of, and says how many younger ones it left (one may be another project's `saani auto on` waiting for its hook: without the mark
   that session would not be registered, and an away session would run with no guard). Started without an entry, Python returns before
