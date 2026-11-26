@@ -173,8 +173,9 @@ def test_on_stops_before_its_marker_when_the_pending_mark_cannot_be_written(worl
 
 
 def test_plain_off_with_no_record_removes_the_stale_pending_marks(world, capsys, monkeypatch):
-    """A `saani auto on` that wrote its mark but not its record: `off` says no run is on and removes the marks of runs the guard holds
-    no entry of; the mark of a registered run stays, and `off --run` is unchanged."""
+    """A `saani auto on` that wrote its mark but not its record: `off` says no run is on and removes the marks older than the grace
+    period of runs the guard holds no entry of; a fresh mark (another `saani auto on` waiting for its hook: without its mark that session
+    would never be registered) and the mark of a registered run stay."""
     real = pathlib.Path.write_text
 
     def fail_on_the_record(self, *a, **kw):
@@ -188,14 +189,30 @@ def test_plain_off_with_no_record_removes_the_stale_pending_marks(world, capsys,
     stale = reg / "2026-11-22_0800.pending"
     assert stale.is_file() and auto.read_record() is None
     guard.turn_on("sess-1", "held", world.root, world.wt, folder=world.run)
-    (reg / "held.pending").write_text("", encoding="utf-8")
-    (reg / "other.pending").write_text("", encoding="utf-8")
+    old = os.stat(stale).st_mtime - auto.PENDING_GRACE - 1
+    for name in ("held", "other", "fresh"):
+        (reg / f"{name}.pending").write_text("", encoding="utf-8")
+    for p in (stale, reg / "held.pending", reg / "other.pending"):
+        os.utime(p, (old, old))
     assert auto.cmd_off(args(run_id=None)) == 0
     out = capsys.readouterr().out
     assert "removed 2 .pending marks of the guard with no run registered: 2026-11-22_0800, other" in out and "no auto run is on" in out
-    assert not stale.exists() and not (reg / "other.pending").exists() and (reg / "held.pending").is_file()
+    assert "left 1 .pending mark of the guard younger than 10 minutes" in out
+    assert not stale.exists() and not (reg / "other.pending").exists()
+    assert (reg / "held.pending").is_file() and (reg / "fresh.pending").is_file()
     assert guard.state("sess-1")["id"] == "held"
+    (reg / "fresh.pending").unlink()
     assert auto.cmd_off(args(run_id=None)) == 0 and capsys.readouterr().out == "no auto run is on\n"
+
+
+def test_a_pending_mark_from_the_future_or_just_at_the_grace_edge_counts_as_young(world):
+    reg = pathlib.Path(guard.registry())
+    reg.mkdir(parents=True)
+    (reg / "r.pending").write_text("", encoding="utf-8")
+    t = os.stat(reg / "r.pending").st_mtime
+    assert auto.clear_stale_pending(now=t - 5) == ([], 1)                                # a clock behind the file's time
+    assert auto.clear_stale_pending(now=t + auto.PENDING_GRACE - 1) == ([], 1)
+    assert auto.clear_stale_pending(now=t + auto.PENDING_GRACE + 1) == (["r"], 0)
 
 
 def test_off_run_removes_an_unreadable_over_mark_and_says_so(world, capsys):

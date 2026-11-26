@@ -744,29 +744,44 @@ def clear_pending(run_id):
             pass
 
 
-def clear_stale_pending():
-    """Removes the `.pending` marks of runs the guard holds no entry of (over marks included), whatever the project: a `saani auto on`
-    that wrote its mark but not its record, or whose session never registered. Only the plain `saani auto off` with no record calls it.
-    A mark only makes bin/saani start Python, so removing one of a `saani auto on` still waiting for its hook can at worst leave that
-    session in present mode. Returns the run ids, sorted."""
+PENDING_GRACE = 10 * 60      # seconds: a younger .pending mark may be a `saani auto on` whose PostToolUse hook has not run yet
+
+
+def clear_stale_pending(now=None):
+    """Removes the `.pending` marks of runs the guard holds no entry of (over marks included), whatever the project, once they are older
+    than PENDING_GRACE (by the file's time): a `saani auto on` that wrote its mark but not its record, or whose session never registered.
+    Only the plain `saani auto off` with no record calls it. A younger mark stays: it may be another project's `saani auto on` waiting
+    for its hook, and without the mark bin/saani would not start Python for that hook, so an away session would never be registered and
+    would run with no guard. A mark whose time cannot be read, or lies in the future, counts as young. Returns (the run ids removed, how
+    many marks were kept as recent), the ids sorted."""
+    import time
     from . import guard
     folder = guard.registry()
     try:
         names = os.listdir(folder)
     except OSError:
-        return []
+        return [], 0
+    now = time.time() if now is None else now
     held = {e.get("id") for _, e in entries()}
-    removed = []
+    removed, recent = [], 0
     for name in names:
         run_id = name[:-len(PENDING)]
         if not name.lower().endswith(PENDING) or run_id in held:
             continue
+        path = os.path.join(folder, name)
         try:
-            os.remove(os.path.join(folder, name))
+            age = now - os.stat(path).st_mtime
+        except OSError:
+            age = -1
+        if not 0 <= age or age < PENDING_GRACE:
+            recent += 1
+            continue
+        try:
+            os.remove(path)
         except OSError:
             continue
         removed.append(run_id)
-    return sorted(removed)
+    return sorted(removed), recent
 
 
 def end_guard_entries(run_id):
@@ -925,10 +940,13 @@ def cmd_off(args):
     rec = read_record()
     run_id = args.run_id or (rec or {}).get("id")
     if not run_id:
-        stale = clear_stale_pending()
+        stale, recent = clear_stale_pending()
         if stale:
             print(f"removed {len(stale)} .pending mark{'' if len(stale) == 1 else 's'} of the guard with no run registered: "
                   + ", ".join(stale))
+        if recent:
+            print(f"left {recent} .pending mark{'' if recent == 1 else 's'} of the guard younger than {PENDING_GRACE // 60} minutes "
+                  "(a `saani auto on` may be waiting for its hook): run `saani auto off` again later")
         print("no auto run is on")
         return 0
     if not valid_id(run_id):
