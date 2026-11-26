@@ -93,7 +93,12 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
      files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the
      background** so several issues progress at once. Model: sonnet; opus for an issue labelled or titled as hard or security. Brief it with
-     the issue number, the worktree path and what the issue asks, not with file dumps.
+     the issue number, the worktree path and what the issue asks, not with file dumps. Also in the brief, the command forms (a refusal
+     counts toward the 40 and a refused `git commit` leaves the issue uncommitted): read with Read, search with Grep (no `sed`, `cat`,
+     `git grep`); git as `git -C <worktree> ...`, one plain command per call, never `cd`; no `$(...)`, backticks, redirections or
+     here-documents; the commit message written to a file in the worktree's `build/` folder, then `git -C <worktree> commit -F <file>`.
+     Anything the owner decided that the coder needs (an answer, a rule) is on the issue, never only in your memory: a headless
+     session sees the repo and the issues and nothing else. A design artifact link comes from the issue (docs/DESIGN-SYNC.md).
    - **Alone:** a change of a few lines in one or two files (a typo, a sentence, a setting) you make yourself in that worktree: no coder,
      no reviewer, then land it.
    - When a coder is done: `saani:reviewer` on that diff (always for guard, landing, CI and deploy code), and `saani comment <n> review` when the review starts. Real findings go back to

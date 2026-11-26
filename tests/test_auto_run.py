@@ -727,11 +727,12 @@ def test_a_registered_worktree_listed_with_another_spelling_still_counts_as_regi
     assert ("branch", "-D", "task/12-cart") not in calls and "the worktree stays" in capsys.readouterr().out
 
 
-def test_the_leftover_folder_command_quotes_the_path_literally(world, monkeypatch, capsys):
+def test_a_folder_in_use_is_left_for_the_next_start_land_or_status_with_nothing_to_do_by_hand(world, monkeypatch, capsys):
     folder, _ = failing_removal(world, monkeypatch, name="it's a folder", error="busy")
     monkeypatch.setattr(core, "force_remove_folder", lambda p: False)
     core.remove_landed_worktree(folder, "task/12-cart")
-    assert f"Remove-Item -LiteralPath '{str(folder).replace(chr(39), chr(39) * 2)}' -Recurse -Force" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "next `saani start`, `land` or `status` removes it" in out and "Remove-Item" not in out
 
 
 def test_git_exiting_during_the_post_push_steps_still_prints_every_next_step(world, monkeypatch, capsys):

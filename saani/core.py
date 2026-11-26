@@ -377,6 +377,7 @@ def cmd_start(args):
         words = slug(args.slug or info["title"])
         name = hotfix_name(prefix, args.issue, words) if args.hotfix else dev_name(prefix, args.issue, words)
     folder = c.wt_dir / name.split("/", 1)[1]
+    clean_leftovers()
     if folder.exists():
         raise SystemExit(f"{folder} already exists: work there, or land or remove it first")
     folder.parent.mkdir(parents=True, exist_ok=True)
@@ -578,6 +579,7 @@ def cmd_land(args):
         status.advance(m.group(2), "review", comments.Direct(True))
         return 0
 
+    clean_leftovers(cwd)
     lock = lock_path(cwd)
     deadline = time.time() + args.wait * 60
     while not take_lock(lock, branch):
@@ -688,11 +690,80 @@ def remove_landed_worktree(cwd, branch):
     if not same_path(cwd, home) and force_remove_folder(cwd):          # git unregistered it but kept the folder: finish the job
         print(f"removed: {cwd} and the local branch {branch} (the folder git left behind)")
         return
-    quoted = str(cwd).replace("'", "''")
     exists = pathlib.Path(cwd).exists()
     left = f"the folder {cwd} is left" if exists else "nothing is left"
     print(f"the worktree is unregistered but git could not delete its folder: the local branch {branch} is deleted; {left}"
-          + (f", remove it yourself (e.g. Remove-Item -LiteralPath '{quoted}' -Recurse -Force)" if exists else ""))
+          + ("; it is in use, and the next `saani start`, `land` or `status` removes it (nothing to do by hand)" if exists else ""))
+
+
+LEFTOVER_PROBLEM = "cannot be checked"
+
+
+def leftover_folders(cwd=None, own=()):
+    """([folder, ...], [(folder, why), ...]): the folders in the worktrees folder that git does not know as a worktree. The first list holds
+    the leftovers: only git-ignored generated files (build/, __pycache__...), or nothing. The second holds the ones left alone, with the
+    reason (a file git does not ignore: tracked or new). Never a registered worktree, never a folder the run is in (`cwd`, `own`, the
+    auto run's folder), never a link."""
+    from . import auto
+    wt = cfg().wt_dir
+    if not wt.is_dir():
+        return [], []
+    known = [p for p, _ in worktrees(cwd)]
+    here = [pathlib.Path(cwd) if cwd else pathlib.Path.cwd(), *map(pathlib.Path, own)]
+    rec = auto.read_record()
+    if rec and rec.get("folder"):
+        here.append(pathlib.Path(rec["folder"]))
+    leftovers, kept = [], []
+    for d in sorted(wt.iterdir()):
+        if d.is_symlink() or not d.is_dir() or any(same_path(d, p) for p in known) or any(_within(p.resolve(), d.resolve()) for p in here):
+            continue
+        files = []
+        for root, dirs, names in os.walk(d):
+            files += [pathlib.Path(root, n).relative_to(d).as_posix() for n in names]
+            files += [pathlib.Path(root, n).relative_to(d).as_posix() for n in dirs if pathlib.Path(root, n).is_symlink()]
+        if not files:
+            leftovers.append(d)
+            continue
+        # the main checkout's ignore rules, asked as if the files lay in it (no index: a tracked file of this name does not hide)
+        r = subprocess.run(["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=known[0], input="\0".join(files) + "\0",
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if r.returncode not in (0, 1):
+            kept.append((d, LEFTOVER_PROBLEM))
+            continue
+        ignored = {p for p in r.stdout.split("\0") if p}
+        rest = [f for f in files if f not in ignored]
+        if rest:
+            kept.append((d, f"it holds {len(rest)} file(s) git does not ignore, e.g. {rest[0]}"))
+        else:
+            leftovers.append(d)
+    return leftovers, kept
+
+
+def remove_leftover_folders(dry=False, cwd=None, own=()):
+    """Removes the leftover folders (`leftover_folders`) with shutil, never a shell command; says what it removed and what it left alone.
+    A folder still in use is not an error: it is tried again at the next call. Returns the number removed (or that would be)."""
+    leftovers, kept = leftover_folders(cwd, own)
+    for d, why in kept:
+        print(f"left alone, not a worktree but not only generated files: {d} ({why})")
+    done = 0
+    for d in leftovers:
+        if dry:
+            print(f"would remove the leftover folder {d}")
+            done += 1
+        elif force_remove_folder(d, tries=1, pause=0):
+            print(f"removed the leftover folder {d}")
+            done += 1
+        else:
+            print(f"the leftover folder {d} is in use: the next `saani start`, `land`, `status` or `prune` removes it")
+    return done
+
+
+def clean_leftovers(cwd=None):
+    """`remove_leftover_folders` for `start`, `land` and `status`: the owner never types it. It never stops the command it runs in."""
+    try:
+        remove_leftover_folders(cwd=cwd)
+    except (Exception, SystemExit) as e:   # noqa: BLE001 (git() exits on a failed command)
+        print(f"leftover worktree folders not checked: {e}")
 
 
 def landing_fields(row):
@@ -857,6 +928,7 @@ def remove_auto_runs(found, dry=False, cwd=None):
 
 
 def cmd_prune(args):
+    leftovers = remove_leftover_folders(args.dry_run)
     local, remote = prune_candidates()
     runs = finished_auto_runs()
     unused, kept = unused_auto_runs()
@@ -866,7 +938,7 @@ def cmd_prune(args):
         print(f"kept the auto run {branch}: {why}")
     removed = remove_auto_runs(runs, args.dry_run) if runs else 0
     if not local and (args.local_only or not remote):
-        if not removed:
+        if not removed and not leftovers:
             print("nothing to prune: every merged branch is already gone")
         return 0
     if local:
@@ -945,6 +1017,7 @@ def worktrees_warning(c, files=None):
 def cmd_status(args):
     if getattr(args, "action", None) == "sync":
         return status.cmd_sync(args)
+    clean_leftovers()
     warning = worktrees_warning(cfg())
     if warning:
         print(warning)

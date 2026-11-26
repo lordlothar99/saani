@@ -13,7 +13,9 @@ run only the test files you doubt (`saani test --worktree <worktree> -- <command
 word), and Claude Code asks before every `cd <folder> && <command>`. So: Read, Grep and Glob (read only) with the worktree's absolute
 paths; `git -C <worktree> <command>`; `saani test --worktree <worktree> --kind <kind> -- <command>`. One plain command per Bash call,
 nothing chained. No `python -` or `python -c`, heredoc scripts, shell loops, `base64` or `awk`: a project's allow rules cannot cover
-arbitrary code, so each one asks the owner (and an auto run's guard refuses it).
+arbitrary code, so each one asks the owner (and an auto run's guard refuses it). Also refused: `$(...)`, backticks, redirections and
+here-documents, `sed`, `git grep`. Read a file with the Read tool (not `cat` or `sed`), search with Grep (not `git grep`); a refused
+command is not tried in another spelling.
 
 You are given an issue and a worktree. Read the issue, then `git -C <worktree> diff origin/<integration branch>...HEAD`, then the code around each change.
 Name commits as `HEAD~n` or ranges like `origin/<integration branch>..HEAD` (`git -C <worktree> show HEAD~1`), never by their short
