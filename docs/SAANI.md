@@ -496,7 +496,7 @@ between them. Saani moves an issue's status forward at its steps, next to the la
 | filed | Backlog (GitHub's default) or no status; an issue in Backlog is not taken by `auto`, so move it out when it may be | |
 | `saani start` (the `Started` comment; `--no-comment` sets it anyway) | In progress | |
 | the review starts (`saani comment <n> review`), through the fixes | In review | |
-| `saani land` (`On dev`) | In review | `in-dev` |
+| `saani land` (`On dev`; `--no-comment` sets it anyway) | In review | `in-dev` |
 | `saani ci merged` / `saani merge` (`On main`) | In review | `in-main` |
 | `saani deploy` closes the issue as completed | Done (GitHub sets it on close) | `in-main` removed |
 | you close it as not planned or duplicate | Not planned / Duplicate | |
@@ -507,6 +507,11 @@ closes it; a closed issue is never reopened by Saani. `saani auto pick` takes ev
 place for what may not be taken yet (an issue with no status, Todo or In progress is taken when it is ready; an open issue still marked Done, Not planned or Duplicate is not). Statuses are matched by the names in `[status] names`, then by category (a renamed status still works). On a repo without
 statuses (`planningStatuses` is null), or with `[status] enabled = "off"`, none of this happens and Saani works from its labels alone.
 `gh` has no status flag yet: Saani reads and sets statuses with `gh api` (GraphQL `setIssueStatus`, the REST `status` field).
+
+The `--dry-run` of `saani land`, `saani merge` and `saani deploy` (and of `saani comment` and `saani ci merged`) prints the status each
+issue would get (`dry-run: #12 status -> In review`; for `deploy`, Done, which GitHub sets when the issue is closed) and sets nothing. A step
+that leaves the status alone says why in one line (`status of #12 unchanged (review): already In review`, or: statuses are off in
+saani.toml, the repo has none, they could not be read, the issue was not found) and never fails the command.
 
 ## Deploy
 `saani deploy` (`saani merge --deploy` runs it after the merge; the `saani:deployer` agent runs only its `--dry-run`, reads the logs and
