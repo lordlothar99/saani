@@ -862,6 +862,59 @@
    "type": "Feature"
   },
   {
+   "number": 137,
+   "title": "Gift cards at checkout",
+   "state": "OPEN",
+   "labels": [],
+   "milestone": "v1.2.0",
+   "worktree": {
+    "path": "../webshop-wt/137-work",
+    "folder": "137-work",
+    "branch": "feat/137-work",
+    "issue": 137,
+    "ahead": 4,
+    "dirty": 0,
+    "last": "Gift cards: tests for the balance",
+    "when": "20 minutes ago"
+   },
+   "agents": [],
+   "need": null,
+   "prompt": null,
+   "runs": [],
+   "step": "tested",
+   "status": {
+    "name": "In progress",
+    "category": "started"
+   },
+   "detail": {
+    "summary": "Sample issue. Gift cards at checkout: what it is, why it matters, and what exists today.\n\n- one fact\n- another fact",
+    "criteria": [
+     {
+      "done": true,
+      "text": "The behaviour works as described"
+     },
+     {
+      "done": true,
+      "text": "Tests cover it"
+     }
+    ],
+    "history": [
+     {
+      "when": "2026-01-05",
+      "kind": "opened",
+      "text": "Issue opened"
+     },
+     {
+      "when": "2026-01-06",
+      "kind": "comment",
+      "text": "Started"
+     }
+    ],
+    "url": "https://github.com/acme/webshop/issues/137"
+   },
+   "type": "Feature"
+  },
+  {
    "number": 119,
    "title": "Fix: totals rounding in SEK",
    "state": "OPEN",

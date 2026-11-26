@@ -147,8 +147,8 @@ def test_two_running_subagents_of_one_role_keep_both_runs_with_their_issues_and_
 
 
 def test_the_columns_have_short_names_and_their_explanations_are_tooltips():
-    """Ready, Building, Testing, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
-    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Merged", "To deploy", "To close", "Deployed"]
+    """Ready, Building, Testing, Ready to land, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
+    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Ready to land", "Merged", "To deploy", "To close", "Deployed"]
     assert "Last 7 days" in fp.COLUMNS[-1][2]
     assert '"data-tip":c.hint' in fp.page() and "content:attr(data-tip)" in fp.page()
 
@@ -354,7 +354,7 @@ def test_a_refresh_button_asks_everything_again_and_the_pull_request_tasks_start
     assert "issues" not in fp._cache
 
 
-STEPS = {"backlog", "todo", "you", "started", "building", "testing", "landing", "dev", "pr", "deploy", "close", "checks", "done"}
+STEPS = {"backlog", "todo", "you", "started", "building", "testing", "tested", "landing", "dev", "pr", "deploy", "close", "checks", "done"}
 
 
 def test_the_board_is_served_with_its_skeleton_and_its_sample(monkeypatch):
@@ -417,7 +417,7 @@ def test_the_sample_shows_every_zone_and_keeps_out_private_text():
     """The sample is synthetic, every step is a known one, and it holds no session text or path."""
     mock = json.loads(fp.MOCK_FILE.read_text(encoding="utf-8"))
     steps = {c["step"] for c in mock["cards"]}
-    assert steps <= STEPS and {"backlog", "todo", "you", "started", "testing", "pr", "deploy", "close", "checks", "done"} <= steps
+    assert steps <= STEPS and {"backlog", "todo", "you", "started", "testing", "tested", "pr", "deploy", "close", "checks", "done"} <= steps
     assert set(mock["sample"]["staged"]) == {c["number"] for c in mock["cards"] if c.get("staged")}
     raw = json.dumps(mock)
     assert "C:\\Users" not in raw and "/Users/" not in raw and "@" not in raw.replace("@pytest", "")
@@ -799,6 +799,46 @@ def test_a_worktree_is_at_least_in_progress_and_review_at_least_in_review():
     _, got = kanban(issues, trees=[tree(1), tree(2), tree(3)])
     assert got["started"] == [(1, None), (2, None)] and got["review"] == [(3, "branch")]
     assert got["backlog"] == [(4, None)] and got["todo"] == []
+
+
+def test_a_clean_worktree_with_green_landing_tests_is_ready_to_land():
+    """Tested and committed but not landed: its own column (the Loading Yard on the map), never mixed with work still being written (#108)."""
+    issue = listed(1, PROGRESS)
+    green = {**tree(1), "green": True}
+    assert fp.column_for(issue, green) == "tested"
+    assert fp.column_for(issue, {**green, "dirty": 2}) == "building"             # an edit since the green run: back to the Workshops
+    assert fp.column_for(issue, {**green, "ahead": 0}) == "building"             # nothing to land
+    assert fp.column_for(issue, tree(1)) == "building"                           # no green result for this tree
+    assert fp.column_for(issue, green, testing={1}) == "testing"                 # a live run wins
+    assert fp.prompt_for(1, "tested").startswith("Land #1")
+
+
+def test_a_ready_to_land_card_stays_in_progress_with_a_badge():
+    built, got = kanban([listed(1, PROGRESS), listed(2, REVIEW)], trees=[{**tree(1), "green": True}, {**tree(2), "green": True}])
+    assert got["started"] == [(1, None)] and got["review"] == [(2, "branch")]
+    cards = [c for col in built["columns"] for c in col["cards"]]
+    assert all({"text": "ready to land", "kind": "info"} in c["badges"] for c in cards)
+
+
+def test_landing_green_reads_the_queue_result_of_the_worktree_tree(monkeypatch, tmp_path):
+    from saani import queue
+    command = ["python", "-m", "pytest", "-q"]
+    cfg = type("Cfg", (), {"landing": command, "command": lambda self, name: list(command)})()
+    monkeypatch.setattr(fp, "cfg", lambda: cfg)
+    folder = tmp_path / queue.QUEUE_DIR
+    folder.mkdir()
+    queue.store_result(folder, {"kind": "land", "command": command, "id": "j1"}, "tree-a", 0)     # stored by saani land, kind landing
+    git = {"status": "", "rev-parse HEAD^{tree}": "tree-a", "rev-parse --git-common-dir": str(tmp_path)}
+    def run(*args, cwd=None, timeout=60):
+        return git["status"] if args[1] == "--no-optional-locks" else git[" ".join(args[1:])]
+    monkeypatch.setattr(fp, "run", run)
+    assert fp.landing_green("C:/wt/1-x") is True
+    git["status"] = "?? new.txt"
+    assert fp.landing_green("C:/wt/1-x") is False                                # untracked files count: not the tested tree
+    git["status"], git["rev-parse HEAD^{tree}"] = "", "tree-b"
+    assert fp.landing_green("C:/wt/1-x") is False                                # a new commit
+    git["rev-parse HEAD^{tree}"], cfg.landing = "tree-a", []
+    assert fp.landing_green("C:/wt/1-x") is False                                # no landing tests set: nothing to know
 
 
 def test_dev_and_production_are_in_review_with_their_own_sections():

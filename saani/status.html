@@ -62,7 +62,7 @@ h2 i{white-space:normal;font:400 11px/1.3 var(--body);letter-spacing:.04em;text-
 .col.shut header{display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 0}
 .col.shut header .row{flex-direction:column;align-items:center}.col.shut header span{writing-mode:vertical-rl;transform:rotate(180deg)}.col.shut header p{display:none}
 .cards{display:flex;flex-direction:column;gap:9px;padding:0 9px 10px;max-height:68vh;overflow-y:auto;scrollbar-color:var(--faint) transparent}
-.c-you{--accent:var(--ember)}.c-ready{--accent:var(--sand)}.c-building{--accent:var(--ochre)}.c-testing{--accent:#f0b25a}
+.c-you{--accent:var(--ember)}.c-ready{--accent:var(--sand)}.c-building{--accent:var(--ochre)}.c-testing{--accent:#f0b25a}.c-tested{--accent:#e0c46a}
 .c-dev{--accent:var(--blue)}.c-main{--accent:var(--sage)}.c-live{--accent:var(--dust)}
 .c-backlog{--accent:var(--dust)}.c-todo{--accent:var(--sand)}.c-started{--accent:var(--ochre)}.c-review{--accent:var(--blue)}.c-done{--accent:var(--sage)}
 .badge.warn{color:var(--ochre);border-color:rgba(208,138,60,.55)}.badge.info{color:var(--blue);border-color:rgba(143,180,201,.55)}
@@ -309,7 +309,7 @@ function render(s){
  const L=s.landing||{};const lk=$("lock");
  if(L.lock){lk.textContent="joining dev · "+L.lock.branch;lk.className="pill hot"}else{lk.textContent="no task joining dev";lk.className="pill"}
  const cols=s.board||[];const cnt=id=>(cols.find(c=>c.id===id)||{cards:[]}).cards.length;
- $("counts").textContent=`${cnt("you")} wait for you · ${cnt("building")+cnt("testing")} in work`;
+ $("counts").textContent=`${cnt("you")} wait for you · ${cnt("building")+cnt("testing")+cnt("tested")} in work`;
  LABELS=(s.project&&s.project.labels)||{};projects(s.projects,s.project);const k=s.kanban&&s.kanban.columns?s.kanban:null;lastCols=k?k.columns:cols;lastPinned=k?k.pinned:[];drawBoard();drawPC(s.resources);
  const crew=Array.isArray(s.crew)?s.crew:[];$("crew-n").textContent=`Claude Code chats in this project's folders · ${crew.length} · ${crew.filter(a=>a.state==="working").length} working now`;
  $("crew").replaceChildren(...(crew.length?crew.map(a=>{const running=a.subagents.filter(x=>x.state!=="done");

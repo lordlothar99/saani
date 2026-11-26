@@ -7,7 +7,7 @@ invented project, also served locally at `/mock-state.json`).
 ## Two shapes, one page
 | Shape | Who gives it | How the page reads it |
 |---|---|---|
-| `board` (columns) | today's `/api/state` | `normalize()` turns each column into a step: `you`, `ready` -> `backlog` or `todo` by the card's `queue` (`todo` when it has none), or `started` when an agent works on it, `building`, `testing`, `dev`, `main` -> `deploy`, `live` -> `done`; issues the open pull request carries -> `pr` |
+| `board` (columns) | today's `/api/state` | `normalize()` turns each column into a step: `you`, `ready` -> `backlog` or `todo` by the card's `queue` (`todo` when it has none), or `started` when an agent works on it, `building`, `testing`, `tested` (ready to land: the Loading Yard), `dev`, `main` -> `deploy`, `live` -> `done`; issues the open pull request carries -> `pr` |
 | `cards` (flat, with `step`) | the sample; `/api/state` once the lifecycle data model lands | read as is |
 
 **Renamed (#83):** the steps `inbox` and `backlog` are now `backlog` (the Wayfarers' Tents) and `todo` (the Granary), after GitHub's statuses. A sample or a Design `mock-state.json` written before must rename them: the old `backlog` to `todo` first, then the old `inbox` to `backlog`.
@@ -32,7 +32,7 @@ invented project, also served locally at `/mock-state.json`).
 | `number`, `title`, `state`, `labels`, `milestone` | as GitHub | the issue |
 | `status` | `{name, category}` or `null` | the issue's GitHub status (`In review`, `started`...), read from the REST API with the Type; `null`: none, or the repo has no statuses |
 | `type` | `Bug`, `Task`, `Feature`... or `null` | the issue Type GitHub holds (read from the REST API: `gh issue list --json` has none); `null`: none set, the page falls back on the branch prefix and the labels |
-| `step` | string | `backlog` (the Wayfarers' Tents: status Backlog or none), `todo` (the Granary: status Todo), `you`, `started`, `building`, `testing`, `landing`, `dev`, `pr`, `deploy`, `close`, `checks`, `done` |
+| `step` | string | `backlog` (the Wayfarers' Tents: status Backlog or none), `todo` (the Granary: status Todo), `you`, `started`, `building`, `testing`, `landing`, `tested` (the Loading Yard: committed, landing tests green, not landed), `dev`, `pr`, `deploy`, `close`, `checks`, `done` |
 | `queue` | `backlog` \| `todo` or absent | `/api/state` only, on a Ready card: where it waits, decided by the server from the GitHub status (`todo` for Todo, In progress and In review; `backlog` for Backlog, none, Done, Not planned, Duplicate), and without statuses from the milestone (a milestone is `todo`); absent (the sample, an older server): `todo` |
 | `need` | `answer` \| `act` \| null | waits for the owner: the glowing ring |
 | `auto` | `{fit, why, source}` or absent | `fit` is `yes`, `partly` or `no`, `source` is `table`: read from the issue's At a glance table (`saani/glance.py`); absent: the page estimates it from the labels and says so |
