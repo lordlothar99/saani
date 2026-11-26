@@ -620,6 +620,16 @@ that uses `{key}` may ask for its own tap.
 - A passphrase is never pasted into a chat.
 
 ## Releases
+`saani release pr [--dry-run]` makes the one integration -> production pull request, so every merge into production is a release: it
+opens it (title `Release v<version>`) or, when one is open, updates its title and body; never two. The issues are those that `refs #n` in
+`git log <production>..<integration>` names and that are open. The body is their release notes (as `release notes --pr`), then one line
+per issue: `Closes #n` when its At a glance Auto row is yes (GitHub closes it at the merge), `refs #n` when it is partly or no, or has no
+table (its owner part stays open: the owner closes it). The pull request gets the milestone of its issues when they all share one. It refuses,
+with the next step, unless `[release] version_file` holds a higher version on the integration branch than on production (compared by its
+numbers); a project without `version_file` has no such check, and the output says so. `--dry-run` prints the title, the body and the issues
+and writes nothing. It is the owner's command: the guard does not allow it in an auto run, which ends with its report as before.
+`saani ci pr` and `saani merge` work on that pull request as before.
+
 The release notes live in the GitHub issues, not in a file: each issue's `## Result`, its Type and the commits that landed it (`saani
 release notes`). `CHANGELOG.md` is frozen. `saani merge` turns them into a GitHub release by itself when it should: after the merge, with
 `[release] version_file` set (docs/CONFIG.md), it reads the version in that file on the merge commit and on its first parent (from GitHub,

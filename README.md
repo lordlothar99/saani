@@ -125,6 +125,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | `saani merge [PR] [--deploy [--skip-ci WHY]] [--dry-run]` | `/saani:merge` | merge the green `dev` -> `main` pull request, relabel, clean up, create the release when the version changed |
 | `saani deploy [--dry-run] [--skip-ci WHY]` | `/saani:deploy` | CI green, no issue says "⛔ Do not deploy", checks, dry run, deploy, log, prod tag, issues closed; `--skip-ci` (the owner's) skips only the CI gate, the reason goes into the log |
 | `saani release notes <milestone> \| --pr N` | `/saani:release notes v1.0.0` | the release notes from the issues: by Type, each with its Result line and its commits |
+| `saani release pr [--dry-run]` | `/saani:release pr` | opens or updates the one dev -> main release pull request: the notes, `Closes #n` / `refs #n` lines, the milestone; refuses unless the version is bumped |
 | `saani release create <version>` | `/saani:release create 1.2.0` | the GitHub release by hand (`saani merge` makes it by itself) |
 | `saani prune [--dry-run]` | `/saani:prune` | delete merged branches and finished auto runs (Claude shows the list and asks first) |
 | `saani ci status\|sync\|pr\|merged\|place` | `/saani:ci pr` | hybrid CI: GitHub Actions within the free minutes, the PC for the rest |

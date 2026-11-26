@@ -14,7 +14,7 @@ import tempfile
 
 import argparse
 
-from . import comments, config, kpis
+from . import comments, config, glance, kpis
 
 VERSION = re.compile(r"""^\s*["']?(?:__version__|version)["']?\s*[:=]\s*["']([^"']+)["']""", re.I | re.M)
 GH_TIMEOUT = 60
@@ -241,9 +241,9 @@ def commit_lines(row, pool=None):
     return out
 
 
-def issue_rows(numbers=None, milestone=None, short=False):
+def issue_rows(numbers=None, milestone=None, short=False, with_milestone=False):
     c = cfg()
-    fields = "number,title,body,state,labels" + ("" if short else ",comments")
+    fields = "number,title,body,state,labels" + ("" if short else ",comments") + (",milestone" if with_milestone else "")
     if numbers is not None:
         rows = []
         for n in numbers:
@@ -496,9 +496,115 @@ def cmd_create(args):
     return 0
 
 
+# ---------------------------------------------------------------- the release pull request (integration -> production)
+
+def version_key(version):
+    """The numbers of a version, to compare (1.10.0 > 1.9.0); () when it has none."""
+    return tuple(int(n) for n in re.findall(r"\d+", version or ""))
+
+
+def check_version():
+    """(what to say, the version or None); stops with the refusal and the next step when the version may not ship. Without
+    `[release] version_file` there is nothing to check."""
+    c = cfg()
+    if not c.version_file:
+        return "no version check: [release] version_file is not set", None
+    here = version_of(file_at(c.integration, c.version_file))
+    there = version_of(file_at(c.production, c.version_file))
+    if here is None:
+        raise SystemExit(f"saani release pr: no version found in {c.version_file} on {c.integration}: "
+                         f"next: put the version there, land it, run saani release pr again")
+    if version_key(here) <= version_key(there):
+        raise SystemExit(f"saani release pr: the version in {c.version_file} is {here} on {c.integration} and {there or 'none'} on {c.production}: "
+                         f"every merge into {c.production} is a release, so it must be higher. "
+                         f"next: bump it on {c.integration} (an issue, landed with saani land), then run saani release pr again")
+    return f"version {here} (higher than {c.production}'s {there or 'none'})", here
+
+
+def named_commits():
+    """The non-merge commits in origin/<production>..origin/<integration> [{"sha", "subject", "message"}], oldest first; stops when git fails."""
+    c = cfg()
+    git("fetch", "--quiet", "origin")
+    out = git("log", "--no-merges", "--reverse", "--format=%H%x1f%s%x1f%B%x1e", f"origin/{c.production}..origin/{c.integration}")
+    if out is None:
+        raise SystemExit(f"saani release pr: git log origin/{c.production}..origin/{c.integration} failed (is origin fetched?)")
+    found = []
+    for record in out.split("\x1e"):
+        parts = record.strip("\n").split("\x1f", 2)
+        if len(parts) == 3:
+            found.append({"sha": parts[0], "subject": parts[1], "message": parts[2]})
+    return found
+
+
+def closing_lines(rows):
+    """`Closes #n` for an issue whose At a glance Auto row is yes (GitHub closes it at the merge), `refs #n` for the others (an owner part
+    stays open: the owner closes it; no At a glance is "not sure": refs)."""
+    out = []
+    for r in sorted(rows, key=lambda r: r["number"]):
+        fit = (glance.parse(r.get("body")).get("auto") or {}).get("fit")
+        out.append(f"{'Closes' if fit == 'yes' else 'refs'} #{r['number']}")
+    return out
+
+
+def shared_milestone(rows):
+    """The milestone title all the issues have, or None (some have none, or they differ)."""
+    titles = {((r.get("milestone") or {}).get("title") or "") for r in rows}
+    return titles.pop() if len(titles) == 1 and "" not in titles else None
+
+
+def release_body(rows, issues):
+    """The pull request body: the release notes of its issues, then the Closes / refs lines."""
+    section = with_section("", render("Release notes", issues, list(cfg().types))) if issues else f"{SECTION}\n\nNo open issue is named by the commits.\n"
+    lines = closing_lines(rows)
+    return section.rstrip() + ("\n\n" + "\n".join(lines) if lines else "") + "\n"
+
+
+def cmd_pr(args):
+    c = cfg()
+    message, version = check_version()
+    commits = named_commits()
+    if not commits:
+        raise SystemExit(f"saani release pr: nothing to release, {c.integration} has no commit that {c.production} lacks")
+    numbers = sorted({n for cm in commits for n in kpis.issues_in(cm["message"])})
+    rows = [r for r in issue_rows(numbers=numbers, with_milestone=True) if r.get("state") == "OPEN"]
+    types = read_types() if rows else {}
+    issues = [{"number": r["number"], "title": r.get("title", ""), "body": r.get("body") or "", "type": types.get(r["number"]),
+               "commits": commit_lines(r, commits)} for r in rows]
+    title = f"Release v{version}" if version else f"Release: {c.integration} to {c.production}"
+    body = release_body(rows, issues)
+    milestone = shared_milestone(rows) if rows else None
+    existing = gh_json("pr", "list", "--repo", c.repo, "--base", c.production, "--head", c.integration, "--state", "open",
+                       "--json", "number,url") or []
+    print(message)
+    if args.dry_run:
+        print(f"dry run: nothing is written. {'Would update pull request #' + str(existing[0]['number']) if existing else 'Would open a pull request'}")
+        print(f"title: {title}\nmilestone: {milestone or 'none'}\nissues: " + (", ".join(f"#{r['number']}" for r in rows) or "none"))
+        print("body:\n" + body, end="")
+        return 0
+    path = via_file(body, ".md")
+    try:
+        if existing:
+            extra = ["--milestone", milestone] if milestone else []
+            gh("pr", "edit", str(existing[0]["number"]), "--repo", c.repo, "--title", title, "--body-file", path, *extra)
+            print(f"updated pull request #{existing[0]['number']}: {title}")
+        else:
+            extra = ["--milestone", milestone] if milestone else []
+            url = gh("pr", "create", "--repo", c.repo, "--base", c.production, "--head", c.integration, "--title", title,
+                     "--body-file", path, *extra).strip()
+            print(f"opened {url}: {title}")
+    finally:
+        os.unlink(path)
+    print("next: saani ci pr, then saani merge")
+    return 0
+
+
 def add_parsers(sub):
-    p = sub.add_parser("release", help="release notes from the GitHub issues (`release notes`) and the GitHub releases (`release create`)")
+    p = sub.add_parser("release", help="release notes from the GitHub issues (`release notes`), the GitHub releases (`release create`) "
+                                       "and the release pull request (`release pr`)")
     rs = p.add_subparsers(dest="what", required=True)
+    r = rs.add_parser("pr", help="open or update the one integration -> production pull request: notes, Closes / refs lines, the version bump required")
+    r.add_argument("--dry-run", action="store_true", help="print the title, the body and the issues; write nothing")
+    r.set_defaults(run=cmd_pr)
     n = rs.add_parser("notes", help="the notes of a milestone's issues, or of a pull request's (`--pr N`)")
     n.add_argument("milestone", nargs="?", help="the milestone's title")
     n.add_argument("--pr", type=int, help="the issues this pull request names with `refs #n` (body and commits) instead of a milestone")
