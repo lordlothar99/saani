@@ -38,6 +38,16 @@ def test_a_comment_is_its_heading_then_the_fields_as_a_one_row_table_then_the_te
     assert "a\\|b" in comments.render("linked", {"Issue": "a|b"})
 
 
+def test_a_decision_is_a_progress_comment_with_a_decision_field_and_the_latest_one_wins():
+    first = comments.render("progress", {"Decision": "keep a | pipe", "Date": "2026-11-25"}, "context")
+    second = comments.render("progress", {"Decision": "second"})
+    assert comments.decision_of([first]) == "keep a | pipe"
+    assert comments.decision_of(["hello", first, second, "### ⚙ Progress\nplain text", comments.render("progress", {"Step": "x"})]) == "second"
+    assert comments.decision_of([]) is None
+    assert comments.decision_of([comments.render("progress", {"Step": "x"}), comments.render("blocked", {"Decision": "no"})]) is None
+    assert comments.decision_of([comments.render("progress", {"Decision": ""})]) is None
+
+
 def test_every_kind_has_the_heading_of_the_comment_kinds_file():
     headings = {"started": "▶ Started", "review": "🔎 In review", "blocked": "⛔ Blocked", "question": "❓ Question", "progress": "⚙ Progress",
                 "on-dev": "✅ On dev", "in-pr": "📦 In PR", "on-main": "🚀 On main", "deployed": "✔ Deployed", "linked": "🔗 Linked"}

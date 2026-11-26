@@ -506,6 +506,14 @@ tokens and the estimate per issue, role and model; the window counts whole days 
 `/saani:merge N` or `/saani:merge N --deploy`. With `--post` it is also a comment on the pull request. The skill adds what only Claude Code
 knows (the options for each pending issue).
 
+### The owner's decisions (#102)
+A headless auto run sees only the repo and the issues, so an answer the owner gives in a session is worth nothing to it until it is on the
+issue. Every decision is posted as a `Progress` comment with a `Decision` field, with the existing command (no separate command):
+`saani comment <n> progress --field Decision="<the decision>" [--text "<why>"]`; where it changes the issue's rules, the At a glance rows
+(Auto, Needs the owner, Blocked by) are edited too. `/saani:auto` does both for each answer before `saani auto away` starts, and never
+starts a run with an answer that is not on its issue. `saani auto pick` (text and `--json`) gives each eligible issue its latest `Decision`
+(`decision`, `null` when none), so the coder's brief has it.
+
 ### Status comments
 `saani comment <n> <kind>` writes a comment in the shape of `.github/COMMENT_KINDS.md` (heading, `--field KEY=VALUE` as a one-row table,
 `--text` as the body), posts it with `gh issue comment`, then applies the kind's label change with `gh issue edit` (labels from `[issues]
