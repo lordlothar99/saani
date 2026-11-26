@@ -390,9 +390,14 @@ def cmd_start(args):
     taken = existing_branch(args.issue, on_origin, hotfix=args.hotfix)
     if taken:                                           # the claim is a branch on origin (#100): a second one is refused
         home = next((p for p, b in worktrees() if b == taken), None)
-        raise SystemExit(f"issue #{args.issue} is already claimed: branch {taken} is on origin"
-                         + (f", its worktree is {home}: work there" if home else
-                            f" (not a worktree of this clone: another clone holds it; if it is abandoned, delete it: git push origin --delete {taken})"))
+        if home:
+            more = f", its worktree is {home}: work there"
+        elif taken in branches:
+            more = (f" and is a local branch of this clone with no worktree: `git worktree add {c.wt_dir / taken.split('/', 1)[1]} {taken}` resumes it "
+                    f"(run `git worktree prune` first if git says the folder is still registered)")
+        else:
+            more = f" (not a worktree of this clone: another clone holds it; if it is abandoned, delete it: git push origin --delete {taken})"
+        raise SystemExit(f"issue #{args.issue} is already claimed: branch {taken} is on origin" + more)
     name = existing_branch(args.issue, branches, hotfix=args.hotfix)
     if not name:
         prefix = branch_type(info.get("type"))
@@ -769,7 +774,22 @@ def prune_candidates(cwd=None):
     for base in (f"origin/{c.production}", f"origin/{c.integration}"):
         local |= set(git("branch", "--format=%(refname:short)", "--merged", base, cwd=cwd).splitlines())
     remote = git("branch", "-r", "--format=%(refname:short)", "--merged", f"origin/{c.production}", cwd=cwd).splitlines()
-    return prunable(local, held), prunable([r for r in remote if r.startswith("origin/")], held)
+    remote = [r for r in remote if r.startswith("origin/") and not is_fresh_claim(r, cwd)]
+    return prunable(local, held), prunable(remote, held)
+
+
+def is_fresh_claim(ref, cwd=None):
+    """True for a remote branch that looks like a claim (#100) rather than finished work: a worker branch whose tip commit does not
+    mention its own issue (`#<n>`), so it has no commit of its own, it still sits at the commit it was started from, which can already be
+    inside production (a claim made right after a release, a hotfix claim at the prod tag). Merged work always ends in a commit that
+    names its issue. When the tip cannot be read the branch counts as a claim: prune never guesses toward deleting."""
+    m = cfg().worker_branch.match(ref.removeprefix("origin/"))
+    if not m:
+        return False
+    tip = git("log", "-1", "--format=%B", ref, cwd=cwd, check=False)
+    if tip.returncode != 0:
+        return True
+    return re.search(rf"#0*{int(m.group(2))}(?!\d)", tip.stdout or "") is None
 
 
 RUN_BRANCHES = ("auto/", "longrun/")      # "longrun/" is the old name of "auto/": runs made before the rename are still recognised and removed

@@ -511,3 +511,28 @@ def test_land_after_a_start_removes_the_remote_branch_too(origin_clone, git, tmp
     monkeypatch.setattr(core.status, "advance", lambda *a, **k: None)
     assert core.cmd_land(type("A", (), {"worktree": str(wt), "keep": False, "dry_run": False, "wait": 1, "no_comment": True})()) == 0
     assert "task/7-add-thing" not in _heads(git, origin) and not wt.exists()
+
+
+def test_prune_keeps_a_fresh_claim_that_is_already_inside_production_and_still_prunes_old_merged_work(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    ident = ("-c", "user.name=Someone", "-c", "user.email=someone@example.com")
+    git("push", "-q", "origin", "dev:refs/heads/task/7-add-thing", cwd=main)       # a claim at the tip: dev == main, so it is merged into production
+    git("checkout", "-q", "-b", "task/8-old-work", cwd=main)
+    (main / "old.txt").write_text("old", encoding="utf-8")
+    git("add", "old.txt", cwd=main)
+    git(*ident, "commit", "-q", "-m", "Old work (refs #8)", "-m", "Why: x.", "-m", "Undo: revert.", cwd=main)
+    git("push", "-q", "origin", "task/8-old-work", "task/8-old-work:refs/heads/main", cwd=main)    # landed and released
+    git("checkout", "-q", "dev", cwd=main)
+    local, remote = core.prune_candidates()
+    assert "task/8-old-work" in remote and "task/7-add-thing" not in remote
+
+
+def test_a_second_start_with_the_local_branch_but_no_worktree_says_how_to_resume(origin_clone, git, tmp_path, monkeypatch):
+    origin, main, ns = _start_world(origin_clone, tmp_path, monkeypatch)
+    core.cmd_start(ns)
+    git("worktree", "remove", "--force", str(tmp_path / "wt" / "7-add-thing"), cwd=main)    # removed by hand: the branch is still local
+    with pytest.raises(SystemExit) as e:
+        core.cmd_start(ns)
+    msg = str(e.value)
+    assert "no worktree" in msg and "git worktree add" in msg and "task/7-add-thing" in msg
+    assert "another clone" not in msg and "--delete" not in msg

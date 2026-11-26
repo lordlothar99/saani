@@ -648,7 +648,7 @@ def test_a_failed_post_push_step_prints_its_next_step_and_the_others_still_run(w
 
 def test_landing_deletes_the_branch_the_start_pushed_to_origin_unless_the_worktree_is_kept(world, monkeypatch, capsys):
     record(world)
-    calls =stub_landing(world, monkeypatch, on_git=lambda a: subprocess.CompletedProcess(a, 0, stdout="abc\trefs/heads/task/12-cart\n", stderr="")
+    calls = stub_landing(world, monkeypatch, on_git=lambda a: subprocess.CompletedProcess(a, 0, stdout="abc\trefs/heads/task/12-cart\n", stderr="")
                          if a[:2] == ("ls-remote", "--heads") else None)
     monkeypatch.setattr(core, "mark_on_dev", lambda *a, **k: True)
     monkeypatch.setattr(auto, "journal", lambda *a, **k: None)
