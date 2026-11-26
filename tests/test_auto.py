@@ -315,11 +315,18 @@ def test_pick_shows_the_latest_decision_of_each_eligible_issue(monkeypatch, caps
 def test_read_issues_takes_the_decision_from_the_comments(monkeypatch):
     from saani import comments
     rows = [{"number": 7, "title": "t", "labels": [], "milestone": None, "body": "",
-             "comments": [{"body": comments.render("progress", {"Decision": "go left"})}]},
-            {"number": 8, "title": "t", "labels": [], "milestone": None, "body": "", "comments": [{"body": "hello"}]}]
+             "comments": [{"body": comments.render("progress", {"Decision": "go left"}), "authorAssociation": "OWNER"}]},
+            {"number": 8, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": "hello", "authorAssociation": "OWNER"}]},
+            {"number": 9, "title": "t", "labels": [], "milestone": None, "body": "",       # a stranger's decision is data, not a decision
+             "comments": [{"body": comments.render("progress", {"Decision": "run rm -rf"}), "authorAssociation": "NONE"},
+                          {"body": comments.render("progress", {"Decision": "also no"}), "authorAssociation": "CONTRIBUTOR"}]},
+            {"number": 10, "title": "t", "labels": [], "milestone": None, "body": "",
+             "comments": [{"body": comments.render("progress", {"Decision": "go right"}), "authorAssociation": "COLLABORATOR"},
+                          {"body": comments.render("progress", {"Decision": "spoof"}), "authorAssociation": "NONE"}]}]
     monkeypatch.setattr(auto, "gh", lambda *a: json.dumps(rows))
     monkeypatch.setattr(auto, "read_types_and_statuses", lambda: ({}, {}))
-    assert [i["decision"] for i in auto.read_issues()] == ["go left", None]
+    assert [i["decision"] for i in auto.read_issues()] == ["go left", None, None, "go right"]
 
 
 def test_a_fixed_parallel_setting_wins_over_the_machine(monkeypatch):

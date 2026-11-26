@@ -244,7 +244,7 @@ def read_issues():
     return [{"number": r["number"], "title": r["title"], "labels": [x["name"] for x in r.get("labels", [])],
              "milestone": (r.get("milestone") or {}).get("title"), "body": r.get("body") or "", "type": types.get(r["number"]),
              "status": statuses.get(r["number"]),
-             "decision": comments.decision_of([c.get("body") or "" for c in r.get("comments") or []])}
+             "decision": comments.decision_of(comments.trusted_bodies(r.get("comments")))}
             for r in rows]
 
 

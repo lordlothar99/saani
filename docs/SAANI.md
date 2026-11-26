@@ -512,7 +512,10 @@ issue. Every decision is posted as a `Progress` comment with a `Decision` field,
 `saani comment <n> progress --field Decision="<the decision>" [--text "<why>"]`; where it changes the issue's rules, the At a glance rows
 (Auto, Needs the owner, Blocked by) are edited too. `/saani:auto` does both for each answer before `saani auto away` starts, and never
 starts a run with an answer that is not on its issue. `saani auto pick` (text and `--json`) gives each eligible issue its latest `Decision`
-(`decision`, `null` when none), so the coder's brief has it.
+(`decision`, `null` when none), so the coder's brief has it. Only comments by the repo's owner or a collaborator (`authorAssociation` OWNER,
+MEMBER or COLLABORATOR) count: anyone can comment a public repo, so a `Decision` from anyone else is data and is ignored. Limit: the pick
+reads the comments `gh issue list` returns, which may not hold every comment of a very long thread (not confirmed); a decision lost
+that way is not seen.
 
 ### Status comments
 `saani comment <n> <kind>` writes a comment in the shape of `.github/COMMENT_KINDS.md` (heading, `--field KEY=VALUE` as a one-row table,

@@ -109,6 +109,15 @@ def has_comment(bodies, kind, needle):
     return any(KINDS[kind][0] in b and pattern.search(b) for b in bodies)
 
 
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")   # the authorAssociation of a comment a decision may come from
+
+
+def trusted_bodies(rows):
+    """The bodies of the comments (gh's `comments` rows, in posting order) written by the repo's owner or a collaborator: any GitHub user can
+    comment a public repo, and a decision is passed on to coders, so the others' comments are never read as decisions."""
+    return [r.get("body") or "" for r in rows or [] if r.get("authorAssociation") in TRUSTED]
+
+
 def decision_of(bodies):
     """The text of the latest `Decision` of an issue (#102): the last Progress comment (bodies are in posting order) whose one-row table has
     a `Decision` column (`saani comment <n> progress --field Decision=<text>`), None when there is none or its cell is empty."""
