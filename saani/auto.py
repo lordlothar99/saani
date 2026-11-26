@@ -424,7 +424,8 @@ def cmd_pick(args):
 # ---------------------------------------------------------------- saani auto wait: keep the headless session's turn open (#111)
 
 WAIT_DEFAULT_MINUTES = 8          # `auto wait` without --minutes (a Bash call lasts 10 minutes at most)
-WAIT_LOOK_SECONDS = 15            # `auto wait` looks at the run's branches this often (local git only, no model, no gh)
+WAIT_MAX_MINUTES = 9.5            # the most `auto wait --minutes` accepts
+WAIT_LOOK_SECONDS = 15           # `auto wait` looks at the run's branches this often (local git only, no model, no gh)
 
 
 def flight_marks(rec_id):
@@ -476,6 +477,8 @@ def cmd_wait(args):
     minutes = WAIT_DEFAULT_MINUTES if minutes is None else minutes
     if not math.isfinite(minutes) or minutes <= 0:
         raise SystemExit("saani auto wait: --minutes needs a number more than 0, e.g. --minutes 8")
+    if minutes > WAIT_MAX_MINUTES:
+        raise SystemExit(f"saani auto wait: --minutes is at most {WAIT_MAX_MINUTES:g} (a Bash call lasts 10 minutes at most)")
     rec = read_record()
     if not rec:
         raise SystemExit("saani auto wait: no run is on")
@@ -1261,7 +1264,15 @@ def cut_off_issues(rec):
     ended left in flight. Reads git and the journal only; empty when it cannot tell."""
     try:
         landed = {n for n, _ in landed_issues(rec)}
-        return sorted((n, p) for n, (p, _) in flight_marks(rec["id"]).items() if n not in landed)
+        parked = set()                       # the session itself parked these: a blocked or question comment after the started line
+        for r in read_journal(rec["id"]):
+            if r.get("issue") is None:
+                continue
+            if r.get("kind") == "started":
+                parked.discard(int(r["issue"]))
+            elif r.get("kind") in ("blocked", "question"):
+                parked.add(int(r["issue"]))
+        return sorted((n, p) for n, (p, _) in flight_marks(rec["id"]).items() if n not in landed and n not in parked)
     except (Exception, SystemExit):
         return []
 
@@ -1270,10 +1281,10 @@ def park_cut_off(rec, what):
     """The watcher comments each cut-off issue as blocked, with where it stands (its worktree). A refusal by gh only prints a warning."""
     from . import comments
     for n, path in cut_off_issues(rec):
-        text = (f"The away run {rec['id']} ended ({what}) while this issue was in flight. Its work stands in the worktree `{path}`, "
-                "possibly with uncommitted changes. Nothing was landed for it.")
+        text = (f"The away run {rec['id']} ended ({what}) while this issue was in flight. Its work stands in the worktree folder "
+                f"`{pathlib.Path(path).name}`, possibly with uncommitted changes. Nothing was landed for it.")
         try:
-            if comments.try_post(n, "blocked", text=text):
+            if comments.try_post(n, "blocked", text=text, once=rec["id"]):
                 watch_note(f"#{n} commented as blocked (worktree {path})")
         except Exception as e:                 # the watcher always goes on to switch the run off
             watch_note(f"#{n} could not be commented ({e})")

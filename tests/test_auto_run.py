@@ -1471,6 +1471,9 @@ def test_wait_command_prints_json_and_checks_its_arguments(world, capsys, monkey
     for bad in (0.0, -1.0, float("inf"), float("nan")):
         with pytest.raises(SystemExit, match="--minutes needs a number"):
             auto.cmd_wait(args(minutes=bad))
+    with pytest.raises(SystemExit, match="--minutes is at most 9.5"):
+        auto.cmd_wait(args(minutes=10.0))
+    assert auto.cmd_wait(args(minutes=9.5)) == 0
 
 
 def test_wait_is_an_action_with_minutes_and_nothing_else_takes_minutes(world):
@@ -1499,17 +1502,42 @@ def test_the_fallback_report_names_the_issues_in_flight_and_the_watcher_comments
     monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
     monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $0.00")
     monkeypatch.setattr(auto, "fetch", lambda: None)
-    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {63: ("/w/63-x", "a"), 100: ("/w/100-y", "b")})
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {5: ("/w/5-x", "a"), 6: ("/w/6-y", "b")})
     monkeypatch.setattr(auto, "landed_issues", lambda rec: [])
     posted = []
-    monkeypatch.setattr(comments, "try_post", lambda n, kind, fields=None, text="", io=None, **kw: posted.append((n, kind, text)) or True)
+    def try_post(n, kind, fields=None, text="", io=None, **kw):
+        assert kw.get("once") == "r1"
+        posted.append((n, kind, text))
+        return True
+    monkeypatch.setattr(comments, "try_post", try_post)
     def on(env):
         record(world, started=auto.utc_now(), watch=env[auto.WATCH_VAR])
         guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
     assert auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=on)) == 0
     text = (world.root / "build" / "saani-auto-r1.md").read_text(encoding="utf-8")
-    assert "cut off while in flight: #63 (/w/63-x), #100 (/w/100-y)" in text
-    assert [(n, k) for n, k, _ in posted] == [(63, "blocked"), (100, "blocked")]
-    assert "/w/63-x" in posted[0][2] and "r1" in posted[0][2]
+    assert "cut off while in flight: #5 (/w/5-x), #6 (/w/6-y)" in text
+    assert [(n, k) for n, k, _ in posted] == [(5, "blocked"), (6, "blocked")]
+    assert "`5-x`" in posted[0][2] and "/w/" not in posted[0][2] and "r1" in posted[0][2]      # the folder's name, never the owner's path
     assert auto.read_record() is None
-    assert "#63 commented as blocked" in capsys.readouterr().out
+    assert "#5 commented as blocked" in capsys.readouterr().out
+
+
+def test_the_watcher_leaves_alone_the_issues_the_session_parked_itself(world, tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "git", lambda *a, cwd=None, check=True: subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
+    monkeypatch.setattr(auto, "cost_text", lambda rec, now: "total: $0.00")
+    monkeypatch.setattr(auto, "fetch", lambda: None)
+    monkeypatch.setattr(auto, "flight_marks", lambda rec_id: {5: ("/w/5-x", "a"), 6: ("/w/6-y", "b"), 7: ("/w/7-z", "c")})
+    monkeypatch.setattr(auto, "landed_issues", lambda rec: [])
+    posted = []
+    monkeypatch.setattr(comments, "try_post", lambda n, kind, **kw: posted.append(n) or True)
+    (world.root / "build").mkdir(exist_ok=True)
+    (world.root / "build" / "saani-auto-r1.md").write_text("mine", encoding="utf-8")           # the session wrote its own report
+    def on(env):
+        record(world, started=auto.utc_now(), watch=env[auto.WATCH_VAR])
+        guard.turn_on("sess", "r1", world.root, world.wt, folder=world.run)
+        for n in (5, 6, 7):
+            auto.journal(n, "started")
+        auto.journal(5, "blocked")
+        auto.journal(6, "question")
+    auto.cmd_watch(watch_args(), which=lambda n: "claude", popen=fake_popen(tmp_path, during=on))
+    assert posted == [7]                                                                        # #5 and #6 were parked by the session

@@ -78,7 +78,7 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that. **Never write a wait loop** (`until`, `while`,
-   `sleep`): the guard refuses them. Wait only with `saani auto wait --minutes 8` (a coder is running and there is nothing else to do:
+   `sleep`): the guard refuses them. Wait only with `saani auto wait --minutes 8` (at most 9.5; a coder is running and there is nothing else to do:
    **alone, one Bash call with the timeout set to 600000 ms**; it blocks with no model and returns when a coder of the run hands back, at a
    stop rule, or after the minutes, with JSON `reason`, `finished`, `in_flight`; then read the coders' results, review, land, pick again, and
    call it again while anything is in flight), `saani auto pick --wait <minutes>` (nothing running, nothing eligible), `saani land

@@ -63,7 +63,7 @@ once and accept the dialog. The mechanics (the command by hand, the trust check,
 
 The ceiling setting is not enough (#111): `claude -p` also exits as soon as a turn ends with no tool call, and a session that says "I am
 waiting for the coder" ends exactly like that. So while an issue is in flight the session waits in a Bash call that returns: `saani auto
-wait [--minutes N]` (default 8) blocks, with no model and no tokens, until a coder of the run hands back (its worktree gets a new commit
+wait [--minutes N]` (default 8, at most 9.5: a Bash call lasts 10 minutes) blocks, with no model and no tokens, until a coder of the run hands back (its worktree gets a new commit
 or goes away), a stop rule is reached or the time passes, and prints JSON (`reason`, `finished`, `in_flight`). The skill never ends a turn
 with a text-only message while an issue is in flight. If the session ends anyway, the watcher's fallback report names the issues cut
 off (with their worktree paths) and the watcher comments each as blocked with where it stands.
