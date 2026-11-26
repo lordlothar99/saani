@@ -17,7 +17,8 @@ separated by spaces or commas: only those issues; none: a full run). The run is 
 - `run <id> --folder <path> [--deploy] [--keep-on]` (then issue numbers, if any): the inside of an away run, typed by `saani auto away` into the
   headless session, never by the owner: skip "Before the run" but its step 4, then do the run. In this headless session, keep your
   turn open until every background coder is done and the report is written: a turn that ends with coders running lets `claude -p` stop
-  them and exit, and nothing lands.
+  them and exit, and nothing lands. **Never end a turn with a text-only message while an issue is in flight** ("I am waiting for its
+  hand-back" ends the session): wait with `saani auto wait` (section "The run", step 0).
 
 ## The two sub-modes
 
@@ -77,13 +78,17 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
 ## The run
 0. **Never wait for approval.** A refused call means skip the item, note it for the report, carry on. No force push, no change to the
    project's protected files, no deploy unless the owner started the run for that. **Never write a wait loop** (`until`, `while`,
-   `sleep`): the guard refuses them. Wait only with `saani auto pick --wait <minutes>` (nothing running, nothing eligible), `saani land
-   --wait` (the landing lock) or `saani auto status --check`; run git as `git -C <worktree> <command>` and `saani` with `--worktree`, never
+   `sleep`): the guard refuses them. Wait only with `saani auto wait --minutes 8` (at most 9.5; a coder is running and there is nothing else to do:
+   **alone, one Bash call with the timeout set to 600000 ms**; it blocks with no model and returns when a coder of the run hands back, at a
+   stop rule, or after the minutes, with JSON `reason`, `finished`, `in_flight`; then read the coders' results, review, land, pick again, and
+   call it again while anything is in flight), `saani auto pick --wait <minutes>` (nothing running, nothing eligible), `saani land
+   --wait` (the landing lock) or `saani auto status --check`. Never end a turn with a text-only message while an issue is in flight. If
+   `auto wait` fails, call it again; run git as `git -C <worktree> <command>` and `saani` with `--worktree`, never
    `cd` to a folder outside the worktrees.
 1. **The pipeline, several issues at once.** You are Claude Code, the main session: you brief, decide and land; the coder and the reviewer do the reading
    and the writing (docs/PLUGIN.md, "The pipeline from an issue to dev"). Loop:
    - `saani auto pick --json` says `slots` (how many issues may start now: `[auto] parallel`: default sized from the machine, at most 2; a fixed number up to 10, a `warning` above 5; less the issues this run started: the owner's own worktrees, listed in `owner_running`,
-     take no slot; `note` says "no slot" or "nothing eligible") and the `eligible`
+     take no slot, and neither does an issue you parked with `saani comment <n> blocked`, listed in `parked`: its worktree stays and `pick` never offers it again, also with `--only <n>`; only `saani start <n>` or its landing re-admits it; a `question` comment does not park an issue; `note` says "no slot" or "nothing eligible") and the `eligible`
      issues in the run's order (milestone by version, bugs first; At a glance fit, blocked, needs the owner, labels, Type and overlapping
      files already checked, `skipped` says why not). With issue numbers as arguments (`/saani:auto away 12 15`), run `saani auto pick --json --only 12 15`.
    - For each free slot take the first eligible issue: `saani start <n>` (posts Started), then `saani:coder` in that worktree, **run in the

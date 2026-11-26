@@ -277,8 +277,10 @@ def test_the_files_a_worktree_changed_are_read_from_its_diff(tmp_path, monkeypat
 
 # ---------------------------------------------------------------- pick and the command line
 
-def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32, mine=None):
-    """`mine`: the running issues this run started (default: all of `running`; the owner's own worktrees are the rest)."""
+def fake_world(monkeypatch, issues, running=None, cpus=16, gb=32, mine=None, parked=()):
+    """`mine`: the running issues this run started (default: all of `running`; the owner's own worktrees are the rest);
+    `parked`: the run's issues that are blocked (#110)."""
+    monkeypatch.setattr(auto, "run_parked_issues", lambda: set(parked))
     monkeypatch.setattr(auto, "read_issues", lambda: issues)
     monkeypatch.setattr(auto, "fetch", lambda: None)
     monkeypatch.setattr(auto, "running_issues", lambda: dict(running or {}))
@@ -320,7 +322,7 @@ def test_saani_auto_pick_prints_and_saani_auto_still_makes_the_worktree(monkeypa
 
     assert run_saani(monkeypatch, ["auto", "pick", "--json", "--limit", "0"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert set(data) == {"slots", "parallel", "running", "owner_running", "eligible", "skipped"} and data["eligible"] == []
+    assert set(data) == {"slots", "parallel", "running", "owner_running", "parked", "eligible", "skipped"} and data["eligible"] == []
 
     made = []
 
@@ -381,6 +383,35 @@ def test_pick_says_no_slot_and_names_the_owners_worktrees(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "slots: 0 free of 2 (running: #5, #6)" in out and "the owner's worktrees #12, #15 are in flight" in out
     assert "no slot: this run's issues #5, #6 are in flight (2 allowed)" in out
+
+
+# ---------------------------------------------------------------- a parked issue takes no slot (#110)
+
+def test_a_parked_issue_frees_its_slot_and_a_running_one_keeps_it(monkeypatch):
+    fake_world(monkeypatch, [issue(1), issue(5), issue(6)], running={5: [], 6: []}, parked=[6])
+    got = auto.pick("2026-11-22")
+    assert got["running"] == [5] and got["parked"] == [6] and got["slots"] == 1
+    assert [e["number"] for e in got["eligible"]] == [1]
+    assert {"number": 6, "reason": "parked: blocked in this run"} in got["skipped"]
+
+
+def test_a_blocked_issue_is_not_offered_again_even_without_its_worktree(monkeypatch):
+    fake_world(monkeypatch, [issue(1), issue(7)], mine=[7], parked=[7])
+    got = auto.pick("2026-11-22")
+    assert [e["number"] for e in got["eligible"]] == [1] and got["slots"] == 2
+
+
+def test_a_parked_issue_s_files_still_keep_an_overlapping_issue_waiting(monkeypatch):
+    fake_world(monkeypatch, [issue(1, text=body(extra="touches `saani/core.py`")), issue(6)], running={6: ["saani/core.py"]}, parked=[6])
+    got = auto.pick("2026-11-22")
+    assert got["eligible"] == [] and got["slots"] == 2
+
+
+def test_pick_says_which_issues_are_parked(monkeypatch, capsys):
+    monkeypatch.setattr(auto, "journal_pick", lambda note: None)
+    fake_world(monkeypatch, [issue(1), issue(6)], running={6: []}, parked=[6])
+    assert run_saani(monkeypatch, ["auto", "pick"]) == 0
+    assert "parked (blocked, worktree kept): #6" in capsys.readouterr().out
 
 
 def test_pick_says_nothing_eligible_and_journals_it(monkeypatch, capsys):

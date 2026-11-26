@@ -201,13 +201,16 @@ def job_since(job, folder):
     return job.get("created")
 
 
-def render(lines, open_worktrees, outside_unknown=False):
-    """The text of the default `saani status`: the task lines, or the idle line; the open worktrees nothing runs in come after."""
+def render(lines, open_worktrees, outside_unknown=False, parked=()):
+    """The text of the default `saani status`: the task lines, or the idle line; the open worktrees nothing runs in come after.
+    `parked`: the issue numbers the auto run parked (blocked): their worktree is marked, it takes no slot of the run (#110)."""
     out = list(lines) if lines else [IDLE]
     if outside_unknown:
         out.append(OUTSIDE_NOTE)
     busy = {line.split(" ", 1)[0] for line in lines}
-    quiet = [f"{issue_of(b) if b else pathlib.Path(str(p)).name} ({pathlib.Path(str(p)).name})" for p, b in open_worktrees
+    held = {f"#{n}" for n in parked}
+    quiet = [f"{issue_of(b) if b else pathlib.Path(str(p)).name} ({pathlib.Path(str(p)).name})"
+             + (" parked: blocked, takes no slot" if b and issue_of(b) in held else "") for p, b in open_worktrees
              if (issue_of(b) if b else pathlib.Path(str(p)).name) not in busy]
     if quiet:
         out.append("open worktrees, no landing or tests in them: " + ", ".join(quiet))

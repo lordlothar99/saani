@@ -322,13 +322,14 @@ def cmd_auto(args):
     branch. The run's coordinator works there, so the owner's own folder is never touched; each issue still gets its own `saani start`."""
     action = getattr(args, "action", None)
     for name, only in (("folder", ("on", "away", "watch")), ("deploy", ("on", "away", "watch")), ("here", ("on",)), ("check", ("status",)),
-                       ("pr", ("report",)), ("post", ("report",)), ("reason", ("report",)), ("run_id", ("off",)), ("wait", ("pick",)), ("keep_on", ("away", "watch"))):
+                       ("pr", ("report",)), ("post", ("report",)), ("reason", ("report",)), ("run_id", ("off",)), ("wait", ("pick",)), ("keep_on", ("away", "watch")),
+                       ("minutes", ("wait",))):
         given = getattr(args, name, None)
         if given is not None and given is not False and action not in only:
             raise SystemExit(f"saani auto: --{name.removesuffix('_id').replace('_', '-')} belongs to "
                              + " and ".join(f"`saani auto {o}`" for o in only)
                              + (" (the run's mode is --keep-on; [auto] keep_on_quiet_minutes sets its quiet time)" if name == "wait" else ""))
-    if action in ("on", "off", "status", "report", "end", "away", "watch"):
+    if action in ("on", "off", "status", "report", "end", "away", "watch", "wait"):
         if action not in ("on", "away", "watch") and getattr(args, "id", None):
             raise SystemExit(f"saani auto {action}: --id belongs to `saani auto`, `saani auto on` and `saani auto away`" + ("; `off` takes --run" if action == "off" else ""))
         if (getattr(args, "json", False) and action != "end") or getattr(args, "limit", None) is not None or (getattr(args, "only", None) and action not in ("away", "watch")):
@@ -998,7 +999,7 @@ def cmd_status(args):
                                         activity.known_commands(cfg())) if procs is not None else []
         from . import auto
         lines = activity.tasks(held, busy, waiting, auto.read_record(), wts, outside, job_since=lambda j: activity.job_since(j, folder))
-        print("\n".join(activity.render(lines, wts, outside_unknown=procs is None)))
+        print("\n".join(activity.render(lines, wts, outside_unknown=procs is None, parked=auto.run_parked_issues())))
         return 0
     print("statistics:")
     log = main_checkout() / "build" / LANDINGS
@@ -1084,10 +1085,12 @@ def add_parsers(sub):
     p.add_argument("--no-comment", action="store_true", help="do not post the Started comment on the issue")
     p.set_defaults(run=cmd_start)
     p = sub.add_parser("auto", help="a throwaway worktree (auto-<timestamp>) for an auto run to work in; `auto pick`: the issues to take now")
-    p.add_argument("action", nargs="?", choices=["pick", "on", "off", "status", "report", "end", "away", "watch"],
+    p.add_argument("action", nargs="?", choices=["pick", "on", "off", "status", "report", "end", "away", "watch", "wait"],
                    help="pick: the eligible issues in the run's order, the free slots, why the others are left; on, off, status, report: the run; end: whether the End opens or updates the release pull request; "
                         "away: start the run in a headless Claude Code session, in the background (saani/auto.py); "
-                        "watch: what `away` starts (the session, then the run's off), never typed by hand")
+                        "watch: what `away` starts (the session, then the run's off), never typed by hand; "
+                        "wait: block (no model) until a coder of this run hands back, a stop rule or --minutes")
+    p.add_argument("--minutes", type=float, default=None, help="wait: the time limit in minutes (default 8)")
     p.add_argument("--id", help="the run's id instead of the date and time (YYYY-MM-DD_HHMM); with `on`, the id of the run")
     p.add_argument("--folder", help="on, away: the run's folder (default: the current one), inside the worktrees folder")
     p.add_argument("--deploy", action="store_true", help="on, away: the owner started the run so that it may deploy")
