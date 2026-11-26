@@ -59,7 +59,8 @@ version changed). See `skills/auto/SKILL.md`.
 the coder needs is on the issue (its At a glance row or a comment). The coder's brief (`agents/coder.md`, and the brief the main session
 writes, `skills/auto/SKILL.md`) lists the command forms the guard allows and refuses, so a coder avoids the refusals (each counts toward
 the run's 40) from its first call: Read and Grep instead of `sed`, `cat` and `git grep`; `git -C <worktree>` instead of `cd`; no
-`$(...)`, backticks, redirections or here-documents; a commit message written to a file in `build/` and `git commit -F <file>`.
+`$`, `$(...)`, backticks or redirections (the guard allows a quoted here-document for a commit message, but a headless session's
+own permissions refused one once); a commit message written to a file in `build/` and `git commit -F <file>`.
 `agents/reviewer.md` has the same. Leftover worktree folders (a landed worktree's folder that git could not delete) are removed by
 `saani start`, `land`, `status` and `prune` themselves (docs/SAANI.md, `saani prune`). Keeping a UI and its Claude Design artifact in step
 is docs/DESIGN-SYNC.md.

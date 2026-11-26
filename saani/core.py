@@ -499,6 +499,7 @@ def land_hotfix(args, cwd, branch, number):
     if args.dry_run:
         print(f"would run the landing tests against origin/{c.production}, push {branch} and open its pull request into {c.production}")
         return 0
+    clean_leftovers(cwd)
     if c.landing and queued_run("land", [*c.command("landing"), "--base", f"origin/{c.production}"], cwd) != 0:
         print("HOTFIX STOPPED: the landing tests are red: fix it on the branch, commit, land again")
         return 1
@@ -697,32 +698,39 @@ def remove_landed_worktree(cwd, branch):
 
 
 LEFTOVER_PROBLEM = "cannot be checked"
+LEFTOVER_NAME = re.compile(r"\d+-.+|auto-.+")      # the names Saani gives a worktree folder: `<n>-<slug>` and `auto-<id>`; no other folder is ever touched
+LEFTOVER_MIN_AGE = 60                              # seconds: an empty folder younger than this may be a `saani start` that is still making its worktree
 
 
 def leftover_folders(cwd=None, own=()):
-    """([folder, ...], [(folder, why), ...]): the folders in the worktrees folder that git does not know as a worktree. The first list holds
-    the leftovers: only git-ignored generated files (build/, __pycache__...), or nothing. The second holds the ones left alone, with the
-    reason (a file git does not ignore: tracked or new). Never a registered worktree, never a folder the run is in (`cwd`, `own`, the
-    auto run's folder), never a link."""
+    """([folder, ...], [(folder, why), ...]): the folders in the worktrees folder, named as Saani names a worktree folder, that git does not
+    know as a worktree. The first list holds the leftovers: only git-ignored generated files (build/, __pycache__...), or nothing (an
+    empty folder only once it is a minute old). The second holds the ones left alone, with the reason (a file git does not ignore:
+    tracked or new). Never a registered worktree, never a folder the run is in (`cwd`, `own`, the auto run's folder), never a link, and
+    nothing at all when the worktrees folder is or holds the main checkout."""
     from . import auto
     wt = cfg().wt_dir
     if not wt.is_dir():
         return [], []
     known = [p for p, _ in worktrees(cwd)]
+    if _within(known[0].resolve(), wt.resolve()):
+        return [], []
     here = [pathlib.Path(cwd) if cwd else pathlib.Path.cwd(), *map(pathlib.Path, own)]
     rec = auto.read_record()
     if rec and rec.get("folder"):
         here.append(pathlib.Path(rec["folder"]))
     leftovers, kept = [], []
     for d in sorted(wt.iterdir()):
-        if d.is_symlink() or not d.is_dir() or any(same_path(d, p) for p in known) or any(_within(p.resolve(), d.resolve()) for p in here):
+        if (not LEFTOVER_NAME.fullmatch(d.name) or d.is_symlink() or not d.is_dir() or any(same_path(d, p) for p in known)
+                or any(_within(p.resolve(), d.resolve()) for p in here)):
             continue
         files = []
         for root, dirs, names in os.walk(d):
             files += [pathlib.Path(root, n).relative_to(d).as_posix() for n in names]
             files += [pathlib.Path(root, n).relative_to(d).as_posix() for n in dirs if pathlib.Path(root, n).is_symlink()]
         if not files:
-            leftovers.append(d)
+            if time.time() - d.stat().st_mtime >= LEFTOVER_MIN_AGE:
+                leftovers.append(d)
             continue
         # the main checkout's ignore rules, asked as if the files lay in it (no index: a tracked file of this name does not hide)
         r = subprocess.run(["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=known[0], input="\0".join(files) + "\0",

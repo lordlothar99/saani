@@ -95,8 +95,9 @@ The project's own rules (its CLAUDE.md, its saani.toml) win where they differ fr
      background** so several issues progress at once. Model: sonnet; opus for an issue labelled or titled as hard or security. Brief it with
      the issue number, the worktree path and what the issue asks, not with file dumps. Also in the brief, the command forms (a refusal
      counts toward the 40 and a refused `git commit` leaves the issue uncommitted): read with Read, search with Grep (no `sed`, `cat`,
-     `git grep`); git as `git -C <worktree> ...`, one plain command per call, never `cd`; no `$(...)`, backticks, redirections or
-     here-documents; the commit message written to a file in the worktree's `build/` folder, then `git -C <worktree> commit -F <file>`.
+     `git grep`); git as `git -C <worktree> ...`, one plain command per call, not `cd`; no `$`, `$(...)`, backticks or redirections
+     (only `2>&1`, `>/dev/null`, `2>/dev/null`; a quoted here-document is allowed for a commit message only, and a headless session's
+     own permissions refused it once); the commit message written to a file in the worktree's `build/` folder, then `git -C <worktree> commit -F <file>`.
      Anything the owner decided that the coder needs (an answer, a rule) is on the issue, never only in your memory: a headless
      session sees the repo and the issues and nothing else. A design artifact link comes from the issue (docs/DESIGN-SYNC.md).
    - **Alone:** a change of a few lines in one or two files (a typo, a sentence, a setting) you make yourself in that worktree: no coder,
