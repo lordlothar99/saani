@@ -141,7 +141,7 @@ A slash command for every `saani` command, the auto skill, the worker subagents 
 [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Status
-On `dev` after v1.3.0 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
+On `dev` after v1.4.0 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
 change goes through `saani start` and `saani land`, and its releases are made by `saani merge`. The roadmap is in the issues.
 
 ## Contributing
