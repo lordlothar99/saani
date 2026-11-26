@@ -295,6 +295,7 @@ a{color:var(--amber)}
  .panel header{grid-template-columns:1fr auto}.panel .big{grid-column:1}
  .panel footer{grid-template-columns:minmax(0,1fr)}.copy{grid-row:auto;grid-column:1}
 }
+.survey{bottom:calc(68px + env(safe-area-inset-bottom,0px));right:calc(14px + env(safe-area-inset-right,0px));padding:8px 12px;display:flex;gap:12px;align-items:center;color:var(--sand)}
 .compass{flex:none;display:block}
 .cmp-n{font:700 8px var(--mono);fill:var(--bone)}
 .sv-r{display:grid;gap:5px;min-width:150px}
@@ -329,7 +330,7 @@ a{color:var(--amber)}
 <div class="hud summary" id="summary" aria-label="At a glance" hidden></div>
 
 
-<div class="hud survey" id="survey" aria-label="Compass and scale">
+<div class="hud survey" id="survey" aria-label="Compass and scale" hidden>
  <svg class="compass" viewBox="-22 -22 44 44" width="44" height="44" aria-hidden="true"><circle r="20" fill="none" stroke="currentColor" stroke-opacity=".35"/>
   <path d="M0 -17L4 0L0 3L-4 0Z" fill="var(--ember)"/><path d="M0 17L4 0L0 -3L-4 0Z" fill="currentColor" fill-opacity=".55"/><path d="M-17 0L0 -2.5L0 2.5ZM17 0L0 -2.5L0 2.5Z" fill="currentColor" fill-opacity=".35"/>
   <text y="-9" text-anchor="middle" class="cmp-n">N</text></svg>
@@ -967,6 +968,10 @@ function sampleCrew(d) {
 }
 function sampleRelease(d) {
   sampleCrew(d);
+  if (d && d.cards && !d.closed_milestones) {
+    const done = d.cards.filter(c => c.step === "done" || (d.board || []).some(col => col.id === "done" && col.cards.includes(c))).slice(0, 2).map(c => c.number);
+    d.cards = d.cards.map(c => done.includes(c.number) ? {...c, milestone: "v1.0.0"} : c); d.closed_milestones = ["v1.0.0"];
+  }
   if (!d || !d.cards || !d.pr) return d;
   const extra = d.cards.filter(c => c.step === "dev" || c.step === "testing").slice(0, 3).map(c => c.number);
   d.cards = d.cards.map(c => extra.includes(c.number) ? {...c, step: "pr"} : c);
@@ -976,7 +981,10 @@ function sampleRelease(d) {
 function layout() {
   POS = {}; GROUPS = []; HARV = null;
   const byZone = {};
-  for (const c of DATA.cards) (byZone[STEP_ZONE[c.step] || "todo"] ||= []).push(c);
+  // The owner, 2026-11-26: the Citadel leaves out the done issues of closed milestones (the server names them; a milestone it does not
+  // name is kept)
+  const closedMs = new Set(DATA.closed_milestones || []);
+  for (const c of DATA.cards) { const z = STEP_ZONE[c.step] || "todo"; if (z === "citadel" && c.milestone && closedMs.has(c.milestone)) continue; (byZone[z] ||= []).push(c); }
   const msKey = m => { const p = (m || "").match(/\d+/g); return p ? p.map(Number).reduce((a, v) => a * 100 + v, 0) : 1e9; };
   for (const [zid, list] of Object.entries(byZone)) {
     if (zid === "tower" && DATA.pr && list.length) { harvesterLayout(ZONE[zid], list); continue; }
