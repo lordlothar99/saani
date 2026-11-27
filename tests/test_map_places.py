@@ -49,3 +49,13 @@ def test_the_script_parses(tmp_path):
     js.write_text(script, encoding="utf-8")
     done = subprocess.run(["node", "--check", str(js)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_map_and_every_popup_list_the_same_issues():
+    """The Citadel leaves out the done issues of closed milestones on the map; its popup, the release PR's popup and the tower's tooltip
+    take their cards from the same `zoneCards`, never from `DATA.cards` filtered by step again."""
+    assert "const zoneCards = id => DATA.cards.filter(c => zoneOf(c) === id && shownCard(c));" in PAGE
+    assert "if (shownCard(c)) (byZone[zoneOf(c)] ||= []).push(c)" in PAGE                      # the map's layout
+    assert "const cards = zoneCards(z.id).sort(" in PAGE                                       # a place's popup
+    assert 'cards = zoneCards("tower").sort(' in PAGE                                          # the release PR's popup
+    assert not re.search(r'DATA\.cards\.filter\(c => \(?STEP_ZONE\[c\.step\]', PAGE)

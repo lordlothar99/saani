@@ -1004,13 +1004,18 @@ function sampleRelease(d) {
   d.pr = {...d.pr, inside: [...new Set([...(d.pr.inside || []), ...extra])]};
   return d;
 }
+// The owner, 2026-11-27: the map and every popup list the same issues. A card's place is zoneOf; shownCard says whether the map draws it (the
+// Citadel leaves out the done issues of closed milestones: the server names them, a milestone it does not name is kept); zoneCards(id) is what
+// the place holds: the map's parked vehicles, its count, and the popup's list all come from it.
+const zoneOf = c => STEP_ZONE[c.step] || "todo";
+const shownCard = c => !(zoneOf(c) === "citadel" && c.milestone && (DATA.closed_milestones || []).includes(c.milestone));
+const zoneCards = id => DATA.cards.filter(c => zoneOf(c) === id && shownCard(c));
 function layout() {
   POS = {}; GROUPS = []; HARV = null;
   const byZone = {};
   // The owner, 2026-11-26: the Citadel leaves out the done issues of closed milestones (the server names them; a milestone it does not
   // name is kept)
-  const closedMs = new Set(DATA.closed_milestones || []);
-  for (const c of DATA.cards) { const z = STEP_ZONE[c.step] || "todo"; if (z === "citadel" && c.milestone && closedMs.has(c.milestone)) continue; (byZone[z] ||= []).push(c); }
+  for (const c of DATA.cards) if (shownCard(c)) (byZone[zoneOf(c)] ||= []).push(c);
   const msKey = m => { const p = (m || "").match(/\d+/g); return p ? p.map(Number).reduce((a, v) => a * 100 + v, 0) : 1e9; };
   for (const [zid, list] of Object.entries(byZone)) {
     if (zid === "tower" && DATA.pr && list.length) { harvesterLayout(ZONE[zid], list); continue; }
@@ -1290,7 +1295,7 @@ $("#map").addEventListener("pointerover", e => {
   const b = e.target.closest(".blk"), w = e.target.closest(".wkr"), z = e.target.closest(".plaque"), hv = !b && e.target.closest(".harv");
   if (b) { const c = DATA.cards.find(x => x.number == b.dataset.n); tip.innerHTML = `<span class="n">#${c.number}</span><span class="t">${esc(c.title)}</span><span class="s">${esc(typeInfo(c).word)} · ${esc(STEP_LABEL[c.step] || c.step)} · ${esc(c.milestone || "no milestone")}${c.need ? " · needs you" : ""}</span>${(ZONE[STEP_ZONE[c.step]] || {}).cmd ? `<span class="s">Command: ${esc(ZONE[STEP_ZONE[c.step]].cmd)}</span>` : ""}`; }
   else if (w) { const k = WORKERS[w.dataset.w]; tip.innerHTML = `<span class="n">${esc(k.name)}${k.folder ? " · " + esc(k.folder) : ""}</span><span class="t">${esc(stateWord(k))}</span><span class="s">${esc(k.model || (k.kind === "planned" ? "not hired yet" : "model not recorded"))}</span>`; }
-  else if (hv && DATA.pr) { const n = DATA.cards.filter(c => c.step === "pr").length; tip.innerHTML = `<span class="n">Release PR #${esc(DATA.pr.number)}</span><span class="t">${esc(DATA.pr.title || "")}</span><span class="s">CI ${esc(ciLook(DATA.pr).word)} · ${n} issue${n > 1 ? "s" : ""} on board · click for details and a prompt</span>`; }
+  else if (hv && DATA.pr) { const n = zoneCards("tower").length; tip.innerHTML = `<span class="n">Release PR #${esc(DATA.pr.number)}</span><span class="t">${esc(DATA.pr.title || "")}</span><span class="s">CI ${esc(ciLook(DATA.pr).word)} · ${n} issue${n > 1 ? "s" : ""} on board · click for details and a prompt</span>`; }
   else if (z) { const zz = ZONE[z.dataset.zone]; tip.innerHTML = `<span class="n">${esc(zz.name)}</span><span class="t">${esc(zz.stage)}</span><span class="s">${esc(hintOf(zz))}${zz.id !== "camp" ? " Click for a prompt covering all its issues." : ""}</span>`; }
   else return hideTip();
   tip.hidden = false; moveTip(e);
@@ -1529,7 +1534,7 @@ function placesPanel() {
       secs));
 }
 function zonePanel(z) {
-  const cards = DATA.cards.filter(c => (STEP_ZONE[c.step] || "todo") === z.id).sort((a, b) => a.number - b.number);
+  const cards = zoneCards(z.id).sort((a, b) => a.number - b.number);
   const f = cards.length ? folderFor(cards[0]) : folderFor({step: ""}), prompt = cards.length ? zonePrompt(z, cards) : null;
   const items = cards.length ? el("ul", {class: "zlist"}, cards.map(c => { const li = el("li", {}, el("span", {class: "zdot", style: `background:${typeInfo(c).color}`}), el("b", {}, "#" + c.number), " ", c.title, el("span", {class: "muted"}, " · " + (c.milestone || "no milestone")));
       li.addEventListener("click", () => { openPanel(issuePanel(c)); if (LIVE && !DETAILS[c.number] && !c.detail) fetchDetail(c); }); return li; }))
@@ -1545,7 +1550,7 @@ function zonePanel(z) {
 }
 // The owner, 2026-11-22: the harvester opens its release PR: link, CI, the issues it carries and a prompt for the whole PR
 function prPanel() {
-  const pr = DATA.pr, z = ZONE.tower, cards = DATA.cards.filter(c => c.step === "pr").sort((a, b) => a.number - b.number), ci = ciLook(pr);
+  const pr = DATA.pr, z = ZONE.tower, cards = zoneCards("tower").sort((a, b) => a.number - b.number), ci = ciLook(pr);
   const f = folderFor({step: "pr"}), prompt = cards.length ? zonePrompt(z, cards) : `Prepare the ${INT()} into ${PROD()} pull request.`;
   const items = cards.length ? el("ul", {class: "zlist"}, cards.map(c => { const li = el("li", {}, el("span", {class: "zdot", style: `background:${typeInfo(c).color}`}), el("b", {}, "#" + c.number), " ", c.title, el("span", {class: "muted"}, " · " + (c.milestone || "no milestone")));
       li.addEventListener("click", () => { openPanel(issuePanel(c)); if (LIVE && !DETAILS[c.number] && !c.detail) fetchDetail(c); }); return li; }))
