@@ -448,51 +448,36 @@ def queue_for(issue, statuses_on):
     return "todo" if issue.get("milestone") else "backlog"
 
 
-# ---------------------------------------------------------------- the kanban page: columns are GitHub's statuses (#103)
+# ---------------------------------------------------------------- the kanban page: one column per place of the map (#118)
 
+# The owner, 2026-11-27: the kanban shows the map's places, in the map's flow order and with its names (the Hollow and the Far Outpost never
+# hold issues: no column). A card is in the column of its place on the map: `kanban_place` is `normalize()` of map.html.
 KANBAN_COLUMNS = [
-    ("backlog", "Backlog", "Filed, not released: status Backlog or none. `saani auto pick` skips it: move an issue to Todo when a run may take it."),
-    ("todo", "Todo", "Released: an auto run takes it when it is ready. A badge says why it would not be picked (Auto no, blocked, needs you)."),
-    ("started", "In progress", "Started: an agent works on it in its own folder (a worktree)."),
-    ("review", "In review", "Built and being checked, or merged and waiting to go live: on its branch, on dev, in the release pull request, on production."),
-    ("done", "Done", f"Last {LIVE_DAYS} days: closed. Folded by default."),
+    ("backlog", "Wayfarers' Tents", "Backlog", "Filed, not released: status Backlog or none. `saani auto pick` skips it: set its Type and milestone, then move it to Todo when a run may take it."),
+    ("todo", "The Granary", "Todo", "Released: status Todo, nobody on it yet. An auto run takes it when it is ready; a badge says why it would not (Auto no, blocked, needs you)."),
+    ("you", "Council Rock", "Waiting for you", "Waits for your answer or your action. Copy the card's prompt and paste it to Claude Code."),
+    ("works", "The Workshops", "In progress", "Started or being built: an agent works on it in its own folder (a worktree). Command: /saani:land when it is committed."),
+    ("proving", "Proving Ground", "Testing", "Tests run in its folder, or the last check before it lands. Command: /saani:test (/saani:progress for a slow run)."),
+    ("yard", "The Loading Yard", "Ready to land", "Committed, clean, and its landing tests are green for this very commit: it only waits to land. A new commit sends it back to the workshops. Command: /saani:land."),
+    ("depot", "Caravan Depot", "Integrated", "Merged into the integration branch: goes to production with the next release pull request. Command: /saani:ci pr."),
+    ("tower", "The Refinery", "Release PR", "Carried by the open integration -> production pull request. The light is its CI; red goes back to the integration branch."),
+    ("pad", "Launch Pad", "To deploy", "Merged into production with something to deploy: goes live with the next deploy. Command: /saani:ci merged <pr>."),
+    ("archive", "The Archive", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it. Command: /saani:ci merged <pr>."),
+    ("citadel", "The Citadel", "Done", f"Closed in the last {LIVE_DAYS} days: deployed, closed after merge, or not planned. The done issues of closed milestones are left out, as on the map. Folded by default."),
 ]
-KANBAN_SECTIONS = {
-    "review": [("branch", "On its branch", "Committed in its worktree, tests or review running: not on dev yet."),
-               ("dev", "On dev", "Merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
-               ("pr", "In the release PR", "Carried by the open integration -> production pull request."),
-               ("main", "On production: to deploy", "Merged into production: goes live with the next deploy. Command: /saani:ci merged <pr>."),
-               ("close", "On production: to close", "Merged into production, nothing of it to deploy: close it. Command: /saani:ci merged <pr>."),
-               ("elsewhere", "Not found here", "In review on GitHub, but no worktree or label of it on this PC.")],
-    "done": [("todeploy", "To deploy", "Closed by the merge into production, not deployed yet: it carries in-main until `saani deploy` removes it. Command: /saani:deploy."),
-             ("deployed", "Closed", "Deployed, or closed with nothing to deploy."),
-             ("notplanned", "Not planned and duplicates", "Closed as not planned or as a duplicate.")],
-}
-KANBAN_FLOOR = {"building": "started", "testing": "started", "tested": "started", "dev": "review", "main": "review",
-                "close": "review"}                                                             # a card's place on this PC
-KANBAN_STEPS = ("backlog", "todo", "started", "review")
-KANBAN_SECTION_OF = {"building": "branch", "testing": "branch", "tested": "branch", "main": "main", "close": "close"}
+KANBAN_PLACE_OF = {"you": "you", "building": "works", "testing": "proving", "tested": "yard", "dev": "depot", "main": "pad", "close": "archive",
+                   "live": "citadel"}                                                        # board column -> place (the map's `normalize`)
+KANBAN_PROMPT_OF = {"depot": "dev", "pad": "main", "archive": "close"}                         # place -> the column prompt it uses
 
 
 def kanban_place(card, col, carried=()):
-    """(kanban column, section or None) of a card that sits in board column `col`. The GitHub status decides, but never below where the card
-    is on this PC (a worktree is at least In progress, dev and production at least In review); a closed issue is Done unless it was closed
-    as not planned or a duplicate. A card without a place on this PC (Ready, Waiting for you) is In progress or In review by its status, In
-    progress with a worktree, else Backlog or Todo by its `queue` (an open issue marked Done is not taken by a run: Backlog)."""
-    step = issue_status.step_of(card.get("status"))
-    if col == "live":
-        return "done", "notplanned" if step == "closed" or not_planned(card) else "deployed"
-    if col == "main" and card.get("state") == "CLOSED":          # closed by the merge, not deployed yet: Done, section to deploy
-        return "done", "todeploy"
-    if col in ("ready", "you"):
-        if step not in ("started", "review"):
-            step = "started" if card.get("worktree") else card.get("queue") or "backlog"
-        return step, ("branch" if card.get("worktree") else "elsewhere") if step == "review" else None
-    floor = KANBAN_FLOOR[col]
-    step = max((x for x in (step, floor) if x in KANBAN_STEPS), key=issue_status.rank)
-    if step != "review":
-        return step, None
-    return "review", ("pr" if card["number"] in carried else "dev") if col == "dev" else KANBAN_SECTION_OF[col]
+    """The place of a card that sits in board column `col`, as the map puts it: in the release pull request -> the Refinery; a Ready card is
+    in the Workshops when a session works on it, else in the Wayfarers' Tents (its `queue` says backlog) or the Granary."""
+    if card["number"] in carried:
+        return "tower"
+    if col == "ready":
+        return "works" if card.get("agents") else "backlog" if card.get("queue") == "backlog" else "todo"
+    return KANBAN_PLACE_OF.get(col, "todo")
 
 
 def kanban_why(card):
@@ -512,46 +497,46 @@ def kanban_why(card):
     return out
 
 
-def build_kanban(board, statuses_on, landing=None):
-    """The kanban page's columns when the repo has statuses (else None: the page draws `board` as before): Backlog, Todo, In progress, In
-    review (sections: where the code is), Done (closed in the last days; not planned apart), and `pinned`: every open card that waits for the
-    owner, at any status (it also stays in its own column). `landing`: the issue number joining dev now. Each card is the board's, plus `section`
-    and `badges` (testing, landing, and for Backlog and Todo the reasons a run would not take it)."""
-    if not statuses_on:
-        return None
+def build_kanban(board, landing=None, closed_milestones=()):
+    """The kanban page's columns, one per place of the map, and `pinned`: every open card that waits for the owner, at any place (it also
+    stays in its own column). `landing`: the issue number joining dev now. `closed_milestones`: the Citadel leaves out the done issues of
+    those, as the map does. Each card is the board's, plus `section` (the Citadel's not planned and duplicates) and `badges` (testing,
+    landing, and for Backlog and Todo the reasons a run would not take it). The Refinery column carries the release pull request (`pr`)."""
     pr = next((c.get("pr") for c in board if c["id"] == "dev"), None)
     carried = set((pr or {}).get("inside") or [])
-    cols, pinned = {key: [] for key, _, _ in KANBAN_COLUMNS}, {}
+    left_out = set(closed_milestones or ())
+    cols, pinned = {key: [] for key, _, _, _ in KANBAN_COLUMNS}, {}
     for column in board:
         for card in column["cards"]:
-            col, section = kanban_place(card, column["id"], carried)
-            badges = kanban_why(card) if col in ("backlog", "todo") else []
+            place = kanban_place(card, column["id"], carried)
+            if place == "citadel" and card.get("milestone") in left_out:
+                continue
+            badges = kanban_why(card) if place in ("backlog", "todo") else []
             if column["id"] == "testing":
                 badges.append({"text": "testing", "kind": "info"})
             if column["id"] == "tested":
                 badges.append({"text": "ready to land", "kind": "info"})
             if landing is not None and card["number"] == landing:
                 badges.append({"text": "landing", "kind": "info"})
-            if col == "backlog" and not card.get("need"):                # not released: the prompt is to get it ready, not to start it
+            if place == "backlog" and not card.get("need"):              # not released: the prompt is to get it ready, not to start it
                 card = {**card, "prompt": f"Get #{card['number']} ready for a run: set its Type and milestone, rewrite it in the issue template, "
                                           f"say what blocks it, then tell me whether it may move to Todo."}
-            cols[col].append({**card, "section": section, "badges": badges})
+            apart = place == "citadel" and (issue_status.step_of(card.get("status")) == "closed" or not_planned(card))
+            cols[place].append({**card, "section": "notplanned" if apart else None, "badges": badges})
             if card.get("need") and card.get("state", "OPEN") == "OPEN":          # a closed issue with a leftover label waits for nobody
                 pinned.setdefault(card["number"], card)
     order = lambda c: (milestone_key(c.get("milestone")), c["number"])
     out = []
-    for key, title, hint in KANBAN_COLUMNS:
+    for key, title, stage, hint in KANBAN_COLUMNS:
         cards = sorted(cols[key], key=order)
-        sections = []
-        for sid, stitle, shint in KANBAN_SECTIONS.get(key, []):
-            numbers = [c["number"] for c in cards if c["section"] == sid]
-            if not numbers and not (sid == "pr" and pr):
-                continue
-            sections.append({"id": sid, "title": stitle, "hint": shint, "count": len(numbers),
-                             "pr": pr if sid == "pr" else None,
-                             "prompt": column_prompt("dev", numbers, pr) if sid == "pr" else
-                             column_prompt("main" if sid == "todeploy" else sid, numbers, None) if sid in ("dev", "main", "close", "todeploy") else None})
-        out.append({"id": key, "title": title, "hint": hint, "cards": cards, "sections": sections})
+        numbers = [c["number"] for c in cards]
+        apart = sum(1 for c in cards if c["section"] == "notplanned")
+        sections = [{"id": "notplanned", "title": "Not planned and duplicates", "hint": "Closed as not planned or as a duplicate.",
+                     "count": apart, "pr": None, "prompt": None}] if apart else []
+        prompt = (column_prompt("dev", numbers, pr) if key == "tower"
+                  else column_prompt(KANBAN_PROMPT_OF[key], numbers, None) if key in KANBAN_PROMPT_OF else None)
+        out.append({"id": key, "title": title, "stage": stage, "hint": hint, "cards": cards, "sections": sections, "prompt": prompt,
+                    "pr": pr if key == "tower" else None})
     return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
 
 
@@ -1049,7 +1034,7 @@ def state():
                          for c in projects()],
             "milestones": strips.get("milestones", []), "closed_milestones": strips.get("closed_milestones", []),
             "hygiene": strips.get("hygiene", []),
-            "board": board, "kanban": safe(lambda: build_kanban(board, has_statuses(iss.get("board", [])), int(m.group(2)) if m else None), default=False),
+            "board": board, "kanban": safe(lambda: build_kanban(board, int(m.group(2)) if m else None, strips.get("closed_milestones", [])), default=False),
             "crew": crew, "roster": safe(lambda: roster(defined_agents(), crew), default=[]), "resources": resources(),
             "landing": land, "tests": tst, "phases": [], "ci": safe(lambda: cached("ci", 600, ci)),
             "saani": safe(lambda: cached("saani", 300, saani_version), default={})}

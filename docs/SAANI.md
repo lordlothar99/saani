@@ -191,22 +191,27 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
 ## The map and the kanban page
 `saani ui` (aliases `saani map`, `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed
 every 5 s, read-only.
-- **`/kanban`, the kanban page:** one card per issue, each with what it needs and a "Copy prompt" to paste to Claude Code. On a repo with
-  GitHub issue statuses the columns are the statuses: **Backlog** (status Backlog or none), **Todo**, **In progress**, **In review** and
-  **Done** (closed in the last 7 days, folded by default; Not planned and Duplicate in a closed section of it). The GitHub status decides,
-  never below where the work is on this PC (a worktree is at least In progress; dev and production at least In review). Inside **In
-  review** a section says where the code is: on its branch, on dev, in the release pull request (it keeps its card with the CI in three
-  colours), on production to deploy, on production to close (the status stays In review until the issue is closed). An issue the merge
-  closed (`Closes #n`) that still carries `in-main` is not deployed yet: it sits under **Done**, section **To deploy**, until `saani deploy`
-  removes the label, then under Closed (the map's To deploy zone holds it too), however long ago it was closed. One closed as not planned or
-  as a duplicate stays under Not planned and duplicates, and the hygiene strip flags its `in-main`. **Waiting for you** is a row pinned above the columns: every open issue with `help wanted` or `owner-action`, at any
-  status; it also stays in its own column. Testing, ready to land and landing are badges on the card, with an agent working; a Backlog or Todo card shows
-  why `saani auto pick` would not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the
-  map. Without statuses (or `[status] enabled = "off"`) the page keeps its former columns (Waiting for you, Ready, Building, Testing,
-  Ready to land, Merged, To deploy, To close, Deployed). `/api/state` carries both: `board` (the map's columns, unchanged) and `kanban` (`columns` with
-  `sections`, `pinned`; `null` without statuses); `closed_milestones` (the titles of the project's closed milestones, from the same fetch as the
-  milestone strip: the map's Citadel leaves out their done issues; `[]` when there are none or GitHub cannot be read); the open pull request with its CI in three colours; the Claude Code sessions of
-  the project and what each works on (folder, branch, issue numbers only, never message text); the subagents (defined, planned, built in);
+- **`/kanban`, the kanban page:** one card per issue, each with what it needs and a "Copy prompt" to paste to Claude Code. The columns are
+  the places of the map, in its flow order and with its names, each with its stage under the name: **Wayfarers' Tents** (Backlog: status
+  Backlog or none), **The Granary** (Todo), **Council Rock** (Waiting for you: `help wanted` or `owner-action`), **The Workshops** (In
+  progress: a worktree, or a session works on it), **Proving Ground** (Testing), **The Loading Yard** (Ready to land), **Caravan Depot**
+  (Integrated: on dev), **The Refinery** (Release PR: the open pull request keeps its card with the CI in three colours, and the issues it
+  carries), **Launch Pad** (To deploy: `in-main`), **The Archive** (To close: `in-main`, nothing to deploy) and **The Citadel** (Done: closed in
+  the last 7 days, folded by default; Not planned and Duplicate in a closed section of it). The Hollow (camp) and the Far Outpost never hold
+  issues, so they have no column. A card is in the column of its place on the map, by the same rules (`kanban_place` follows `normalize()` of
+  map.html; the "?" tooltips and the Places and their rules popup of the map say what puts an issue in each place), and the Citadel leaves out
+  the done issues of closed milestones, as on the map. An issue the merge closed (`Closes #n`) that still carries `in-main` is not deployed yet:
+  it sits on the Launch Pad until `saani deploy` removes the label, then in the Citadel, however long ago it was closed. One closed as not
+  planned or as a duplicate stays under Not planned and duplicates, and the hygiene strip flags its `in-main`. **Waiting for you** is also a
+  row pinned above the columns: every open issue with `help wanted` or `owner-action`, wherever it is; it also stays in its own column.
+  Testing, ready to land and landing are badges on the card, with an agent working; a Backlog or Todo card shows why `saani auto pick` would
+  not take it (Auto no or partly, blocked by #n, needs the owner, no Type). Ideas stay off the page, as on the map. The columns do not depend
+  on GitHub statuses: without them (or with `[status] enabled = "off"`) a milestone puts a Ready card in The Granary, none in the Wayfarers'
+  Tents. `/api/state` carries both: `board` (the board's columns, unchanged) and `kanban` (`columns`, each with `stage`, `sections`, `prompt`
+  and, for The Refinery, `pr`; `pinned`); `closed_milestones` (the titles of the project's closed milestones, from the same fetch as the
+  milestone strip: the Citadel, on both pages, leaves out their done issues; `[]` when there are none or GitHub cannot be read); the open pull
+  request with its CI in three colours; the Claude Code sessions of the project and what each works on (folder, branch, issue numbers only,
+  never message text); the subagents (defined, planned, built in);
   the PC's load.
 - **`/`, the map (the default page; `/map` and the old `/board` open it too):** the same issues as a desert war-game board seen from above.
   Each lifecycle step is a zone along a road from START (bottom left) to END (top right), with branches (to deploy or to close) and the ways
