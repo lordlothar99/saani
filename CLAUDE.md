@@ -4,6 +4,8 @@
 - The code lives here: `saani.py` (the command), `saani/` (the package), `tests/`, `docs/`, the Claude Code plugin (the repo root is the plugin: `.claude-plugin/`, `skills/`, `bin/`; docs/PLUGIN.md).
 - Saani builds itself: `python -I saani.py start <n>` and `python -I saani.py land` (settings in saani.toml). Tests: `python -m pytest -q`.
 - Branches: `main` is released, `dev` is where work happens. Commits say what, `refs #n`, and the trailers `Why:` and `Undo:`.
+- An owner's answer lives on the issue (its At a glance row or a comment), never only in a chat: an auto run reads nothing else.
+- A change to `saani/guard.py` is made in an attended session; an auto run comments it as blocked with the exact lines.
 - Standard library only, Python 3.11 or newer. Commands for the owner are Windows PowerShell 5.1.
 - Saani is generic: no project's name, path, issue number or private data in its code, docs, tests or samples (samples use an invented
   project, acme/webshop).

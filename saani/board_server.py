@@ -285,6 +285,12 @@ def need_of(labels):
     return None
 
 
+def not_planned(issue):
+    """True for an issue closed as not planned or as a duplicate (its state reason, or its GitHub status category)."""
+    return (issue.get("state_reason") or "").upper() in ("NOT_PLANNED", "DUPLICATE") or \
+        ((issue.get("status") or {}).get("category") in ("not_planned", "duplicate"))
+
+
 def column_for(issue, worktree=None, testing=(), closing=()):
     """The status page column of an issue (see the module's docstring), or None when it stays off the map."""
     lab = cfg().labels
@@ -298,7 +304,8 @@ def column_for(issue, worktree=None, testing=(), closing=()):
     if worktree and (worktree.get("ahead") or worktree.get("dirty")):
         return "building"
     if issue.get("state") == "CLOSED":
-        return "live"
+        # the merge closed it; until the deploy removes in-main it is not live yet (a project without a deploy never sets in-main)
+        return "main" if lab.get("in_main", "in-main") in labels and not not_planned(issue) else "live"
     if lab.get("in_main", "in-main") in labels:
         return "close" if issue["number"] in closing else "main"
     if lab.get("in_dev", "in-dev") in labels:
@@ -457,7 +464,8 @@ KANBAN_SECTIONS = {
                ("main", "On production: to deploy", "Merged into production: goes live with the next deploy. Command: /saani:ci merged <pr>."),
                ("close", "On production: to close", "Merged into production, nothing of it to deploy: close it. Command: /saani:ci merged <pr>."),
                ("elsewhere", "Not found here", "In review on GitHub, but no worktree or label of it on this PC.")],
-    "done": [("deployed", "Closed", "Deployed or closed after the merge."),
+    "done": [("todeploy", "To deploy", "Closed by the merge into production, not deployed yet: it carries in-main until `saani deploy` removes it. Command: /saani:deploy."),
+             ("deployed", "Closed", "Deployed, or closed with nothing to deploy."),
              ("notplanned", "Not planned and duplicates", "Closed as not planned or as a duplicate.")],
 }
 KANBAN_FLOOR = {"building": "started", "testing": "started", "tested": "started", "dev": "review", "main": "review",
@@ -473,7 +481,9 @@ def kanban_place(card, col, carried=()):
     progress with a worktree, else Backlog or Todo by its `queue` (an open issue marked Done is not taken by a run: Backlog)."""
     step = issue_status.step_of(card.get("status"))
     if col == "live":
-        return "done", "notplanned" if step == "closed" else "deployed"
+        return "done", "notplanned" if step == "closed" or not_planned(card) else "deployed"
+    if col == "main" and card.get("state") == "CLOSED":          # closed by the merge, not deployed yet: Done, section to deploy
+        return "done", "todeploy"
     if col in ("ready", "you"):
         if step not in ("started", "review"):
             step = "started" if card.get("worktree") else card.get("queue") or "backlog"
@@ -540,7 +550,7 @@ def build_kanban(board, statuses_on, landing=None):
             sections.append({"id": sid, "title": stitle, "hint": shint, "count": len(numbers),
                              "pr": pr if sid == "pr" else None,
                              "prompt": column_prompt("dev", numbers, pr) if sid == "pr" else
-                             column_prompt(sid, numbers, None) if sid in ("dev", "main", "close") else None})
+                             column_prompt("main" if sid == "todeploy" else sid, numbers, None) if sid in ("dev", "main", "close", "todeploy") else None})
         out.append({"id": key, "title": title, "hint": hint, "cards": cards, "sections": sections})
     return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
 
@@ -857,11 +867,12 @@ def issue_types(state, since=None):
 
 
 def gh_issues(*filters):
-    rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,updatedAt,body", timeout=60)
+    rows = run("gh", "issue", "list", "--repo", cfg().repo, *filters, "--json", "number,title,labels,milestone,state,stateReason,updatedAt,body", timeout=60)
     state = filters[filters.index("--state") + 1] if "--state" in filters else "open"
     since = next(iter(re.findall(r"closed:>=(\d{4}-\d{2}-\d{2})", " ".join(filters))), None)
     types, statuses = issue_types(state, since)
-    return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"), "type": types.get(r["number"]),
+    return [{"number": r["number"], "title": r["title"][:120], "state": r.get("state", "OPEN"), "state_reason": r.get("stateReason"),
+             "type": types.get(r["number"]),
              "status": statuses.get(r["number"]),
              "labels": [x["name"] for x in r.get("labels", [])], "milestone": (r.get("milestone") or {}).get("title"),
              "glance": glance.parse(r.get("body"))}                  # the body itself stays here: the panel asks for it on demand
@@ -871,9 +882,12 @@ def gh_issues(*filters):
 def issues():
     since = (datetime.date.today() - datetime.timedelta(days=LIVE_DAYS)).isoformat()
     queries = {"open": ("--state", "open", "--limit", "300"),
-               "closed": ("--state", "closed", "--search", f"closed:>={since}", "--limit", "40")}
+               "closed": ("--state", "closed", "--search", f"closed:>={since}", "--limit", "40"),
+               # closed by the merge, not deployed yet: still in-main, however long ago (To deploy does not expire after LIVE_DAYS)
+               "waiting": ("--state", "closed", "--label", cfg().labels["in_main"], "--limit", "100")}
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
+    got["closed"] += [i for i in got.pop("waiting") if i["number"] not in {x["number"] for x in got["closed"]}]
     # Both pages place every open issue (an `idea` stays off, see column_for), assigned to the owner or not, and the recently closed ones.
     return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"]}
 
@@ -903,8 +917,10 @@ def hygiene(open_issues, closed_issues, landed, labels):
     no_milestone: open (not an idea) with no milestone; landed_unlabelled: commits between production and the integration branch name
     them, yet they carry neither in-dev nor in-main."""
     life = {labels["in_dev"], labels["in_main"]}
+    # a closed issue keeps in-main until the deploy (To deploy), unless the project has no deploy or it was closed as not planned / duplicate
+    stale = lambda i: bool((life if not cfg().deploy_command or not_planned(i) else {labels["in_dev"]}) & set(i["labels"]))  # noqa: E731
     found = {
-        "closed_labelled": [i["number"] for i in closed_issues if life & set(i["labels"])],
+        "closed_labelled": [i["number"] for i in closed_issues if stale(i)],
         "no_milestone": [i["number"] for i in open_issues if not i.get("milestone") and labels["idea"] not in i["labels"]],
         "landed_unlabelled": [i["number"] for i in open_issues if i["number"] in landed and not life & set(i["labels"])],
     }

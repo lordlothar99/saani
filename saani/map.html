@@ -1125,7 +1125,7 @@ function render() {
 let WORKERS = {};
 
 // ------------------------------------------------------------------ HUD
-const HYGIENE = {closed_labelled: "Closed, still labelled in-dev / in-main", no_milestone: "No milestone", landed_unlabelled: "On dev without in-dev"};
+const HYGIENE = {closed_labelled: "Closed, still labelled in-dev (or in-main with nothing to deploy)", no_milestone: "No milestone", landed_unlabelled: "On dev without in-dev"};
 function summary(byZone, ws) {
   const need = DATA.cards.filter(c => c.need).length, prog = (byZone.works || []).length + (byZone.proving || []).length + (byZone.yard || []).length;
   const pr = DATA.pr, ci = pr ? (pr.ci || {}).state || "none" : null;

@@ -10,7 +10,9 @@ Steps, each printed, the first failure stops with what to do next:
      comes and kept in build/saani-deploy-<UTC>.log of the main checkout; a success is exit 0 and, when `log_ok` is set, a match of that
      regex in the output;
   5. the prod tag moved to the deployed commit and pushed (the one force push Saani does: the moving tag, nothing else), `### ✔ Deployed`
-     on each issue in the range that carries the in_main label, and those issues closed.
+     on each issue in the range (open or closed, once per commit) with the in_main / in_dev labels removed, and a GitHub Deployment
+     (REST deployments + a `success` status, environment `[deploy] environment`). No issue is closed here: the merge of the release
+     pull request closed them (`Closes #n`, docs/SAANI.md).
 `--skip-ci "<why>"` (the owner's, typed by hand; never an auto run's) skips step 1 only, when GitHub will not run the CI: it prints what the
 gate said and the reason, writes both into the deploy log, and every other step runs as usual.
 `--dry-run` stops after step 3 and prints the deploy command. The key's path is only passed through: it is printed as `<key>`, the key's
@@ -24,7 +26,7 @@ import subprocess
 import sys
 import threading
 
-from . import ci, comments, config, glance, kpis, merge, status
+from . import ci, comments, config, glance, kpis, merge
 
 
 class Stop(Exception):
@@ -173,13 +175,15 @@ def step_issues(gh, sha):
     c = cfg()
     found, blocked = [], []
     if not gh.ok("git", "rev-parse", "-q", "--verify", f"refs/tags/{c.prod_tag}"):
-        # A first deploy: there is no range, so the issues merged and not yet deployed are the open ones labelled in_main.
-        print(f"2. no {c.prod_tag} tag: a first deploy; the open {c.labels['in_main']} issues are read for the marker, none is commented or closed")
-        for issue in gh.json("gh", "issue", "list", "--repo", c.repo, "--label", c.labels["in_main"], "--state", "open", "--limit", "200",
-                             "--json", "number,body") or []:
+        # A first deploy: there is no range, so the issues merged and not yet deployed are those labelled in_main, open or closed (the merge
+        # of the release pull request closed most of them).
+        print(f"2. no {c.prod_tag} tag: a first deploy; the {c.labels['in_main']} issues (open or closed) are read for the marker and recorded")
+        for issue in gh.json("gh", "issue", "list", "--repo", c.repo, "--label", c.labels["in_main"], "--state", "all", "--limit", "200",
+                             "--json", "number,body,labels") or []:
             text = says_do_not_deploy(issue.get("body"))
             if text:
                 blocked.append((issue["number"], text))
+            found.append((issue["number"], [lab.get("name") for lab in issue.get("labels", [])]))
     else:
         for n in issues_in(gh.read("git", "log", "--format=%B%x1e", f"{c.prod_tag}..{sha}")):
             issue = gh.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "number,body,labels") or {}
@@ -243,17 +247,17 @@ def step_deploy(gh, sha, skipped=None):
         sink.write(f"# exit: {outcome(code)}\n")
     if code is None:
         raise Stop(f"the deploy timed out after {c.deploy_timeout_minutes:g} minutes and was stopped; the log is {log}. The server may be "
-                   f"half-done: look at it before running saani deploy again. The prod tag was not moved, no issue closed")
+                   f"half-done: look at it before running saani deploy again. The prod tag was not moved, no issue commented")
     if not succeeded(code, out, c.deploy_log_ok):
         why = f"exit {code}" if code != 0 else f"the output does not match log_ok ({c.deploy_log_ok})"
-        raise Stop(f"the deploy failed ({why}); the log is {log}. The prod tag was not moved, no issue closed: read the log, fix, "
+        raise Stop(f"the deploy failed ({why}); the log is {log}. The prod tag was not moved, no issue commented: read the log, fix, "
                    f"and run saani deploy again (the deployer agent reads a log and says what it means)")
     print(f"4. deploy ok (exit 0{', log_ok matched' if c.deploy_log_ok else ''}); log: {log.name}")
     return log.name
 
 
 def step_after(gh, sha, found, log_name):
-    """Step 5: the prod tag, then `✔ Deployed` and the close on each issue of the range that carries the in_main label. Returns 0 or 1."""
+    """Step 5: the prod tag, then `✔ Deployed` and the label removal on each issue of the range, then the GitHub Deployment. Returns 0 or 1."""
     c = cfg()
     code = 0
     try:
@@ -264,18 +268,63 @@ def step_after(gh, sha, found, log_name):
         print(f"5. the deploy is done but the {c.prod_tag} tag was not moved: {e}\n   Move it by hand: git tag -f {c.prod_tag} {sha}, "
               f"then git push origin refs/tags/{c.prod_tag} --force")
         code = 1
-    for n, labels in found:
-        if c.labels["in_main"] not in labels:
-            print(f"   #{n}: not labelled {c.labels['in_main']}: left as it is")
-            continue
+    for n, labels in found:                       # open or closed: the merge closed them, the deploy only records itself
+        drop = labels_to_drop(labels)
         try:
             posted = comments.try_post(n, "deployed", {"Commit": sha[:7], "Log": log_name}, io=gh, labels=False, once=sha[:7])
-            gh.write("gh", "issue", "close", str(n), "--repo", c.repo, "--reason", "completed")
-            print(f"   #{n}: " + ("commented ✔ Deployed and " if posted else "already commented (or the comment failed); ") + "closed")
+            if drop:
+                gh.write("gh", "issue", "edit", str(n), "--repo", c.repo, *[x for label in drop for x in ("--remove-label", label)])
+            print(f"   #{n}: " + ("commented ✔ Deployed" if posted else "already commented (or the comment failed)")
+                  + (f"; removed {', '.join(drop)}" if drop else ""))
         except SystemExit as e:
-            print(f"   #{n}: could not comment or close ({e}): do it by hand")
+            print(f"   #{n}: could not comment or remove the label ({e}): do it by hand")
             code = 1
-    return code
+    return code | record_deployment(gh, sha, log_name)
+
+
+def labels_to_drop(labels):
+    """The in_main / in_dev label names among `labels`: what a deploy takes off an issue (in this order)."""
+    c = cfg()
+    return [c.labels[k] for k in ("in_main", "in_dev") if c.labels[k] in (labels or [])]
+
+
+def deployment_payload(sha, log_name=""):
+    """The body of the REST call that creates the GitHub Deployment: no required contexts (the deployer's own step 1 judged the CI, and
+    --skip-ci may have skipped it), no auto merge."""
+    c = cfg()
+    return {"ref": sha, "environment": c.deploy_environment, "auto_merge": False, "required_contexts": [],
+            "production_environment": c.deploy_environment == "production", "transient_environment": False,
+            "description": f"saani deploy {sha[:7]}" + (f" ({log_name})" if log_name else "")}
+
+
+def record_deployment(gh, sha, log_name):
+    """A GitHub Deployment on the deployed commit (REST `deployments`) and its `success` status. Returns 0, or 1 when it could not be
+    recorded (the deploy itself is done: it says so and what to do)."""
+    c = cfg()
+    body = c.root / "build" / (log_name.rsplit(".", 1)[0] + "-deployment.json")
+    try:
+        body.parent.mkdir(parents=True, exist_ok=True)
+        body.write_text(json.dumps(deployment_payload(sha, log_name)), encoding="utf-8")
+        made = json.loads(gh.write("gh", "api", f"repos/{c.repo}/deployments", "--method", "POST", "--input", str(body)) or "{}")
+        number = made.get("id")
+        if not number:
+            raise SystemExit("GitHub gave no deployment id")
+        gh.write("gh", "api", f"repos/{c.repo}/deployments/{number}/statuses", "--method", "POST",
+                 "-f", "state=success", "-f", f"environment={c.deploy_environment}", "-f", f"description=deployed {sha[:7]}")
+    except (SystemExit, OSError, ValueError) as e:
+        print(f"5. the deploy is done but the GitHub Deployment was not recorded: {e}\n   Record it by hand if you want it on the repository's Deployments")
+        return 1
+    print(f"5. GitHub Deployment recorded: {sha[:7]} to {c.deploy_environment}, status success")
+    return 0
+
+
+def preview(found, sha):
+    """The dry run's lines for step 5: the comments, the label changes and the Deployment (nothing is written)."""
+    c = cfg()
+    for n, labels in found:
+        drop = labels_to_drop(labels)
+        print(f"dry-run: #{n}: comment ### ✔ Deployed ({sha[:7]})" + (f"; remove {', '.join(drop)}" if drop else "") + "; the issue is not closed here")
+    print(f"dry-run: GitHub Deployment of {sha[:7]} to {c.deploy_environment}, then its success status")
 
 
 def run(args):
@@ -316,10 +365,7 @@ def run(args):
         if getattr(args, "dry_run", False):
             print("dry-run: would deploy with: " + " ".join(expand(c.deploy_command, True, sha))
                   + (" (CI gate skipped: --skip-ci)" if skipped else ""))
-            dry = ci.Run(True)
-            for n, labels in found:                 # closing sets Done (GitHub does it by itself); shown here, set by no one
-                if c.labels["in_main"] in labels:
-                    status.advance(n, "done", dry)
+            preview(found, sha)
             return 0
         log_name = step_deploy(gh, sha, skipped)
         code = step_after(gh, sha, found, log_name)
@@ -335,7 +381,7 @@ def run(args):
 
 
 def add_parsers(sub):
-    p = sub.add_parser("deploy", help="deploy production: CI green, no issue says do not deploy, checks, dry run, deploy, log, prod tag, close issues")
+    p = sub.add_parser("deploy", help="deploy production: CI green, no issue says do not deploy, checks, dry run, deploy, log, prod tag, comment the issues, record a GitHub Deployment")
     p.add_argument("--dry-run", action="store_true", help="steps 1 to 3 only, then print the deploy command (the key shown as <key>)")
     p.add_argument("--skip-ci", metavar="WHY", help="skip step 1, the CI gate, for this reason (printed and written into the deploy log); "
                    "the owner's, never an auto run's")

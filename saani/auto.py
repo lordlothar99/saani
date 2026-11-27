@@ -739,12 +739,17 @@ def mark_pending(run_id):
         raise SystemExit(f"saani auto on: cannot write the guard's mark in {folder}: {e}")
 
 
-def clear_pending(run_id):
-    """Removes the mark of `mark_pending`, if there is one."""
+def clear_pending(run_id, grace=0):
+    """Removes the mark of `mark_pending`, if there is one and it is older than `grace` seconds (by the file's time; a time that cannot
+    be read, or lies in the future, counts as young)."""
+    import time
     from . import guard
     if valid_id(run_id):
+        path = os.path.join(guard.registry(), run_id + PENDING)
         try:
-            os.remove(os.path.join(guard.registry(), run_id + PENDING))
+            if grace and not 0 <= time.time() - os.stat(path).st_mtime >= grace:
+                return
+            os.remove(path)
         except OSError:
             pass
 
@@ -793,7 +798,7 @@ def end_guard_entries(run_id):
     """Removes the guard's registry entries of this run made for this repository (every session that registered it), through the guard's
     `turn_off`; the entries of another project's run with the same id stay; and the run's `.pending` mark. Returns how many entries."""
     from . import guard
-    clear_pending(run_id)
+    clear_pending(run_id, PENDING_GRACE)      # a younger mark may be another project's `saani auto on` with the same id (a minute stamp)
     mine = own_entries(run_id)
     if len(mine) == len([1 for _, e in entries() if e.get("id") == run_id]):      # no other project holds this id: the guard's own call
         return guard.turn_off_run(run_id) or 0

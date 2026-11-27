@@ -15,13 +15,16 @@ quiet() {
   local all=("$1"/*) hit=("$1"/.[s]aani)
   [ "${#all[@]}" -gt 0 ] || return 1
   [ "${#hit[@]}" -gt 0 ] || return 0
+  [ -r "$1/.saani" ] && [ -x "$1/.saani" ] || return 1          # a folder that lists but cannot be searched is not read for sure
   all=("$1"/.saani/*) hit=("$1"/.saani/[a]uto)
   [ "${#all[@]}" -gt 0 ] || return 1
   [ "${#hit[@]}" -gt 0 ] || return 0
+  [ -r "$1/.saani/auto" ] && [ -x "$1/.saani/auto" ] || return 1
   all=("$1"/.saani/auto/*) hit=("$1"/.saani/auto/*.json "$1"/.saani/auto/*.over "$1"/.saani/auto/*.pending)
   [ "${#all[@]}" -gt 0 ] && [ "${#hit[@]}" -eq 0 ]
 }
 if [ "$#" -eq 1 ] && [ "$1" = guard ]; then
+  unset GLOBIGNORE            # it would hide the entries from the globs below: a registered session would take the fast path
   shopt -s nullglob dotglob nocaseglob
   case "$OSTYPE" in
     msys*|cygwin*) homes=("${HOME//\\//}" "${USERPROFILE//\\//}") ;;     # a Windows Python's home is USERPROFILE

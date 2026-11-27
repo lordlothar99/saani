@@ -53,7 +53,7 @@ The full design (principles, landing rules, test tiers, CI placement, the guard,
 - A GitHub repo with an integration branch (e.g. `dev`) and a production branch (e.g. `main`), and issues that have a
   [Type](https://docs.github.com/en/issues/tracking-your-work-with-issues/configuring-issues/managing-issue-types-in-an-organization)
   (Task, Feature, Bug), or labels mapped to branch prefixes
-- Optional: GitHub's issue statuses. Saani moves them (In progress, In review; GitHub sets Done when the deploy closes the issue) and
+- Optional: GitHub's issue statuses. Saani moves them (In progress, In review; GitHub sets Done when the merge of the release pull request closes the issue) and
   `auto` takes every ready issue except those in Backlog: Backlog is your "not now", drag a card out of it to let a run take it. Without them, Saani works from its labels
 
 Developed and used on Windows (PowerShell 5.1). The code has guards for macOS and Linux, but they are not tested there yet.
@@ -123,7 +123,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | `saani comment <n> <kind>` | `/saani:comment 42 blocked` | a status comment on an issue and its label (`start`, `land` and `ci` post theirs by themselves) |
 | `saani review diff <n>` | `/saani:review diff 42` | the diff a review must read: the commits after the issue's last recorded review, or all of it |
 | `saani merge [PR] [--deploy [--skip-ci WHY]] [--dry-run]` | `/saani:merge` | merge the green `dev` -> `main` pull request, relabel, clean up, create the release when the version changed |
-| `saani deploy [--dry-run] [--skip-ci WHY]` | `/saani:deploy` | CI green, no issue says "⛔ Do not deploy", checks, dry run, deploy, log, prod tag, issues closed; `--skip-ci` (the owner's) skips only the CI gate, the reason goes into the log |
+| `saani deploy [--dry-run] [--skip-ci WHY]` | `/saani:deploy` | CI green, no issue says "⛔ Do not deploy", checks, dry run, deploy, log, prod tag, issues commented, GitHub Deployment recorded; `--skip-ci` (the owner's) skips only the CI gate, the reason goes into the log |
 | `saani release notes <milestone> \| --pr N` | `/saani:release notes v1.0.0` | the release notes from the issues: by Type, each with its Result line and its commits |
 | `saani release pr [--dry-run]` | `/saani:release pr` | opens or updates the one dev -> main release pull request: the notes, `Closes #n` / `refs #n` lines, the milestone; refuses unless the version is bumped |
 | `saani release create <version>` | `/saani:release create 1.2.0` | the GitHub release by hand (`saani merge` makes it by itself) |
@@ -143,7 +143,7 @@ A slash command for every `saani` command, the auto skill, the worker subagents 
 [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Status
-On `dev` after v1.4.1 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
+On `dev` after v1.4.2 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
 change goes through `saani start` and `saani land`, and its releases are made by `saani merge`. The roadmap is in the issues.
 
 ## Contributing

@@ -109,7 +109,7 @@ def test_merge_dry_run_prints_the_status_of_the_issues_it_would_move(merge_world
     merge_world.gh = MergeDryGh()
     assert test_merge.merge.run_command(test_merge.args(dry=True)) == 0
     out = capsys.readouterr().out
-    assert "dry-run: #12 status -> In review" in out and "#13" not in out
+    assert "dry-run: #12 status -> In review" in out and "#13:" not in out and "#13 status" not in out    # #13 is named in the summary, but not on dev: no change
     assert merge_world.gh.written == []
 
 
@@ -158,27 +158,21 @@ class DeployStatusGh(DeployGh):
         return super().json(*cmd)
 
 
-def test_deploy_dry_run_prints_the_done_status_of_each_issue(deploy_world, statuses, capsys, monkeypatch):  # noqa: F811
+def test_deploy_dry_run_sets_no_status_and_closes_nothing(deploy_world, statuses, capsys, monkeypatch):  # noqa: F811
     import test_deploy
     deploy_world.gh = DeployStatusGh()
-
-    def make(dry):                                                          # like ci.Run: the flag is the caller's
-        deploy_world.gh.dry = dry
-        return deploy_world.gh
-    monkeypatch.setattr(ci, "Run", make)
     assert test_deploy.deploy.run(test_deploy.args(dry=True)) == 0
     out = capsys.readouterr().out
-    assert deploy_world.gh.graphql_dry and all(deploy_world.gh.graphql_dry)      # every status read went through a dry Run
-    assert "dry-run: #1 status -> Done" in out and "dry-run: #2 status -> Done" in out
+    assert "status ->" not in out and "dry-run: GitHub Deployment of" in out
     assert not deploy_world.gh.wrote("gh", "issue", "close") and ids(deploy_world.gh.calls) == []
 
 
-def test_deploy_leaves_Done_to_github_s_close(deploy_world, statuses):  # noqa: F811
+def test_deploy_leaves_Done_to_the_merge_s_close(deploy_world, statuses):  # noqa: F811
     import test_deploy
     deploy_world.gh = DeployStatusGh()
     assert test_deploy.deploy.run(test_deploy.args()) == 0
-    assert ids(deploy_world.gh.calls) == []                                 # no status write: closing as completed sets Done
-    assert [c[3] for c in deploy_world.gh.wrote("gh", "issue", "close")] == ["1", "2"]
+    assert ids(deploy_world.gh.calls) == []                                 # no status write: the merge closed the issues, which sets Done
+    assert not deploy_world.gh.wrote("gh", "issue", "close")
 
 
 # ---------------------------------------------------------------- a no-op says why

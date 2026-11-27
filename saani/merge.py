@@ -1,7 +1,8 @@
 """saani merge [PR] [--deploy [--skip-ci WHY]] [--dry-run]: the owner's one word at the end of an auto run (docs/SAANI.md, "Two modes").
 
 Merges the green integration -> production pull request with a merge commit (never squash or rebase: the trailers stay; the head branch is
-never deleted: it is the integration branch), then does what `saani ci merged <PR>` does (relabel, remove the finished auto runs). With
+never deleted: it is the integration branch). GitHub closes the issues the pull request lists with `Closes #n` (Saani closes none by hand;
+it prints which closed and which, `refs`, stay open), then `saani ci merged <PR>` relabels and removes the finished auto runs. With
 `--deploy` it then runs the deployer (`saani.deploy.run`, with `--skip-ci` if given: it skips the deploy's CI gate, never this pull
 request's); without one it stops after the merge and exits 2.
 Standard library only; the checks are pure functions (tests/test_merge.py).
@@ -186,7 +187,8 @@ def merge_it(args):
     print(f"#{n} {pr.get('title', '')}: {pr['headRefName']} -> {pr['baseRefName']}, mergeable, {c.ci_status_context} green on {sha[:7]}")
     if args.dry_run:
         print(f"dry-run: gh pr merge {n} --merge")
-        print(f"dry-run: then saani ci merged {n} (relabel, remove the finished auto runs)")
+        print(f"dry-run: GitHub closes the `Closes #n` issues at the merge (Saani closes none by hand); then saani ci merged {n} "
+              f"(relabel the issues, remove the finished auto runs)")
         try:
             ci.preview_status(gh, n)
         except (SystemExit, OSError, ValueError) as e:
