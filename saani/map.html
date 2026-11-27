@@ -216,6 +216,32 @@ button{font:inherit;color:inherit}
 .crit li.done{color:var(--mute)}
 .crit .box{width:13px;height:13px;margin-top:4px;border:1px solid var(--sand)}
 .crit li.done .box{background:var(--sand)}
+.qm{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;margin-left:10px;border:1.5px solid var(--sand);border-radius:50%;font:600 13px/1 var(--mono);color:var(--sand);cursor:help;vertical-align:middle}
+.qm:hover,.qm[aria-expanded="true"]{background:var(--sand);color:var(--night)}
+.qm:focus-visible{outline:2px solid var(--bone);outline-offset:2px}
+#critTip{position:fixed;z-index:40;width:min(400px,calc(100vw - 24px));max-height:min(75vh,620px);overflow:auto;padding:14px 16px;background:var(--slab-hi);border:1px solid var(--edge-hi);box-shadow:0 14px 40px rgba(0,0,0,.55);font-size:14px;line-height:1.45;color:var(--bone);pointer-events:none}
+#critTip[hidden]{display:none}
+#critTip.pinned{pointer-events:auto}
+#critTip h4{margin:0 0 2px;font:600 15px/1.3 var(--body);color:var(--bone)}
+.rule-lead{margin:8px 0 6px;font:500 11px/1.3 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--amber)}
+.rule-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:14px}
+.rule-list>li{display:grid;grid-template-columns:18px 1fr;gap:6px}
+.rule-list>li::before{content:"\2713";color:var(--ok);font-weight:700}
+.rule-list b{color:var(--sand);font-weight:600}
+.rule-list>li.no::before{content:"\2717";color:var(--alert)}
+.rule-list ul{margin:4px 0 0;padding-left:16px;display:grid;gap:3px;list-style:"\2013  "}
+.rule code{font:12.5px var(--mono);background:rgba(227,196,150,.1);padding:1px 4px}
+#critTip code{font:12.5px var(--mono);background:rgba(227,196,150,.1);padding:1px 4px}
+.rule-next{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--edge);color:var(--dust);font-size:13.5px}
+.rule-next b{color:var(--sand)}
+.rule-note{margin:6px 0 0;color:var(--dust);font-size:13.5px}
+.body.one{display:block}
+.place-sec{margin:0 0 18px;padding:0 0 18px;border-bottom:1px solid var(--edge)}
+.place-sec h3{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 6px;font:600 17px/1.3 var(--body);letter-spacing:0;text-transform:none;color:var(--bone)}
+.place-sec .muted{margin:0 0 4px}
+.order{margin:0 0 22px;padding:0 0 18px 20px;display:grid;gap:4px;font-size:14px;color:var(--bone);border-bottom:1px solid var(--edge)}
+.places-btn{display:block;margin-top:12px;text-align:center}
+@media (max-width:760px){#critTip{left:12px!important;right:12px;width:auto}}
 .grid{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:14px}
 .grid dt{font:500 11px/1.9 var(--mono);color:var(--mute);text-transform:uppercase;letter-spacing:.08em}
 .grid dd{margin:0;color:var(--bone);min-width:0;overflow-wrap:anywhere}
@@ -336,7 +362,7 @@ a{color:var(--amber)}
   <text y="-9" text-anchor="middle" class="cmp-n">N</text></svg>
  <div class="sv-r"><div class="scale"><span id="sc-bar"></span><b id="sc-txt">50 m</b></div><div class="sv-xy" id="sv-xy" title="Where the pointer is: metres east of the board's west corner, metres north of its south corner">E — · N —</div></div>
 </div>
-<div class="hud zoom"><button class="btn" id="zout" type="button" aria-label="Zoom out">−</button><span class="pct" id="pct">100%</span><button class="btn" id="zin" type="button" aria-label="Zoom in">+</button><button class="btn" id="zfit" type="button">Fit</button><details class="legend" id="legend"><summary class="btn" aria-label="What the map shows" title="What the map shows">?</summary><div class="hud legend-pop"><button class="x" type="button" aria-label="Close the signs">×</button><h3 class="legend-h">Signs</h3><ul id="legend-list"></ul><p class="legend-ver" id="legend-ver"></p></div></details></div>
+<div class="hud zoom"><button class="btn" id="zout" type="button" aria-label="Zoom out">−</button><span class="pct" id="pct">100%</span><button class="btn" id="zin" type="button" aria-label="Zoom in">+</button><button class="btn" id="zfit" type="button">Fit</button><details class="legend" id="legend"><summary class="btn" aria-label="What the map shows" title="What the map shows">?</summary><div class="hud legend-pop"><button class="x" type="button" aria-label="Close the signs">×</button><h3 class="legend-h">Signs</h3><ul id="legend-list"></ul><button class="btn places-btn" id="places-help" type="button">Places and their rules</button><p class="legend-ver" id="legend-ver"></p></div></details></div>
 
 <div id="tip" hidden></div>
 <div id="veil" class="veil" hidden></div>
@@ -1309,7 +1335,7 @@ let PANEL_FROM = null, closeTimer = 0;
 $("#map").addEventListener("pointerdown", e => { PANEL_FROM = [e.clientX, e.clientY]; }, true);
 function openPanel(node) {
   lastFocus = document.activeElement; clearTimeout(closeTimer);
-  const v = $("#veil"); v.innerHTML = ""; v.append(node); v.hidden = false; v.classList.remove("closing", "open", "settled"); hideTip();
+  const v = $("#veil"); v.innerHTML = ""; v.append(node); v.hidden = false; v.classList.remove("closing", "open", "settled"); hideTip(); hideCrit();
   const p = v.querySelector(".panel");
   if (p && PANEL_FROM) { const r = p.getBoundingClientRect(); p.style.transformOrigin = `${(PANEL_FROM[0] - r.left).toFixed(0)}px ${(PANEL_FROM[1] - r.top).toFixed(0)}px`; }
   void v.offsetWidth; v.classList.add("open");
@@ -1318,6 +1344,7 @@ function openPanel(node) {
 }
 function closePanel() {
   const v = $("#veil"); if (v.hidden) return;
+  hideCrit();
   const p = v.querySelector(".panel"); if (p && PANEL_FROM && !p.style.transformOrigin) { const r = p.getBoundingClientRect(); p.style.transformOrigin = `${(PANEL_FROM[0] - r.left).toFixed(0)}px ${(PANEL_FROM[1] - r.top).toFixed(0)}px`; }
   v.classList.remove("open", "settled"); v.classList.add("closing");
   closeTimer = setTimeout(() => { v.hidden = true; v.innerHTML = ""; v.classList.remove("closing"); }, RM ? 0 : 310);
@@ -1399,6 +1426,108 @@ function zonePrompt(z, cards) {
   if (say === undefined) return `Take care of ${list} (stage "${z.stage}").`;
   return say && (z.cmd && z.id !== "proving" ? `${say} (${z.cmd})` : say);
 }
+// ------------------------------------------------------------------ the criteria: what puts an issue in each place
+// The owner, 2026-11-27: every place says in plain words which tag (label), status, branch, worktree or pull request puts an issue in it:
+// a "?" on its popup (a tooltip) and a help popup listing them all (the "?" menu, bottom right). These follow column_for / queue_for in
+// board_server.py and normalize() above: change one, change the other (tests/test_map_places.py checks that no place is missing).
+const L = k => LAB(k) || {in_dev: "in-dev", in_main: "in-main", idea: "idea"}[k];
+function criteriaOf(id) {
+  const q = s => "`" + s + "`", dev = q(L("in_dev")), main = q(L("in_main")), ans = q(L("answer")), act = q(L("act")), int = INT(), prod = PROD();
+  const none = ["Labels", `none of ${dev}, ${main}, ${ans}, ${act}`], noTree = ["Worktree and branch", "none yet: `saani start` has not been run on it"],
+        noSession = ["Claude session", "none is working on it"];
+  return {
+    backlog: {rows: [["Issue", "open"], ["GitHub status", "Backlog, or no status (a project without GitHub statuses: the issue has no milestone)"], none, noTree, noSession],
+      next: "You set its status to Todo: it moves to The Granary."},
+    todo: {rows: [["Issue", "open"], ["GitHub status", "Todo (In progress or In review also count when nobody is working on it); a project without GitHub statuses: the issue has a milestone"], none, noTree, noSession],
+      next: "`saani start <n>`, or an auto run, creates its worktree and branch: it moves to The Workshops."},
+    you: {rows: [["Issue", "open"], ["Label", [`${ans}: it waits for your answer`, `${act}: it waits for you to do something`]], ["Not labelled", `${dev} or ${main}`],
+        ["Worktree", "none, or nothing in it yet (no commit, no edit)"], ["GitHub status", "does not matter"]],
+      next: "You answer and remove the label: it goes back to where its work stands (The Granary or The Workshops)."},
+    works: {rows: [["Issue", `open, and not labelled ${dev} or ${main}`],
+        ["One of these", ["its worktree holds commits that are not landed yet, or edits that are not committed (branch `task/<n>-...`)",
+          `its worktree exists but is still empty (just started), and it has no ${ans} or ${act} label`, "it has no worktree, but a Claude session is working on it"]],
+        ["Not", "its tests are running (Proving Ground), or its landing tests are green (Loading Yard)"]],
+      next: "Committed and tests started (`saani test`, `saani land`): The Proving Ground. Landed: The Caravan Depot."},
+    camp: {note: "No issue lives here. Workers (Claude Code sessions and subagents) that are not on an issue rest here."},
+    proving: {rows: [["Tests", "running now in its worktree: `saani test`, or the final check of `saani land`"], ["Worktree", "the issue's own (branch `task/<n>-...`)"],
+        ["Priority", "this place wins over every other one"]],
+      next: "Green: The Loading Yard. A failure: back to The Workshops."},
+    yard: {rows: [["Worktree", `its branch has commits that ${q(int)} does not have yet`], ["Edits", "nothing uncommitted in the worktree"], ["Tests", "the landing tests are green for this exact commit"]],
+      next: `\`saani land\` merges it into ${q(int)}: The Caravan Depot. A new commit resets the tests: back to The Workshops.`},
+    depot: {rows: [["Issue", "open"], ["Label", `${dev} (its code is on ${q(int)}: \`saani land\` sets the label)`],
+        ["Pull request", "not carried by the open release pull request, or no release pull request is open"]],
+      next: `The release pull request ${q(int)} to ${q(prod)} names it: The Refinery.`},
+    tower: {rows: [["Issue", `open, labelled ${dev}`], ["Pull request", `named by the open release pull request ${q(int)} to ${q(prod)} (its commits or its description say \`refs #n\` or \`Closes #n\`)`]],
+      note: "The beacon is that pull request's CI: green, red, or yellow while it runs. Without an open pull request this place is empty.",
+      next: `\`saani merge\` merges it into ${q(prod)}: the issues it \`Closes\` are closed, the others get ${main}.`},
+    pad: {rows: [["Label", `${main} (merged into ${q(prod)})`], ["Issue", "open, or closed by the merge and not deployed yet"],
+        ["Something to deploy", "an open issue: at least one of its commits changes a deployed file (`[deploy] paths`); a closed one: nothing more is needed"],
+        ["Not", "closed as not planned or as a duplicate"]],
+      next: `\`saani deploy\` removes ${main}: a closed issue moves to The Citadel.`},
+    archive: {rows: [["Issue", "open"], ["Label", main], ["Nothing to deploy", "none of its commits changes a deployed file (tooling, docs, tests); a project with no `[deploy] paths` never puts an issue here"]],
+      next: "You close it, citing the merge commit: it moves to The Citadel."},
+    outpost: {note: "Nothing puts an issue here yet: the live map has no rule for it. Only the sample data shows it (a checklist of the live system, waiting for you)."},
+    citadel: {rows: [["Issue", "closed"], ["Closed", `in the last ${7} days`], ["Label", `not ${main} (otherwise it is still waiting to be deployed)`],
+        ["Also here", `an issue closed as not planned or as a duplicate, even with ${main}`]],
+      note: "Done issues of closed milestones are left out."},
+  }[id] || {};
+}
+const fmt = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+function critNode(z) {
+  const c = criteriaOf(z.id);
+  const li = ([k, v]) => { const s = el("span", {html: `<b>${esc(k)}:</b> ` + (Array.isArray(v) ? "" : fmt(v))}); if (Array.isArray(v)) s.append(el("ul", {}, v.map(t => el("li", {html: fmt(t)})))); return el("li", {class: k === "Not" ? "no" : null}, s); };
+  return el("div", {class: "rule"},
+    c.rows ? el("p", {class: "rule-lead"}, "An issue is here when all of these are true") : null,
+    c.rows ? el("ul", {class: "rule-list"}, c.rows.map(li)) : null,
+    c.note ? el("p", {class: "rule-note", html: fmt(c.note)}) : null,
+    c.next ? el("p", {class: "rule-next", html: "<b>Then</b> " + fmt(c.next)}) : null);
+}
+let critBtn = null, critPinned = false;
+function hideCrit() {
+  const t = $("#critTip"); if (t) t.hidden = true;
+  if (critBtn) { critBtn.setAttribute("aria-expanded", "false"); critBtn.removeAttribute("aria-describedby"); }
+  critBtn = null; critPinned = false;
+}
+function showCrit(btn, pin) {
+  if (critBtn && critBtn !== btn) hideCrit();
+  const z = ZONE[btn.dataset.zone]; let t = $("#critTip");
+  if (!t) { t = el("div", {id: "critTip", role: "tooltip", hidden: true}); document.body.append(t); }
+  t.replaceChildren(el("h4", {}, criteriaOf(z.id).rows ? `Why is an issue in ${z.name}?` : z.name), critNode(z));
+  t.hidden = false; t.classList.toggle("pinned", !!pin); critBtn = btn; critPinned = !!pin;
+  btn.setAttribute("aria-expanded", "true"); btn.setAttribute("aria-describedby", "critTip");
+  const r = btn.getBoundingClientRect(), w = t.offsetWidth, h = t.offsetHeight;
+  let top = r.bottom + 8; if (top + h > innerHeight - 12) top = Math.max(12, r.top - h - 8);
+  t.style.left = Math.min(Math.max(12, r.left), Math.max(12, innerWidth - w - 12)) + "px"; t.style.top = top + "px";
+}
+function qmark(z) {
+  const b = el("button", {class: "qm", type: "button", "data-zone": z.id, "aria-label": `What puts an issue in ${z.name}`, "aria-expanded": "false", title: ""}, "?");
+  b.addEventListener("mouseenter", () => { if (!critPinned) showCrit(b, false); });
+  b.addEventListener("mouseleave", () => { if (!critPinned) hideCrit(); });
+  b.addEventListener("focus", () => { if (!critPinned) showCrit(b, false); });
+  b.addEventListener("blur", () => { if (!critPinned) hideCrit(); });
+  b.addEventListener("click", e => { e.stopPropagation(); if (critBtn === b && critPinned) hideCrit(); else showCrit(b, true); });
+  return b;
+}
+addEventListener("keydown", e => { if (e.key === "Escape" && critBtn) { hideCrit(); e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+addEventListener("pointerdown", e => { if (critBtn && !e.target.closest("#critTip, .qm")) hideCrit(); }, true);
+// The owner, 2026-11-27: the help popup of the "?" menu: every place and what puts an issue in it
+function placesPanel() {
+  const order = ZONES.filter(z => z.id !== "camp").concat(ZONE.camp);
+  const first = [`Labelled ${"`" + L("idea") + "`"} (and no worktree): not on the map at all`, "Its tests are running: The Proving Ground", "Its landing tests are green on its last commit: The Loading Yard",
+    "Its worktree holds commits or edits: The Workshops", "Closed: The Launch Pad (still labelled " + "`" + L("in_main") + "`" + ") or The Citadel",
+    "Labelled " + "`" + L("in_main") + "`" + ": The Launch Pad, or The Archive when nothing is to be deployed",
+    "Labelled " + "`" + L("in_dev") + "`" + ": The Refinery when the release pull request carries it, else The Caravan Depot",
+    `Labelled ${"`" + L("answer") + "`"} or ${"`" + L("act") + "`"}: Council Rock`, "Has a worktree, or a Claude session works on it: The Workshops",
+    "Otherwise: The Granary (status Todo) or The Wayfarers' Tents (Backlog, or no status)"];
+  const secs = order.map(z => el("section", {class: "place-sec"}, el("h3", {}, z.name, el("span", {class: "tag"}, z.stage)), el("p", {class: "muted"}, hintOf(z)), critNode(z)));
+  return el("div", {class: "panel", role: "dialog", "aria-modal": "true", "aria-label": "Places and their rules"},
+    el("header", {}, el("div", {class: "big"}, "?"), el("div", {}, el("h2", {}, "Places and their rules"), el("div", {class: "chips"}, el("span", {class: "tag"}, `${order.length} places`))),
+      el("button", {class: "x", type: "button", "aria-label": "Close", onclick: closePanel}, "×")),
+    el("div", {class: "body one"},
+      el("div", {class: "sec"}, el("h3", {}, "Which place wins"), el("p", {class: "muted"}, "An issue sits in exactly one place. When it fits several, the first line below that matches decides:"),
+        el("ol", {class: "order"}, first.map(t => el("li", {html: fmt(t)})))),
+      secs));
+}
 function zonePanel(z) {
   const cards = DATA.cards.filter(c => (STEP_ZONE[c.step] || "todo") === z.id).sort((a, b) => a.number - b.number);
   const f = cards.length ? folderFor(cards[0]) : folderFor({step: ""}), prompt = cards.length ? zonePrompt(z, cards) : null;
@@ -1410,7 +1539,7 @@ function zonePanel(z) {
     prompt ? el("div", {class: "prompt"}, prompt) : el("div", {class: "prompt muted"}, cards.length ? "Nothing to do: they are done." : "Nothing to do here."),
     prompt ? el("div", {class: "copy"}, copyButton(() => `Folder: ${f.path} (branch ${f.branch})\n${prompt}`)) : null);
   return el("div", {class: "panel", role: "dialog", "aria-modal": "true", "aria-label": `Zone ${z.name}`},
-    el("header", {}, el("div", {class: "big"}, String(cards.length)), el("div", {}, el("h2", {}, z.name), el("div", {class: "chips"}, el("span", {class: "tag"}, z.stage), z.cmd ? el("span", {class: "tag"}, z.cmd) : null)),
+    el("header", {}, el("div", {class: "big"}, String(cards.length)), el("div", {}, el("h2", {}, z.name, qmark(z)), el("div", {class: "chips"}, el("span", {class: "tag"}, z.stage), z.cmd ? el("span", {class: "tag"}, z.cmd) : null)),
       el("button", {class: "x", type: "button", "aria-label": "Close", onclick: closePanel}, "×")),
     el("div", {class: "body"}, el("div", {}, el("div", {class: "sec"}, el("h3", {}, "What happens here"), el("p", {}, hintOf(z))), el("div", {class: "sec"}, el("h3", {}, `At this stage · ${cards.length}`), items)), el("div", {})), foot);
 }
@@ -1425,7 +1554,7 @@ function prPanel() {
     el("div", {class: "folder"}, "Paste in a Claude Code chat opened in ", el("b", {}, f.path), ` (branch ${f.branch}, ${f.why})`),
     el("div", {class: "prompt"}, prompt), el("div", {class: "copy"}, copyButton(() => `Folder: ${f.path} (branch ${f.branch})\n${prompt}`)));
   return el("div", {class: "panel", role: "dialog", "aria-modal": "true", "aria-label": `Pull request ${pr.number}`},
-    el("header", {}, el("div", {class: "big"}, "#" + pr.number), el("div", {}, el("h2", {}, pr.title || "Release pull request"),
+    el("header", {}, el("div", {class: "big"}, "#" + pr.number), el("div", {}, el("h2", {}, pr.title || "Release pull request", qmark(ZONE.tower)),
       el("div", {class: "chips"}, el("span", {class: "tag", style: `border-color:${ci.col};color:${ci.col}`}, "CI " + ci.word), el("span", {class: "tag"}, `${INT()} → ${PROD()}`), el("span", {class: "tag"}, `${cards.length} issue${cards.length === 1 ? "" : "s"}`))),
       el("button", {class: "x", type: "button", "aria-label": "Close", onclick: closePanel}, "×")),
     el("div", {class: "body"},
@@ -1743,6 +1872,7 @@ $("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const c = DA
 $("#ms").addEventListener("change", e => { FILTER.ms = e.target.value; applyFilter(); });
 $("#lr").addEventListener("change", e => { FILTER.lr = e.target.value; applyFilter(); });
 $("#legend .x").addEventListener("click", () => { $("#legend").open = false; });
+$("#places-help").addEventListener("click", e => { const r = e.currentTarget.getBoundingClientRect(); PANEL_FROM = [r.left + r.width / 2, r.top + r.height / 2]; $("#legend").open = false; openPanel(placesPanel()); });
 $("#summary").addEventListener("click", e => { const b = e.target.closest(".chip"); if (!b) return; FILTER.chip = FILTER.chip === b.dataset.chip ? "" : b.dataset.chip; render(); });
 $("#demo").addEventListener("click", () => demo(!demoTimer));
 $("#proj").addEventListener("change", e => switchProject(e.target.value));

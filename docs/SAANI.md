@@ -226,7 +226,10 @@ every 5 s, read-only.
   worker's panel lists all the runs of its role). The release pull request is the harvester: hover for its CI, click to open its link, the
   issues it carries and a prompt for the whole PR. Hover for a summary, click for the full panel (context, acceptance criteria, history,
   auto fit, the issue's GitHub status, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch; the signs (what each shape and colour
-  means) open from the "?" button in the zoom panel. A Status panel shows how many agents are working and the release pull request's CI
+  means) open from the "?" button in the zoom panel, which also has a **Places and their rules** button: a help popup listing every place with what
+  puts an issue in it (#116). Each place's popup has its own "?" next to the title, a tooltip in plain words: the issue's state, GitHub status, labels, worktree
+  and branch, tests and pull request that must all be true, and what moves it on. Both read one table in map.html (`criteriaOf`), which follows `column_for` and
+  `queue_for` in board_server.py: a change to one is a change to the other (tests/test_map_places.py fails when a place has no entry). A Status panel shows how many agents are working and the release pull request's CI
   light (green passed, yellow running, red failed; click it for the PR panel).
 - While Saani does not answer, the map keeps the last data on screen, shows "Stale" (since when) and asks less often (every 10, 20, 40,
   then 60 s, back to 5 s once it answers). A hidden browser tab stops asking and pauses the animations. Switching project crosses a
