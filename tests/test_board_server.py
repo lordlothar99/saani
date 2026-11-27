@@ -149,7 +149,7 @@ def test_two_running_subagents_of_one_role_keep_both_runs_with_their_issues_and_
 
 def test_the_columns_have_short_names_and_their_explanations_are_tooltips():
     """Ready, Building, Testing, Ready to land, Merged on dev, To deploy, To close, Deployed; the explanations as tooltips."""
-    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Ready to land", "Merged", "To deploy", "To close", "Deployed"]
+    assert [t for _, t, _ in fp.COLUMNS] == ["Waiting for you", "Ready", "Building", "Testing", "Ready to land", "Merged", "To deploy", "To close", "Live checks", "Deployed"]
     assert "Last 7 days" in fp.COLUMNS[-1][2]
     assert '"data-tip":c.hint' in fp.page() and "content:attr(data-tip)" in fp.page()
 
@@ -824,7 +824,7 @@ def closed_issue(n, status):
     return {**listed(n, status), "state": "CLOSED"}
 
 
-PLACES = ["backlog", "todo", "you", "works", "proving", "yard", "depot", "tower", "pad", "archive", "citadel"]
+PLACES = ["backlog", "todo", "you", "works", "proving", "yard", "depot", "tower", "pad", "archive", "outpost", "citadel"]
 
 
 def map_places():
@@ -841,11 +841,93 @@ def test_the_columns_are_the_maps_places_in_order():
 
 
 def test_the_columns_are_the_places_of_the_map_that_hold_issues():
-    """A place added to or renamed in ZONES shows up here: the Hollow and the Far Outpost never hold issues, the others each have a column."""
-    never = {"camp", "outpost"}
+    """A place added to or renamed in ZONES shows up here: the Hollow never holds issues, the others each have a column."""
+    never = {"camp"}
     zones = [(i, n) for i, n in map_places() if i not in never]
     assert zones == [(c["id"], c["title"]) for c in kanban([listed(1, TODO)])[0]["columns"]]
     assert {i for i, _ in map_places()} == set(PLACES) | never
+
+
+# ---------------------------------------------------------------- the Far Outpost: the live checks of a released milestone (#120)
+
+def outpost_issue(n, title=None, state="OPEN", labels=(), milestone="v1.0"):
+    return {"number": n, "title": title or f"t{n}", "labels": list(labels), "state": state, "milestone": milestone, "state_reason": None}
+
+
+def checks_column(issues, number):
+    board = fp.build_board(issues, [], set(), [], [])
+    return next((c["id"] for c in board if number in [x["number"] for x in c["cards"]]), None)
+
+
+def test_the_live_checks_of_a_released_milestone_are_in_the_far_outpost(cfg):
+    cfg.deploy_command = []
+    checks = outpost_issue(9, "Live checks v1.0")
+    assert checks_column([outpost_issue(1, state="CLOSED"), outpost_issue(2, labels=["in-main"]), checks], 9) == "checks"
+    assert checks_column([outpost_issue(1, state="CLOSED"), checks], 9) == "checks"
+    assert checks_column([outpost_issue(1), checks], 9) == "ready"                              # an open issue: not released yet
+    assert checks_column([outpost_issue(1, labels=["in-dev"]), checks], 9) == "ready"           # on dev only: not released
+    assert checks_column([outpost_issue(1, labels=["in-dev"]), outpost_issue(9, "Live checks v1.0", labels=["in-dev"])], 9) == "dev"
+
+
+def test_a_closed_in_main_issue_holds_the_live_checks_back_only_with_a_deploy_command(cfg):
+    waiting = outpost_issue(1, state="CLOSED", labels=["in-main"])
+    checks = outpost_issue(9, "live checks v1.0")                                              # any case
+    cfg.deploy_command = ["deploy.sh"]
+    assert checks_column([waiting, checks], 9) == "ready"                                      # still To deploy
+    assert checks_column([{**waiting, "state_reason": "NOT_PLANNED"}, checks], 9) == "checks"  # never deployed
+    assert checks_column([{**waiting, "labels": []}, checks], 9) == "checks"                   # deployed
+    cfg.deploy_command = []
+    assert checks_column([waiting, checks], 9) == "checks"                                     # nothing would remove in-main
+
+
+def test_only_an_open_live_checks_issue_with_a_milestone_goes_to_the_far_outpost(cfg):
+    cfg.deploy_command = []
+    done = outpost_issue(1, state="CLOSED")
+    assert checks_column([done, outpost_issue(9, "Live checks v1.0", state="CLOSED")], 9) == "live"      # closed: the Citadel
+    assert checks_column([done, outpost_issue(9, "Live checks v1.0", labels=["idea"])], 9) is None        # an idea stays off
+    assert checks_column([done, outpost_issue(9, "Live checks v1.0", milestone=None)], 9) == "ready"       # no milestone
+    assert checks_column([done, outpost_issue(9, "Checks of v1.0")], 9) == "ready"                         # another title
+    assert checks_column([done, outpost_issue(9, "Live checks v1.0", milestone="v2.0")], 9) == "ready"     # another milestone, nothing in it
+    assert checks_column([outpost_issue(2, milestone="v2.0"), done, outpost_issue(9, "Live checks v1.0")], 9) == "checks"   # another milestone's open issue
+
+
+def test_a_waiting_for_you_label_does_not_keep_the_live_checks_out_of_the_far_outpost(cfg):
+    cfg.deploy_command = []
+    for label in ("help wanted", "owner-action"):
+        assert checks_column([outpost_issue(1, state="CLOSED"), outpost_issue(9, "Live checks v1.0", labels=[label])], 9) == "checks"
+
+
+def test_an_open_idea_issue_of_the_milestone_holds_the_release_back(cfg):
+    cfg.deploy_command = []
+    issues = [outpost_issue(1, state="CLOSED"), outpost_issue(2, labels=["idea"]), outpost_issue(9, "Live checks v1.0")]
+    assert checks_column(issues, 9) == "ready"
+
+
+def test_the_closed_issues_of_a_milestone_with_live_checks_are_fetched_whatever_their_age(cfg, monkeypatch):
+    """All the milestone's issues closed 8+ days ago: the release is still seen; a milestone with only its Live checks issue is not released."""
+    cfg.deploy_command = []
+    calls = []
+
+    def fake_gh_issues(*f):
+        calls.append(f)
+        if "--milestone" in f:
+            return [outpost_issue(1, state="CLOSED")] if f[f.index("--milestone") + 1] == "v1.0" else []
+        if "open" in f:
+            return [outpost_issue(9, "Live checks v1.0"), outpost_issue(19, "Live checks v2.0", milestone="v2.0")]
+        return []
+    monkeypatch.setattr(fp, "gh_issues", fake_gh_issues)
+    got = fp.issues()
+    assert [i["number"] for i in got["settled"]] == [1] and not [i for i in got["closed"] if i["number"] == 1]    # not placed on the board
+    assert sum("--milestone" in c for c in calls) == 2
+    board = fp.build_board(got["board"], [], set(), [], [], None, (), got["settled"])
+    placed = {c["id"]: [x["number"] for x in c["cards"]] for c in board}
+    assert placed["checks"] == [9] and placed["ready"] == [19] and placed["live"] == []
+
+
+def test_the_kanban_puts_the_live_checks_in_the_far_outpost_column(cfg):
+    cfg.deploy_command = []
+    _, got = kanban([outpost_issue(1, state="CLOSED"), outpost_issue(9, "Live checks v1.0")])
+    assert got["outpost"] == [(9, None)] and got["citadel"] == [(1, None)] and got["todo"] == []
 
 
 def test_each_status_puts_its_issue_in_its_place():

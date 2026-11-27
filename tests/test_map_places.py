@@ -26,9 +26,16 @@ def test_every_place_has_criteria():
 
 def test_a_place_without_issues_says_so_instead_of_listing_rules():
     block = PAGE.split("function criteriaOf(id) {", 1)[1].split("}[id] || {};", 1)[0]
-    for place in ("camp", "outpost"):
+    for place in ("camp",):
         entry = re.search(r"^    %s: \{(.*?)\n(?=    \w+: \{|$)" % place, block, re.M | re.S).group(1)
         assert "note:" in entry and "rows:" not in entry
+
+
+def test_the_far_outpost_has_real_rows_and_the_board_column_maps_to_it():
+    block = PAGE.split("function criteriaOf(id) {", 1)[1].split("}[id] || {};", 1)[0]
+    entry = re.search(r"^    outpost: \{(.*?)\n(?=    \w+: \{|$)", block, re.M | re.S).group(1)
+    assert "rows:" in entry and "Live checks" in entry and "Nothing puts an issue here" not in entry
+    assert 'checks: "checks"' in PAGE.split("function normalize(d) {", 1)[1].split("\n}", 1)[0]
 
 
 def test_the_popups_and_the_menu_are_wired():

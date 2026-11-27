@@ -196,12 +196,19 @@ every 5 s, read-only.
   Backlog or none), **The Granary** (Todo), **Council Rock** (Waiting for you: `help wanted` or `owner-action`), **The Workshops** (In
   progress: a worktree, or a session works on it), **Proving Ground** (Testing), **The Loading Yard** (Ready to land), **Caravan Depot**
   (Integrated: on dev), **The Refinery** (Release PR: the open pull request keeps its card with the CI in three colours, and the issues it
-  carries), **Launch Pad** (To deploy: `in-main`), **The Archive** (To close: `in-main`, nothing to deploy) and **The Citadel** (Done: closed in
-  the last 7 days, folded by default; Not planned and Duplicate in a closed section of it). The Hollow (camp) and the Far Outpost never hold
-  issues, so they have no column. A card is in the column of its place on the map, by the same rules (`kanban_place` follows `normalize()` of
+  carries), **Launch Pad** (To deploy: `in-main`), **The Archive** (To close: `in-main`, nothing to deploy), **The Far Outpost** (Live checks: see below) and **The Citadel** (Done: closed in
+  the last 7 days, folded by default; Not planned and Duplicate in a closed section of it). The Hollow (camp) never holds
+  issues, so it has no column. An open issue is in The Far Outpost when its title starts with "Live checks" (any case) and it has a
+  milestone, and that milestone's release is merged: every other issue of the milestone is closed or carries `in-main`, and, when the
+  project has a `[deploy] command`, none of them is still To deploy (a closed issue labelled `in-main`). The board's column for it is
+  `checks`. It stays there until you close it, then it goes to The Citadel; before the release it stays in its normal place; an `idea`
+  stays off the map, yet an open `idea` issue of the milestone holds the release back like any open issue. Its labels (`help wanted`,
+  `owner-action`) do not matter. The milestone's issues closed more than 7 days ago still count: for each milestone with an open "Live
+  checks" issue the board makes one more `gh issue list` call (its closed issues, at most 100). A milestone with only its Live checks
+  issue is never released. A card is in the column of its place on the map, by the same rules (`kanban_place` follows `normalize()` of
   map.html; the "?" tooltips and the Places and their rules popup of the map say what puts an issue in each place), and the Citadel leaves out
   the done issues of closed milestones, as on the map. An issue the merge closed (`Closes #n`) that still carries `in-main` is not deployed yet:
-  it sits on the Launch Pad until `saani deploy` removes the label, then in the Citadel, however long ago it was closed. One closed as not
+  it sits on the Launch Pad until `saani deploy` removes the label, then in the Citadel, however long ago it was closed. This needs a `[deploy] command`: a project without one never runs a deploy, so a closed issue is never To deploy there, whatever its labels (it is in the Citadel, and the hygiene strip flags its `in-main`), and the closed `in-main` issues are not even fetched. One closed as not
   planned or as a duplicate stays under Not planned and duplicates, and the hygiene strip flags its `in-main`. **Waiting for you** is also a
   row pinned above the columns: every open issue with `help wanted` or `owner-action`, wherever it is; it also stays in its own column.
   Testing, ready to land and landing are badges on the card, with an agent working; a Backlog or Todo card shows why `saani auto pick` would
@@ -572,7 +579,7 @@ between them. Saani moves an issue's status forward at its steps, next to the la
 | the review starts (`saani comment <n> review`), through the fixes | In review | |
 | `saani land` (`On dev`; `--no-comment` sets it anyway) | In review | `in-dev` |
 | `saani ci merged` / `saani merge` (`On main`), an issue that stays open (`refs`) | In review | `in-main` |
-| the merge of the release pull request, an issue it lists with `Closes #n` | Done (GitHub closes it and sets the status) | `in-main` if the project has a deploy (To deploy until then), else `in-dev` removed |
+| the merge of the release pull request, an issue it lists with `Closes #n` | Done (GitHub closes it and sets the status) | `in-main` if the project has a `[deploy] command` (To deploy until then; without one a closed issue is never To deploy), else `in-dev` removed |
 | `saani deploy` (`Deployed`; closes nothing, records a GitHub Deployment) | unchanged | `in-main` / `in-dev` removed |
 | you close it as not planned or duplicate | Not planned / Duplicate | |
 | it needs you | unchanged | `help wanted` / `owner-action` (there is no Blocked status) |

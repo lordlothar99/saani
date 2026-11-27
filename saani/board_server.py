@@ -10,7 +10,7 @@ The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
    your answer; the `act` label: your action), Ready (open, nothing blocks it, nobody on it yet), Building (a worktree with work in it), Testing (tests
    running in its worktree, or the final check of `saani land`), Merged on the integration branch (`in_dev`), To deploy (`in_main`),
-   Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to Claude Code
+   Live checks (the open "Live checks ..." issue of a milestone whose release is merged), Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to Claude Code
    (prompt_for): the owner talks to one agent, Claude Code, which starts the workers.
 2. Who works on what? The Claude Code sessions of the project's folders active in the last hours, from the metadata of the session files in
    ~/.claude/projects/ (folder, branch, last activity, model, and the issue numbers of the worktree folders its lines name; only those
@@ -67,6 +67,8 @@ COLUMNS = [
     ("dev", "Merged", "Done and merged into the integration branch: goes to production with the next pull request. Command: /saani:ci pr."),
     ("main", "To deploy", "Merged into production: ready to deploy. Goes live with the next deploy. Command: /saani:ci merged <pr>."),
     ("close", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it. Command: /saani:ci merged <pr>."),
+    ("checks", "Live checks", "The checklist of the live system (an open issue titled \"Live checks ...\") of a milestone whose release is merged: every other issue of "
+                              "it is closed or on production, and none waits for the deploy. It stays until you close it."),
     ("live", "Deployed", f"Last {LIVE_DAYS} days: deployed and closed. Folded by default."),
 ]
 WORKTREE_IN_TEXT = re.compile(r"[\\/]([^\\/\s\"']+-wt)[\\/]+(\d+)-")
@@ -291,8 +293,36 @@ def not_planned(issue):
         ((issue.get("status") or {}).get("category") in ("not_planned", "duplicate"))
 
 
-def column_for(issue, worktree=None, testing=(), closing=()):
-    """The status page column of an issue (see the module's docstring), or None when it stays off the map."""
+def is_live_checks(issue):
+    """True for an issue titled "Live checks ..." (any case) that has a milestone: the checklist of the live system (as `milestones` reads it)."""
+    return bool(issue.get("milestone")) and (issue.get("title") or "").lower().startswith("live checks")
+
+
+def released_milestones(issues):
+    """The milestones whose release is merged, from the issues the board holds (every open one, the recently closed ones and, with a
+    `[deploy] command`, the closed ones still on in-main) and `issues()`'s `settled` (every closed issue, whenever it closed, of a milestone
+    with an open "Live checks" issue): no other issue of the milestone is open without the in-main label, and, with a deploy command, none
+    is closed and still waiting for the deploy (in-main, not closed as not planned). The "Live checks" issues themselves do not count, and a
+    milestone with no other issue is not released. An open `idea` issue of the milestone holds the release back like any open issue."""
+    in_main = cfg().labels.get("in_main", "in-main")
+    seen, held = set(), set()
+    for i in issues:
+        m = i.get("milestone")
+        if not m or is_live_checks(i):
+            continue
+        seen.add(m)
+        labelled = in_main in (i.get("labels") or [])
+        if i.get("state", "OPEN") == "OPEN":
+            if not labelled:
+                held.add(m)
+        elif labelled and cfg().deploy_command and not not_planned(i):
+            held.add(m)
+    return seen - held
+
+
+def column_for(issue, worktree=None, testing=(), closing=(), checks=()):
+    """The status page column of an issue (see the module's docstring), or None when it stays off the map. `checks`: the milestones whose
+    release is merged (`released_milestones`): their open "Live checks" issue is in the Live checks column (#120)."""
     lab = cfg().labels
     labels = set(issue.get("labels") or [])
     if lab.get("idea", "idea") in labels and not worktree:
@@ -303,9 +333,12 @@ def column_for(issue, worktree=None, testing=(), closing=()):
         return "tested"
     if worktree and (worktree.get("ahead") or worktree.get("dirty")):
         return "building"
+    if issue.get("state", "OPEN") == "OPEN" and is_live_checks(issue) and issue["milestone"] in checks:
+        return "checks"
     if issue.get("state") == "CLOSED":
-        # the merge closed it; until the deploy removes in-main it is not live yet (a project without a deploy never sets in-main)
-        return "main" if lab.get("in_main", "in-main") in labels and not not_planned(issue) else "live"
+        # the merge closed it; until the deploy removes in-main it is not live yet. A project without `[deploy] command` never runs a deploy,
+        # so nothing would remove the label: there a closed issue is never To deploy, whatever its labels (#115)
+        return "main" if cfg().deploy_command and lab.get("in_main", "in-main") in labels and not not_planned(issue) else "live"
     if lab.get("in_main", "in-main") in labels:
         return "close" if issue["number"] in closing else "main"
     if lab.get("in_dev", "in-dev") in labels:
@@ -450,8 +483,8 @@ def queue_for(issue, statuses_on):
 
 # ---------------------------------------------------------------- the kanban page: one column per place of the map (#118)
 
-# The owner, 2026-11-27: the kanban shows the map's places, in the map's flow order and with its names (the Hollow and the Far Outpost never
-# hold issues: no column). A card is in the column of its place on the map: `kanban_place` is `normalize()` of map.html.
+# The owner, 2026-11-27: the kanban shows the map's places, in the map's flow order and with its names (the Hollow never
+# holds issues: no column). A card is in the column of its place on the map: `kanban_place` is `normalize()` of map.html.
 KANBAN_COLUMNS = [
     ("backlog", "Wayfarers' Tents", "Backlog", "Filed, not released: status Backlog or none. `saani auto pick` skips it: set its Type and milestone, then move it to Todo when a run may take it."),
     ("todo", "The Granary", "Todo", "Released: status Todo, nobody on it yet. An auto run takes it when it is ready; a badge says why it would not (Auto no, blocked, needs you)."),
@@ -463,10 +496,11 @@ KANBAN_COLUMNS = [
     ("tower", "The Refinery", "Release PR", "Carried by the open integration -> production pull request. The light is its CI; red goes back to the integration branch."),
     ("pad", "Launch Pad", "To deploy", "Merged into production with something to deploy: goes live with the next deploy. Command: /saani:ci merged <pr>."),
     ("archive", "The Archive", "To close", "Merged into production, nothing of it to deploy (it touches no `[deploy] paths`): close it. Command: /saani:ci merged <pr>."),
+    ("outpost", "The Far Outpost", "Live checks", "The checklist of the live system (an open issue titled \"Live checks ...\") of a milestone whose release is merged: every other issue of it is closed or on production, and none waits for the deploy. Close it when you have checked the live system."),
     ("citadel", "The Citadel", "Done", f"Closed in the last {LIVE_DAYS} days: deployed, closed after merge, or not planned. The done issues of closed milestones are left out, as on the map. Folded by default."),
 ]
 KANBAN_PLACE_OF = {"you": "you", "building": "works", "testing": "proving", "tested": "yard", "dev": "depot", "main": "pad", "close": "archive",
-                   "live": "citadel"}                                                        # board column -> place (the map's `normalize`)
+                   "checks": "outpost", "live": "citadel"}                                                        # board column -> place (the map's `normalize`)
 KANBAN_PROMPT_OF = {"depot": "dev", "pad": "main", "archive": "close"}                         # place -> the column prompt it uses
 
 
@@ -540,8 +574,9 @@ def build_kanban(board, landing=None, closed_milestones=()):
     return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
 
 
-def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
-    """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
+def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=(), settled=()):
+    """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt.
+    `settled`: closed issues that are not placed, only counted for the release of their milestone (see `released_milestones`)."""
     by_number = {}
     for i in issues:
         by_number.setdefault(i["number"], i)
@@ -558,9 +593,10 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=())
     statuses_on = has_statuses(issues)
     landed = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
     open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not landed & set(i.get("labels") or [])}
+    released = released_milestones(list(by_number.values()) + [i for i in settled if i["number"] not in by_number])
     for n, issue in by_number.items():
         w = trees.get(n)
-        col = column_for(issue, w, testing, closing)
+        col = column_for(issue, w, testing, closing, released)
         if not col:
             continue
         need = need_of(issue.get("labels"))
@@ -870,11 +906,21 @@ def issues():
                "closed": ("--state", "closed", "--search", f"closed:>={since}", "--limit", "40"),
                # closed by the merge, not deployed yet: still in-main, however long ago (To deploy does not expire after LIVE_DAYS)
                "waiting": ("--state", "closed", "--label", cfg().labels["in_main"], "--limit", "100")}
+    if not cfg().deploy_command:                                   # no deploy: a closed in-main issue is not To deploy (column_for), no need to fetch them
+        queries.pop("waiting")
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
-    got["closed"] += [i for i in got.pop("waiting") if i["number"] not in {x["number"] for x in got["closed"]}]
+    got["closed"] += [i for i in got.pop("waiting", []) if i["number"] not in {x["number"] for x in got["closed"]}]
+    # The closed issues of a milestone with an open "Live checks" issue, however long ago they closed: they are not placed on the board
+    # (a closed issue older than LIVE_DAYS is not shown), they only tell `released_milestones` that the milestone has other issues, all done (#120).
+    # One call per such milestone (a few at most), each capped at 100 issues.
+    seen = {x["number"] for x in got["open"] + got["closed"]}
+    with_checks = sorted({i["milestone"] for i in got["open"] if is_live_checks(i)})
+    settled = []
+    for m in with_checks:
+        settled += [i for i in gh_issues("--state", "closed", "--milestone", m, "--limit", "100") if i["number"] not in seen]
     # Both pages place every open issue (an `idea` stays off, see column_for), assigned to the owner or not, and the recently closed ones.
-    return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"]}
+    return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"], "settled": settled}
 
 
 def milestones(rows, open_issues):
@@ -885,7 +931,7 @@ def milestones(rows, open_issues):
         if m.get("state") != "open":
             continue
         title = m["title"]
-        checks = next((i["number"] for i in open_issues if i.get("milestone") == title and i["title"].lower().startswith("live checks")), None)
+        checks = next((i["number"] for i in open_issues if i.get("milestone") == title and is_live_checks(i)), None)
         out.append({"title": title, "open": m["open_issues"], "closed": m["closed_issues"], "checks": checks,
                     "ready": m["open_issues"] == 0 and m["closed_issues"] > 0})
     return sorted(out, key=lambda m: milestone_key(m["title"]))
@@ -1028,7 +1074,7 @@ def state():
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
-    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing)
+    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing, iss.get("settled", []))
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],
