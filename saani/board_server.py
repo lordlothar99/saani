@@ -304,8 +304,9 @@ def column_for(issue, worktree=None, testing=(), closing=()):
     if worktree and (worktree.get("ahead") or worktree.get("dirty")):
         return "building"
     if issue.get("state") == "CLOSED":
-        # the merge closed it; until the deploy removes in-main it is not live yet (a project without a deploy never sets in-main)
-        return "main" if lab.get("in_main", "in-main") in labels and not not_planned(issue) else "live"
+        # the merge closed it; until the deploy removes in-main it is not live yet. A project without `[deploy] command` never runs a deploy,
+        # so nothing would remove the label: there a closed issue is never To deploy, whatever its labels (#115)
+        return "main" if cfg().deploy_command and lab.get("in_main", "in-main") in labels and not not_planned(issue) else "live"
     if lab.get("in_main", "in-main") in labels:
         return "close" if issue["number"] in closing else "main"
     if lab.get("in_dev", "in-dev") in labels:
@@ -870,9 +871,11 @@ def issues():
                "closed": ("--state", "closed", "--search", f"closed:>={since}", "--limit", "40"),
                # closed by the merge, not deployed yet: still in-main, however long ago (To deploy does not expire after LIVE_DAYS)
                "waiting": ("--state", "closed", "--label", cfg().labels["in_main"], "--limit", "100")}
+    if not cfg().deploy_command:                                   # no deploy: a closed in-main issue is not To deploy (column_for), no need to fetch them
+        queries.pop("waiting")
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
-    got["closed"] += [i for i in got.pop("waiting") if i["number"] not in {x["number"] for x in got["closed"]}]
+    got["closed"] += [i for i in got.pop("waiting", []) if i["number"] not in {x["number"] for x in got["closed"]}]
     # Both pages place every open issue (an `idea` stays off, see column_for), assigned to the owner or not, and the recently closed ones.
     return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"]}
 

@@ -117,13 +117,27 @@ def card(n, labels, state="CLOSED", **extra):
     return {"number": n, "title": f"t{n}", "labels": labels, "state": state, "milestone": None, **extra}
 
 
-def test_a_closed_issue_that_still_carries_in_main_is_to_deploy_not_deployed():
+def test_a_closed_issue_that_still_carries_in_main_is_to_deploy_not_deployed(cfg):
+    cfg.deploy_command = ["deploy.sh"]
     assert fp.column_for(card(1, ["in-main"])) == "main"
     assert fp.column_for(card(2, [])) == "live" and fp.column_for(card(3, ["in-main"], "OPEN")) == "main"
     assert fp.column_for(card(4, ["in-dev"])) == "live"
 
 
-def test_the_kanban_puts_it_on_the_launch_pad_until_the_deploy_removes_the_label():
+def test_without_a_deploy_command_a_closed_issue_is_never_to_deploy(cfg):
+    """A project without `[deploy] command` never runs a deploy, so nothing would remove in-main: its closed issues are live whatever their
+    labels; an open in-main issue stays where it is (#115)."""
+    assert not cfg.deploy_command
+    assert fp.column_for(card(1, ["in-main"])) == "live" and fp.column_for(card(2, ["in-main"], state_reason="NOT_PLANNED")) == "live"
+    assert fp.column_for(card(3, ["in-main"], "OPEN")) == "main" and fp.column_for(card(4, ["in-main"], "OPEN"), closing={4}) == "close"
+    board = fp.build_board([card(1, ["in-main"]), card(2, ["in-main"], state_reason="NOT_PLANNED"), card(3, ["in-main"], "OPEN")], [], set(), [], [])
+    kanban = {c["id"]: c for c in fp.build_kanban(board)["columns"]}
+    assert [c["number"] for c in kanban["pad"]["cards"]] == [3]
+    assert sorted((c["number"], c["section"]) for c in kanban["citadel"]["cards"]) == [(1, None), (2, "notplanned")]
+
+
+def test_the_kanban_puts_it_on_the_launch_pad_until_the_deploy_removes_the_label(cfg):
+    cfg.deploy_command = ["deploy.sh"]
     board = fp.build_board([card(1, ["in-main"]), card(2, []), card(3, ["in-main"], "OPEN")], [], set(), [], [])
     kanban = {c["id"]: c for c in fp.build_kanban(board)["columns"]}
     assert sorted(c["number"] for c in kanban["pad"]["cards"]) == [1, 3]                  # closed by the merge but not deployed, and the open one
@@ -144,6 +158,7 @@ def test_a_closed_issue_marked_not_planned_or_duplicate_stays_under_not_planned_
 
 
 def test_closed_in_main_issues_are_fetched_without_a_date_limit(cfg, monkeypatch):
+    cfg.deploy_command = ["deploy.sh"]
     calls = []
 
     def fake_run(*cmd, **k):
@@ -159,6 +174,18 @@ def test_closed_in_main_issues_are_fetched_without_a_date_limit(cfg, monkeypatch
     waiting = [c for c in calls if "--label" in c][0]
     assert "in-main" in waiting and "--search" not in waiting
     assert sorted(i["number"] for i in got["closed"]) == [5, 6] and sorted(i["number"] for i in got["board"]) == [5, 6]
+
+
+def test_without_a_deploy_command_the_closed_in_main_issues_are_not_fetched(cfg, monkeypatch):
+    calls = []
+
+    def fake_run(*cmd, **k):
+        if cmd[:3] == ("gh", "issue", "list"):
+            calls.append(cmd)
+        return "[]"
+    monkeypatch.setattr(fp, "run", fake_run)
+    fp.issues()
+    assert len(calls) == 2 and not any("--label" in c for c in calls)
 
 
 def test_a_closed_issue_labelled_in_main_is_not_untidy_with_a_deploy_but_is_without_one(cfg):
