@@ -64,7 +64,9 @@ h2 i{white-space:normal;font:400 11px/1.3 var(--body);letter-spacing:.04em;text-
 .cards{display:flex;flex-direction:column;gap:9px;padding:0 9px 10px;max-height:68vh;overflow-y:auto;scrollbar-color:var(--faint) transparent}
 .c-you{--accent:var(--ember)}.c-ready{--accent:var(--sand)}.c-building{--accent:var(--ochre)}.c-testing{--accent:#f0b25a}.c-tested{--accent:#e0c46a}
 .c-dev{--accent:var(--blue)}.c-main{--accent:var(--sage)}.c-live{--accent:var(--dust)}
-.c-backlog{--accent:var(--dust)}.c-todo{--accent:var(--sand)}.c-started{--accent:var(--ochre)}.c-review{--accent:var(--blue)}.c-done{--accent:var(--sage)}
+.c-backlog{--accent:var(--dust)}.c-todo{--accent:var(--sand)}.c-works{--accent:var(--ochre)}.c-proving{--accent:#f0b25a}.c-yard{--accent:#e0c46a}
+.c-depot{--accent:var(--blue)}.c-tower{--accent:#7fa8d6}.c-pad{--accent:var(--sage)}.c-archive{--accent:var(--dust)}.c-citadel{--accent:var(--sage)}
+.col header .stage{display:block;margin-top:5px;font:400 11px/1.3 var(--mono);color:var(--dust);letter-spacing:.04em}.col.shut header .stage{display:none}
 .badge.warn{color:var(--ochre);border-color:rgba(208,138,60,.55)}.badge.info{color:var(--blue);border-color:rgba(143,180,201,.55)}
 .sec{position:relative;display:flex;justify-content:space-between;align-items:baseline;padding:10px 2px 0;font:400 9.5px/1.3 var(--display);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
 .sec em{font:500 12px/1 var(--mono);font-style:normal;letter-spacing:0;color:var(--bone)}
@@ -223,9 +225,9 @@ function card(c){const live=c.agents.some(a=>a.state==="working");const w=c.work
   (c.runs||[]).map(r=>{const p=pct(r.line);return el("div",{},p!=null?el("div",{class:"bar"},el("i",{style:"width:"+p+"%"})):null,el("div",{class:"runline"},r.line))}),
   c.agents.map(agentLine),btn)}
 // Columns of closed tasks start folded; a click on a column's title folds or unfolds it, remembered here.
-const FOLDED_BY_DEFAULT=["live","done"];let lastCols=[],lastPinned=[];
-function folded(){try{const v=JSON.parse(localStorage.getItem("saani.folded.v2"));if(Array.isArray(v))return v}catch(e){}return FOLDED_BY_DEFAULT}
-function toggle(id){const f=folded();const n=f.includes(id)?f.filter(x=>x!==id):f.concat(id);try{localStorage.setItem("saani.folded.v2",JSON.stringify(n))}catch(e){}drawBoard()}
+const FOLDED_BY_DEFAULT=["live","citadel"];let lastCols=[],lastPinned=[];
+function folded(){try{const v=JSON.parse(localStorage.getItem("saani.folded.v3"));if(Array.isArray(v))return v}catch(e){}return FOLDED_BY_DEFAULT}
+function toggle(id){const f=folded();const n=f.includes(id)?f.filter(x=>x!==id):f.concat(id);try{localStorage.setItem("saani.folded.v3",JSON.stringify(n))}catch(e){}drawBoard()}
 // The search: every word must appear in the card's number, title, labels, milestone, need, branch, folder or agents.
 let query="";
 function haystack(c){const w=c.worktree||{};return["#"+c.number,c.title,(c.labels||[]).join(" "),c.milestone,c.need==="answer"?"your answer":c.need==="act"?"your action":"",
@@ -249,7 +251,7 @@ function drawBoard(){const cols=lastCols,f=folded(),open=matchMedia("(max-width:
  let shown=0,total=0;
  $("board").replaceChildren(...cols.map(c=>{const shut=f.includes(c.id);const hits=c.cards.filter(matches);shown+=hits.length;total+=c.cards.length;
   const head=el("header",{role:"button",tabindex:"0","data-tip":c.hint+(shut?" Click to unfold.":" Click to fold."),"aria-label":c.title+". "+c.hint,"aria-expanded":String(!shut)},
-   el("div",{class:"row"},el("span",{},c.title),el("em",{},query?hits.length+"/"+c.cards.length:String(c.cards.length))));
+   el("div",{class:"row"},el("span",{},c.title),el("em",{},query?hits.length+"/"+c.cards.length:String(c.cards.length))),c.stage?el("small",{class:"stage"},c.stage):null);
   head.onclick=()=>toggle(c.id);head.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle(c.id)}};
   // One button for the whole column when one action covers every card (one pull request, one deploy), whatever the search shows.
   const all=c.prompt&&!shut&&!c.pr?el("button",{class:"copy colcopy",type:"button",title:c.prompt},"Copy prompt · all "+c.cards.length):null;

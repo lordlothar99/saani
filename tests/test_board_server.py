@@ -2,6 +2,7 @@
 and the server's address check."""
 import json
 import pathlib
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -211,7 +212,7 @@ def test_every_open_issue_is_on_the_board_assigned_to_the_owner_or_not(monkeypat
 def test_the_column_of_closed_tasks_starts_folded():
     """the columns showing closed tasks are folded by default; a click on the header unfolds them."""
     closed = [key for key, _, _ in fp.COLUMNS if key == "live"]
-    assert closed and 'FOLDED_BY_DEFAULT=["live","done"]' in fp.page()          # the board's closed column, and the kanban's Done
+    assert closed and 'FOLDED_BY_DEFAULT=["live","citadel"]' in fp.page()          # the board's closed column, and the kanban's Citadel
     assert "aria-expanded" in fp.page()
 
 
@@ -803,7 +804,7 @@ def test_the_old_step_ids_are_gone_from_the_map_the_contract_and_the_sample():
     assert "`backlog` (the Wayfarers' Tents" in contract and "`todo` (the Granary" in contract and "`queue`" in contract
 
 
-# ---------------------------------------------------------------- the kanban: the columns are the GitHub statuses (#103)
+# ---------------------------------------------------------------- the kanban: one column per place of the map (#118)
 
 PROGRESS, REVIEW, DONE_ST = ("In progress", "started"), ("In review", "started"), ("Done", "completed")
 
@@ -812,10 +813,10 @@ def tree(n, ahead=1):
     return {"issue": n, "branch": f"feat/{n}-x", "folder": f"C:/wt/{n}-x", "ahead": ahead, "dirty": 0}
 
 
-def kanban(issues, trees=(), testing=(), pr=None, landing=None, closed=()):
-    """{column id: {section id or None: [numbers]}} of the kanban built from `issues` (the open ones, then the `closed` ones)."""
+def kanban(issues, trees=(), testing=(), pr=None, landing=None, closed=(), left_out=()):
+    """{column id: [(number, section)]} of the kanban built from `issues` (the open ones, then the `closed` ones)."""
     board = fp.build_board(list(issues) + list(closed), list(trees), set(testing), [], [], pr)
-    built = fp.build_kanban(board, fp.has_statuses(list(issues) + list(closed)), landing)
+    built = fp.build_kanban(board, landing, left_out)
     return built, {c["id"]: sorted((x["number"], x["section"]) for x in c["cards"]) for c in built["columns"]}
 
 
@@ -823,22 +824,40 @@ def closed_issue(n, status):
     return {**listed(n, status), "state": "CLOSED"}
 
 
-def test_the_columns_are_the_github_statuses_in_order():
+PLACES = ["backlog", "todo", "you", "works", "proving", "yard", "depot", "tower", "pad", "archive", "citadel"]
+
+
+def map_places():
+    """[(id, name)] of the map's places in flow order, from ZONES in map.html."""
+    block = fp.MAP_FILE.read_text(encoding="utf-8").split("const ZONES = [", 1)[1].split("\n];", 1)[0]
+    return re.findall(r'\{id: "(\w+)",.*?name: "([^"]+)"', block)
+
+
+def test_the_columns_are_the_maps_places_in_order():
     built, _ = kanban([listed(1, TODO)])
-    assert [c["id"] for c in built["columns"]] == ["backlog", "todo", "started", "review", "done"]
-    assert [c["title"] for c in built["columns"]] == ["Backlog", "Todo", "In progress", "In review", "Done"]
+    assert [c["id"] for c in built["columns"]] == PLACES
+    assert [c["title"] for c in built["columns"]][:4] == ["Wayfarers' Tents", "The Granary", "Council Rock", "The Workshops"]
+    assert all(c["stage"] and c["hint"] for c in built["columns"])
 
 
-def test_each_status_puts_its_issue_in_its_column():
+def test_the_columns_are_the_places_of_the_map_that_hold_issues():
+    """A place added to or renamed in ZONES shows up here: the Hollow and the Far Outpost never hold issues, the others each have a column."""
+    never = {"camp", "outpost"}
+    zones = [(i, n) for i, n in map_places() if i not in never]
+    assert zones == [(c["id"], c["title"]) for c in kanban([listed(1, TODO)])[0]["columns"]]
+    assert {i for i, _ in map_places()} == set(PLACES) | never
+
+
+def test_each_status_puts_its_issue_in_its_place():
     _, got = kanban([listed(1, BACKLOG), listed(2), listed(3, TODO), listed(4, ("Done", "completed"))])
     assert got["backlog"] == [(1, None), (2, None), (4, None)] and got["todo"] == [(3, None)]     # an open issue marked Done is not taken: Backlog
-    assert got["started"] == got["review"] == got["done"] == []
+    assert all(got[p] == [] for p in PLACES if p not in ("backlog", "todo"))
 
 
-def test_a_worktree_is_at_least_in_progress_and_review_at_least_in_review():
+def test_a_worktree_puts_its_issue_in_the_workshops_whatever_its_status():
     issues = [listed(1, TODO), listed(2, PROGRESS), listed(3, REVIEW), listed(4, BACKLOG)]
     _, got = kanban(issues, trees=[tree(1), tree(2), tree(3)])
-    assert got["started"] == [(1, None), (2, None)] and got["review"] == [(3, "branch")]
+    assert got["works"] == [(1, None), (2, None), (3, None)]
     assert got["backlog"] == [(4, None)] and got["todo"] == []
 
 
@@ -854,9 +873,9 @@ def test_a_clean_worktree_with_green_landing_tests_is_ready_to_land():
     assert fp.prompt_for(1, "tested").startswith("Land #1")
 
 
-def test_a_ready_to_land_card_stays_in_progress_with_a_badge():
+def test_a_ready_to_land_card_is_in_the_loading_yard_with_a_badge():
     built, got = kanban([listed(1, PROGRESS), listed(2, REVIEW)], trees=[{**tree(1), "green": True}, {**tree(2), "green": True}])
-    assert got["started"] == [(1, None)] and got["review"] == [(2, "branch")]
+    assert got["yard"] == [(1, None), (2, None)] and got["works"] == []
     cards = [c for col in built["columns"] for c in col["cards"]]
     assert all({"text": "ready to land", "kind": "info"} in c["badges"] for c in cards)
 
@@ -882,51 +901,59 @@ def test_landing_green_reads_the_queue_result_of_the_worktree_tree(monkeypatch, 
     assert fp.landing_green("C:/wt/1-x") is False                                # no landing tests set: nothing to know
 
 
-def test_dev_and_production_are_in_review_with_their_own_sections():
+def test_dev_and_production_have_their_own_places_and_prompts():
     on_dev = listed(1, REVIEW, labels=["in-dev"])
     stale = listed(2, TODO, labels=["in-dev"])                                  # the status lags behind the label: the place on dev wins
     to_deploy, to_close = listed(3, REVIEW, labels=["in-main"]), listed(4, REVIEW, labels=["in-main"])
     board = fp.build_board([on_dev, stale, to_deploy, to_close], [], set(), [], [], None, closing={4})
-    built = fp.build_kanban(board, True)
-    review = next(c for c in built["columns"] if c["id"] == "review")
-    assert sorted((c["number"], c["section"]) for c in review["cards"]) == [(1, "dev"), (2, "dev"), (3, "main"), (4, "close")]
-    assert [s["id"] for s in review["sections"]] == ["dev", "main", "close"] and [s["count"] for s in review["sections"]] == [2, 1, 1]
-    assert all(s["prompt"] for s in review["sections"])                         # one prompt per section, as the Merged / To deploy / To close columns had
+    built = fp.build_kanban(board)
+    cols = {c["id"]: c for c in built["columns"]}
+    assert [c["number"] for c in cols["depot"]["cards"]] == [1, 2] and [c["number"] for c in cols["pad"]["cards"]] == [3]
+    assert [c["number"] for c in cols["archive"]["cards"]] == [4]
+    assert all(cols[p]["prompt"] for p in ("depot", "pad", "archive"))          # one prompt per place, as the Merged / To deploy / To close columns had
+    assert not cols["tower"]["prompt"] and cols["tower"]["pr"] is None
 
 
-def test_the_release_pull_request_is_a_section_of_in_review_with_the_issues_it_carries():
+def test_the_release_pull_request_is_the_refinery_with_the_issues_it_carries():
     issues = [listed(n, REVIEW, labels=["in-dev"]) for n in (530, 538, 540)]
     pr = fp.pr_row({"number": 539, "title": "dev into main", "headRefOid": "x", "statusCheckRollup": [],
                     "commits": [{"oid": "a" * 40, "messageHeadline": "x (refs #530)"}, {"oid": "b" * 40, "messageHeadline": "y (refs #538)"}]}, {})
     built, got = kanban(issues, pr=pr)
-    assert got["review"] == [(530, "pr"), (538, "pr"), (540, "dev")]
-    review = next(c for c in built["columns"] if c["id"] == "review")
-    sections = {s["id"]: s for s in review["sections"]}
-    assert sections["pr"]["pr"]["number"] == 539 and sections["pr"]["pr"]["inside"] == [530, 538] and "539" in sections["pr"]["prompt"]
-    assert sections["dev"]["pr"] is None and sections["dev"]["count"] == 1
+    assert got["tower"] == [(530, None), (538, None)] and got["depot"] == [(540, None)]
+    tower = next(c for c in built["columns"] if c["id"] == "tower")
+    assert tower["pr"]["number"] == 539 and tower["pr"]["inside"] == [530, 538] and "539" in tower["prompt"]
 
 
-def test_an_open_release_pull_request_with_no_card_still_shows_its_section():
+def test_an_open_release_pull_request_with_no_card_still_shows_in_the_refinery():
     pr = {"number": 7, "url": "u", "title": "t", "ci": {"state": "green"}, "inside": []}
-    built, got = kanban([listed(1, TODO)], pr=None)
-    assert all(s["id"] != "pr" for c in built["columns"] for s in c["sections"])
+    built, _ = kanban([listed(1, TODO)], pr=None)
+    assert all(c["pr"] is None for c in built["columns"])
     board = fp.build_board([listed(1, REVIEW, labels=["in-dev"])], [], set(), [], [], pr)
-    review = next(c for c in fp.build_kanban(board, True)["columns"] if c["id"] == "review")
-    assert [s["id"] for s in review["sections"]] == ["dev", "pr"] and review["sections"][1]["count"] == 0
+    cols = {c["id"]: c for c in fp.build_kanban(board)["columns"]}
+    assert cols["tower"]["pr"]["number"] == 7 and cols["tower"]["cards"] == [] and [c["number"] for c in cols["depot"]["cards"]] == [1]
 
 
-def test_closed_issues_are_done_and_not_planned_ones_are_apart():
-    _, got = kanban([listed(1, TODO)], closed=[closed_issue(2, DONE_ST), closed_issue(3, ("Not planned", "not_planned")),
-                                               closed_issue(4, ("Duplicate", "duplicate")), closed_issue(5, None)])
-    assert got["done"] == [(2, "deployed"), (3, "notplanned"), (4, "notplanned"), (5, "deployed")] and got["todo"] == [(1, None)]
+def test_closed_issues_are_in_the_citadel_and_not_planned_ones_are_apart():
+    built, got = kanban([listed(1, TODO)], closed=[closed_issue(2, DONE_ST), closed_issue(3, ("Not planned", "not_planned")),
+                                                   closed_issue(4, ("Duplicate", "duplicate")), closed_issue(5, None)])
+    assert got["citadel"] == [(2, None), (3, "notplanned"), (4, "notplanned"), (5, None)] and got["todo"] == [(1, None)]
+    citadel = next(c for c in built["columns"] if c["id"] == "citadel")
+    assert [(s["id"], s["count"]) for s in citadel["sections"]] == [("notplanned", 2)]
 
 
-def test_waiting_for_you_is_a_pinned_row_and_the_card_stays_in_its_column():
+def test_the_citadel_leaves_out_the_done_issues_of_closed_milestones_as_the_map_does():
+    done = [{**closed_issue(n, DONE_ST), "milestone": m} for n, m in ((2, "v1.0.0"), (3, "v1.1.0"), (4, None))]
+    _, got = kanban([listed(1, TODO)], closed=done, left_out=["v1.0.0"])
+    assert [n for n, _ in got["citadel"]] == [3, 4]                             # a milestone the server does not name is kept
+    assert [n for n, _ in kanban([listed(1, TODO)], closed=done)[1]["citadel"]] == [2, 3, 4]
+
+
+def test_waiting_for_you_is_a_pinned_row_and_the_card_stays_in_its_place():
     issues = [listed(1, TODO, labels=["help wanted"]), listed(2, BACKLOG, labels=["owner-action"]), listed(3, REVIEW, labels=["in-dev", "help wanted"]),
               listed(4, TODO)]
     built, got = kanban(issues)
     assert [c["number"] for c in built["pinned"]] == [1, 2, 3]
-    assert got["todo"] == [(1, None), (4, None)] and got["backlog"] == [(2, None)] and got["review"] == [(3, "dev")]
+    assert got["you"] == [(1, None), (2, None)] and got["depot"] == [(3, None)] and got["todo"] == [(4, None)] and got["backlog"] == []
     assert {c["number"]: c["need"] for c in built["pinned"]} == {1: "answer", 2: "act", 3: "answer"}
     assert built["pinned"] == sorted(built["pinned"], key=lambda c: c["number"])
 
@@ -934,7 +961,7 @@ def test_waiting_for_you_is_a_pinned_row_and_the_card_stays_in_its_column():
 def test_a_closed_issue_with_a_leftover_label_is_not_pinned():
     stale = {**listed(9, DONE_ST, labels=["help wanted"]), "state": "CLOSED"}
     built, got = kanban([listed(1, TODO, labels=["help wanted"])], closed=[stale])
-    assert [c["number"] for c in built["pinned"]] == [1] and got["done"] == [(9, "deployed")]
+    assert [c["number"] for c in built["pinned"]] == [1] and got["citadel"] == [(9, None)]
 
 
 def test_a_backlog_card_is_prompted_to_get_ready_not_to_start():
@@ -959,7 +986,7 @@ def test_a_todo_card_says_why_a_run_would_not_take_it():
     for card in cards:
         card["labels"] = []
     board = fp.build_board(cards + [listed(61), listed(99)], [], set(), [], [])
-    built = fp.build_kanban(board, True)
+    built = fp.build_kanban(board)
     todo = {c["number"]: [b["text"] for b in c["badges"]] for c in next(col for col in built["columns"] if col["id"] == "todo")["cards"]}
     assert todo == {1: ["Auto: no"], 2: ["Auto: partly"], 3: ["blocked by #61, #99"], 4: ["needs the owner"], 5: [], 6: ["no Type"]}
     assert all(b["kind"] == "warn" for col in built["columns"] for c in col["cards"] for b in c["badges"])
@@ -968,20 +995,19 @@ def test_a_todo_card_says_why_a_run_would_not_take_it():
 def test_in_progress_and_review_cards_carry_no_pick_badges_but_testing_and_landing_show():
     issues = [{**listed(1, PROGRESS), "glance": {"auto": {"fit": "no", "why": "x"}}}, listed(2, PROGRESS), listed(3, PROGRESS)]
     built, _ = kanban(issues, trees=[tree(1), tree(2), tree(3)], testing={2}, landing=3)
-    started = {c["number"]: [b["text"] for b in c["badges"]] for c in next(col for col in built["columns"] if col["id"] == "started")["cards"]}
-    assert started == {1: [], 2: ["testing"], 3: ["landing"]}
+    works = {c["number"]: [b["text"] for b in c["badges"]] for c in next(col for col in built["columns"] if col["id"] == "works")["cards"]}
+    assert works == {1: [], 3: ["landing"]}
+    proving = {c["number"]: [b["text"] for b in c["badges"]] for c in next(col for col in built["columns"] if col["id"] == "proving")["cards"]}
+    assert proving == {2: ["testing"]}
 
 
-def test_without_statuses_the_page_keeps_the_board_as_it_was():
-    board = fp.build_board([listed(1, None, "v1.0.0")], [], set(), [], [])
-    assert fp.build_kanban(board, fp.has_statuses([listed(1, None, "v1.0.0")])) is None
+def test_without_statuses_the_kanban_still_has_the_places():
+    """The columns are the map's places, not GitHub's statuses: a repo without statuses has them too (a milestone puts a Ready card in Todo)."""
+    issues = [listed(1, None, "v1.0.0"), listed(2, None)]
+    board = fp.build_board(issues, [], set(), [], [])
+    got = {c["id"]: [x["number"] for x in c["cards"]] for c in fp.build_kanban(board)["columns"]}
+    assert got["todo"] == [1] and got["backlog"] == [2]
     assert [c["id"] for c in board] == [k for k, _, _ in fp.COLUMNS]
-
-
-def test_statuses_off_in_saani_toml_keeps_the_board_as_it_was(cfg):
-    cfg.status_enabled = "off"
-    issues = [listed(1, TODO), listed(2, BACKLOG)]
-    assert fp.build_kanban(fp.build_board(issues, [], set(), [], []), fp.has_statuses(issues)) is None
 
 
 def test_the_state_carries_the_kanban_beside_the_board(monkeypatch, tmp_path):
@@ -994,10 +1020,8 @@ def test_the_state_carries_the_kanban_beside_the_board(monkeypatch, tmp_path):
     monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
     state = fp.state()
     assert [c["id"] for c in state["board"]] == [k for k, _, _ in fp.COLUMNS]
-    assert [c["id"] for c in state["kanban"]["columns"]] == ["backlog", "todo", "started", "review", "done"]
+    assert [c["id"] for c in state["kanban"]["columns"]] == PLACES
     assert [c["number"] for c in state["kanban"]["columns"][1]["cards"]] == [1]
-    listing["board"] = [listed(1, None, "v1.0.0")]                             # a repo without statuses: no kanban, the page draws the board
-    assert fp.state()["kanban"] is None
 
 
 def test_the_page_draws_the_kanban_with_a_pinned_row_sections_and_badges():
@@ -1005,6 +1029,7 @@ def test_the_page_draws_the_kanban_with_a_pinned_row_sections_and_badges():
     assert 'id="pinned"' in page and "function drawPinned()" in page and "function sectionBody(c,hits)" in page
     assert 's.kanban&&s.kanban.columns?s.kanban:null' in page and "lastPinned=k?k.pinned:[]" in page
     assert '(c.badges||[]).map(b=>el("span",{class:"chip badge "+b.kind},b.text))' in page and '"agent working"' in page
-    assert 'FOLDED_BY_DEFAULT=["live","done"]' in page and 'class:"fold"' in page and "Waiting for you" in page
-    for col in ("backlog", "todo", "started", "review", "done"):
+    assert 'FOLDED_BY_DEFAULT=["live","citadel"]' in page and 'class:"fold"' in page and "Waiting for you" in page
+    assert 'c.stage?el("small",{class:"stage"},c.stage)' in page and "saani.folded.v3" in page and "saani.folded.v2" not in page
+    for col in PLACES:
         assert f".c-{col}{{--accent:" in page

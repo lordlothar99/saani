@@ -10,6 +10,12 @@ issue stands.
 
 ![The Saani map (synthetic sample data): a desert seen from above, with a settlement for each step of an issue's life along a road from start to end; each issue is a small vehicle parked at its step, the release pull request a harvester in the middle, each running subagent a figure on its issue, and in the corners the Status panel (agents working, the release pull request's CI) and the zoom controls with the "?" that opens the signs](docs/images/map.png)
 
+Every place has a "?" next to its name in its popup: the tooltip says exactly what puts an issue there (its label, branch, worktree, session
+and GitHub status). The "?" menu in the bottom right has a **Places and their rules** button that lists them all, in the order the map
+decides when an issue fits several:
+
+![The "Places and their rules" help popup (synthetic sample data): the ten rules that decide which place an issue sits in, then each place with the conditions that must all be true for an issue to be there](docs/images/places.png)
+
 ## The auto run
 You talk to one **Claude Code** session. In an auto run it works through the open issues by itself, hands each one to worker subagents
 and lands it, while Saani's commands and its guard keep the work safe.
@@ -114,7 +120,7 @@ saani land --worktree ../webshop-wt/42-<slug>   # lock → merge dev → rebuild
 | Terminal | Claude Code | What it does |
 |---|---|---|
 | `saani auto ...` | `/saani:auto [here\|away] [--keep-on] [N ...]` | the auto run above (`auto pick`: the issues it may take now; `auto status`, `auto report`, `auto off --run ID`) |
-| `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button (ending with the Saani release or commit that serves the map); "Stale" when Saani does not answer |
+| `saani ui [--open]` | `/saani:ui` | the map at `http://127.0.0.1:8771` (this machine only, read-only; the kanban page at `/kanban`): issues, worktrees, test jobs, one figure per running subagent, the release pull request, a Status panel (agents working, the release PR's CI light), the signs behind a "?" button (with a Places and their rules help, and a "?" tooltip in each place's popup that gives its criteria; ending with the Saani release or commit that serves the map); "Stale" when Saani does not answer |
 | `saani projects [list\|add [FOLDER]\|remove OWNER/NAME]` | `/saani:projects` | the projects the map's selector offers: one map shows them all |
 | `saani status` | `/saani:status` | what runs, what is blocked or waits in Saani's machinery (or: no activity); `--stats`: landings, test queue medians |
 | `saani start <n> [--hotfix]` | `/saani:start 42` | a worktree and branch for issue `n` from the integration branch (a hotfix starts from the prod tag) |
@@ -143,7 +149,7 @@ A slash command for every `saani` command, the auto skill, the worker subagents 
 [docs/PLUGIN.md](docs/PLUGIN.md).
 
 ## Status
-On `dev` after v1.4.2 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
+On `dev` after v1.4.3 (`saani --version` prints the release). Saani is developed with itself: this repo has its own [saani.toml](saani.toml), every
 change goes through `saani start` and `saani land`, and its releases are made by `saani merge`. The roadmap is in the issues.
 
 ## Contributing

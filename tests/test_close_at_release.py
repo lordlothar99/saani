@@ -123,28 +123,23 @@ def test_a_closed_issue_that_still_carries_in_main_is_to_deploy_not_deployed():
     assert fp.column_for(card(4, ["in-dev"])) == "live"
 
 
-def test_the_kanban_puts_it_under_done_in_the_section_to_deploy_until_the_deploy_removes_the_label():
+def test_the_kanban_puts_it_on_the_launch_pad_until_the_deploy_removes_the_label():
     board = fp.build_board([card(1, ["in-main"]), card(2, []), card(3, ["in-main"], "OPEN")], [], set(), [], [])
-    kanban = fp.build_kanban(board, True)
-    done = next(c for c in kanban["columns"] if c["id"] == "done")
-    sections = {s["id"]: s for s in done["sections"]}
-    assert [c["number"] for c in done["cards"] if c["section"] == "todeploy"] == [1]
-    assert [c["number"] for c in done["cards"] if c["section"] == "deployed"] == [2]
-    assert sections["todeploy"]["count"] == 1 and "#1" in sections["todeploy"]["prompt"]
-    review = next(c for c in kanban["columns"] if c["id"] == "review")
-    assert [c["number"] for c in review["cards"] if c["section"] == "main"] == [3]        # the open one stays on production, to deploy
+    kanban = {c["id"]: c for c in fp.build_kanban(board)["columns"]}
+    assert sorted(c["number"] for c in kanban["pad"]["cards"]) == [1, 3]                  # closed by the merge but not deployed, and the open one
+    assert "#1" in kanban["pad"]["prompt"]
+    assert [c["number"] for c in kanban["citadel"]["cards"]] == [2]
 
 
-def test_a_closed_issue_marked_not_planned_or_duplicate_stays_under_not_planned_and_is_flagged(cfg):
+def test_a_closed_issue_marked_not_planned_or_duplicate_stays_under_not_planned_in_the_citadel_and_is_flagged(cfg):
     cfg.deploy_command = ["deploy.sh"]
     dropped = [card(1, ["in-main"], state_reason="NOT_PLANNED"), card(2, ["in-main"], state_reason="DUPLICATE"),
                card(3, ["in-main"], status={"name": "Not planned", "category": "not_planned"}), card(4, ["in-main"], state_reason="COMPLETED")]
     assert [fp.column_for(i) for i in dropped] == ["live", "live", "live", "main"]
     board = fp.build_board(dropped, [], set(), [], [])
-    kanban = fp.build_kanban(board, True)
-    done = next(c for c in kanban["columns"] if c["id"] == "done")
-    assert sorted(c["number"] for c in done["cards"] if c["section"] == "notplanned") == [1, 2, 3]
-    assert [c["number"] for c in done["cards"] if c["section"] == "todeploy"] == [4]
+    kanban = {c["id"]: c for c in fp.build_kanban(board)["columns"]}
+    assert sorted(c["number"] for c in kanban["citadel"]["cards"] if c["section"] == "notplanned") == [1, 2, 3]
+    assert [c["number"] for c in kanban["pad"]["cards"]] == [4]
     assert fp.hygiene([], dropped, set(), cfg.labels) == [{"kind": "closed_labelled", "issues": [1, 2, 3]}]
 
 
