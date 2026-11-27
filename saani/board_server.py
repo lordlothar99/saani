@@ -300,9 +300,10 @@ def is_live_checks(issue):
 
 def released_milestones(issues):
     """The milestones whose release is merged, from the issues the board holds (every open one, the recently closed ones and, with a
-    `[deploy] command`, the closed ones still on in-main): no other issue of the milestone is open without the in-main label, and, with a
-    deploy command, none is closed and still waiting for the deploy (in-main, not closed as not planned). The "Live checks" issues themselves
-    do not count, and a milestone with no issue in the list is not released."""
+    `[deploy] command`, the closed ones still on in-main) and `issues()`'s `settled` (every closed issue, whenever it closed, of a milestone
+    with an open "Live checks" issue): no other issue of the milestone is open without the in-main label, and, with a deploy command, none
+    is closed and still waiting for the deploy (in-main, not closed as not planned). The "Live checks" issues themselves do not count, and a
+    milestone with no other issue is not released. An open `idea` issue of the milestone holds the release back like any open issue."""
     in_main = cfg().labels.get("in_main", "in-main")
     seen, held = set(), set()
     for i in issues:
@@ -573,8 +574,9 @@ def build_kanban(board, landing=None, closed_milestones=()):
     return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
 
 
-def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=()):
-    """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt."""
+def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=(), settled=()):
+    """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt.
+    `settled`: closed issues that are not placed, only counted for the release of their milestone (see `released_milestones`)."""
     by_number = {}
     for i in issues:
         by_number.setdefault(i["number"], i)
@@ -591,7 +593,7 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=())
     statuses_on = has_statuses(issues)
     landed = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
     open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not landed & set(i.get("labels") or [])}
-    released = released_milestones(by_number.values())
+    released = released_milestones(list(by_number.values()) + [i for i in settled if i["number"] not in by_number])
     for n, issue in by_number.items():
         w = trees.get(n)
         col = column_for(issue, w, testing, closing, released)
@@ -909,8 +911,16 @@ def issues():
     with concurrent.futures.ThreadPoolExecutor(len(queries)) as pool:
         got = dict(zip(queries, pool.map(lambda q: gh_issues(*q), queries.values())))
     got["closed"] += [i for i in got.pop("waiting", []) if i["number"] not in {x["number"] for x in got["closed"]}]
+    # The closed issues of a milestone with an open "Live checks" issue, however long ago they closed: they are not placed on the board
+    # (a closed issue older than LIVE_DAYS is not shown), they only tell `released_milestones` that the milestone has other issues, all done (#120).
+    # One call per such milestone (a few at most), each capped at 100 issues.
+    seen = {x["number"] for x in got["open"] + got["closed"]}
+    with_checks = sorted({i["milestone"] for i in got["open"] if is_live_checks(i)})
+    settled = []
+    for m in with_checks:
+        settled += [i for i in gh_issues("--state", "closed", "--milestone", m, "--limit", "100") if i["number"] not in seen]
     # Both pages place every open issue (an `idea` stays off, see column_for), assigned to the owner or not, and the recently closed ones.
-    return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"]}
+    return {"board": got["open"] + got["closed"], "open": got["open"], "closed": got["closed"], "settled": settled}
 
 
 def milestones(rows, open_issues):
@@ -921,7 +931,7 @@ def milestones(rows, open_issues):
         if m.get("state") != "open":
             continue
         title = m["title"]
-        checks = next((i["number"] for i in open_issues if i.get("milestone") == title and i["title"].lower().startswith("live checks")), None)
+        checks = next((i["number"] for i in open_issues if i.get("milestone") == title and is_live_checks(i)), None)
         out.append({"title": title, "open": m["open_issues"], "closed": m["closed_issues"], "checks": checks,
                     "ready": m["open_issues"] == 0 and m["closed_issues"] > 0})
     return sorted(out, key=lambda m: milestone_key(m["title"]))
@@ -1064,7 +1074,7 @@ def state():
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
-    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing)
+    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing, iss.get("settled", []))
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],

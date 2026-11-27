@@ -202,7 +202,10 @@ every 5 s, read-only.
   milestone, and that milestone's release is merged: every other issue of the milestone is closed or carries `in-main`, and, when the
   project has a `[deploy] command`, none of them is still To deploy (a closed issue labelled `in-main`). The board's column for it is
   `checks`. It stays there until you close it, then it goes to The Citadel; before the release it stays in its normal place; an `idea`
-  stays off the map. A card is in the column of its place on the map, by the same rules (`kanban_place` follows `normalize()` of
+  stays off the map, yet an open `idea` issue of the milestone holds the release back like any open issue. Its labels (`help wanted`,
+  `owner-action`) do not matter. The milestone's issues closed more than 7 days ago still count: for each milestone with an open "Live
+  checks" issue the board makes one more `gh issue list` call (its closed issues, at most 100). A milestone with only its Live checks
+  issue is never released. A card is in the column of its place on the map, by the same rules (`kanban_place` follows `normalize()` of
   map.html; the "?" tooltips and the Places and their rules popup of the map say what puts an issue in each place), and the Citadel leaves out
   the done issues of closed milestones, as on the map. An issue the merge closed (`Closes #n`) that still carries `in-main` is not deployed yet:
   it sits on the Launch Pad until `saani deploy` removes the label, then in the Citadel, however long ago it was closed. This needs a `[deploy] command`: a project without one never runs a deploy, so a closed issue is never To deploy there, whatever its labels (it is in the Citadel, and the hygiene strip flags its `in-main`), and the closed `in-main` issues are not even fetched. One closed as not

@@ -891,6 +891,39 @@ def test_only_an_open_live_checks_issue_with_a_milestone_goes_to_the_far_outpost
     assert checks_column([outpost_issue(2, milestone="v2.0"), done, outpost_issue(9, "Live checks v1.0")], 9) == "checks"   # another milestone's open issue
 
 
+def test_a_waiting_for_you_label_does_not_keep_the_live_checks_out_of_the_far_outpost(cfg):
+    cfg.deploy_command = []
+    for label in ("help wanted", "owner-action"):
+        assert checks_column([outpost_issue(1, state="CLOSED"), outpost_issue(9, "Live checks v1.0", labels=[label])], 9) == "checks"
+
+
+def test_an_open_idea_issue_of_the_milestone_holds_the_release_back(cfg):
+    cfg.deploy_command = []
+    issues = [outpost_issue(1, state="CLOSED"), outpost_issue(2, labels=["idea"]), outpost_issue(9, "Live checks v1.0")]
+    assert checks_column(issues, 9) == "ready"
+
+
+def test_the_closed_issues_of_a_milestone_with_live_checks_are_fetched_whatever_their_age(cfg, monkeypatch):
+    """All the milestone's issues closed 8+ days ago: the release is still seen; a milestone with only its Live checks issue is not released."""
+    cfg.deploy_command = []
+    calls = []
+
+    def fake_gh_issues(*f):
+        calls.append(f)
+        if "--milestone" in f:
+            return [outpost_issue(1, state="CLOSED")] if f[f.index("--milestone") + 1] == "v1.0" else []
+        if "open" in f:
+            return [outpost_issue(9, "Live checks v1.0"), outpost_issue(19, "Live checks v2.0", milestone="v2.0")]
+        return []
+    monkeypatch.setattr(fp, "gh_issues", fake_gh_issues)
+    got = fp.issues()
+    assert [i["number"] for i in got["settled"]] == [1] and not [i for i in got["closed"] if i["number"] == 1]    # not placed on the board
+    assert sum("--milestone" in c for c in calls) == 2
+    board = fp.build_board(got["board"], [], set(), [], [], None, (), got["settled"])
+    placed = {c["id"]: [x["number"] for x in c["cards"]] for c in board}
+    assert placed["checks"] == [9] and placed["ready"] == [19] and placed["live"] == []
+
+
 def test_the_kanban_puts_the_live_checks_in_the_far_outpost_column(cfg):
     cfg.deploy_command = []
     _, got = kanban([outpost_issue(1, state="CLOSED"), outpost_issue(9, "Live checks v1.0")])
