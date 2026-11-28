@@ -29,8 +29,14 @@ def when(text, now=None):
 
 
 def issue_of(branch_or_path):
-    """The issue number in `<type>/<n>-<slug>` or `<n>-<slug>`, as `#n`; the name itself when there is none."""
-    last = str(branch_or_path).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    """The issue number in `<type>/<n>-<slug>` or `<n>-<slug>`, as `#n`; the name itself when there is none. An auto run's branch
+    (`auto/<id>`) or folder (`auto-<id>`) has no issue: it reads `auto run <id>` (#130)."""
+    parts = str(branch_or_path).replace("\\", "/").rstrip("/").split("/")
+    last = parts[-1]
+    if len(parts) == 2 and parts[0] == "auto" and last:          # the branch, not a path that has a folder called auto
+        return f"auto run {last}"
+    if last.startswith("auto-") and len(last) > 5 and last[5].isdigit():
+        return f"auto run {last[5:]}"
     m = ISSUE_IN_NAME.search(last)
     return f"#{m.group(1)}" if m else last
 
