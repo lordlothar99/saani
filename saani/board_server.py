@@ -9,10 +9,13 @@ nothing); pure functions first (tests/test_board_server.py).
 
 The status page answers four questions, in plain words:
 1. What waits for me, what is being done, what is ready to ship? One card per issue, in the column of the place the one resolver gives it
-   (column_for, saani/profile.py): Waiting for you (the `answer` label:
-   your answer; the `act` label: your action), Ready (open, nothing blocks it, nobody on it yet), Building (a worktree with work in it), Testing (tests
-   running in its worktree, or the final check of `saani land`), Merged on the integration branch (`in_dev`), To deploy (`in_main`),
-   Live checks (the open "Live checks ..." issue of a milestone whose release is merged), Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to Claude Code
+   (column_for, saani/profile.py): the resolver weighs the issue's state, worktree, labels, GitHub status, git (commits `refs #n` on
+   the integration branch, not yet on production), the release pull request and the deploy, the order of trust deciding when they
+   disagree (`[pipeline]`; default: status, then git, then labels). The columns: Waiting for you (your answer or your action), Ready
+   (open, nothing blocks it, nobody on it yet), Building (a worktree with work in it), Testing (tests running in its worktree, or the
+   final check of `saani land`), Ready to land, Merged on the integration branch, To deploy, To close (nothing to deploy), Live checks
+   (the open "Live checks ..." issue of a milestone whose release is merged), Deployed (closed in the last LIVE_DAYS days, folded). Each
+   card carries its place and whether it is sure or probable. Issues labelled idea stay off. Each card gives a prompt to paste to Claude Code
    (prompt_for): the owner talks to one agent, Claude Code, which starts the workers.
 2. Who works on what? The Claude Code sessions of the project's folders active in the last hours, from the metadata of the session files in
    ~/.claude/projects/ (folder, branch, last activity, model, and the issue numbers of the worktree folders its lines name; only those
@@ -58,7 +61,7 @@ ACTIVE_SECONDS = 120                   # a file written in the last two minutes:
 IDLE_SECONDS = 30 * 60                 # under thirty minutes: idle; older: asleep
 TEST_LIVE_SECONDS = 120                # a test output written in the last two minutes: tests running
 TAIL_BYTES = 256 * 1024
-LIVE_DAYS = 7
+LIVE_DAYS = profile.LIVE_DAYS          # the Citadel shows the issues closed in the last days
 COLUMNS = [
     ("you", "Waiting for you", "Your answer or your action. Copy the card's prompt and paste it to Claude Code."),
     ("ready", "Ready", "Open, nothing blocks it, nobody on it yet: ready to build. Claude Code can start it. Command: /saani:start <issue>."),
@@ -945,6 +948,16 @@ def hygiene(open_issues, closed_issues, landed, labels):
     return [{"kind": k, "issues": sorted(v)} for k, v in found.items() if v]
 
 
+def fetch_branches():
+    """`git fetch` of the production and integration branches, quietly, so the git signal (`landed_refs`) is not stale after a merge done
+    elsewhere (`saani merge` fetches nothing). Offline or refused: nothing is said, the local refs are read as they are."""
+    c = cfg()
+    try:
+        run("git", "fetch", "-q", "origin", c.production, c.integration, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def landed_refs():
     """Issue numbers that commits between production and the integration branch name (`refs #n`)."""
     c = cfg()
@@ -1055,6 +1068,7 @@ def state():
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
     def strips_of():
         rows = milestone_rows()                                              # one fetch for the strip and the closed ones
+        fetch_branches()                                                     # cached with the strips: once every 120 s at most
         landed = landed_refs()                                               # the hygiene strip and the git signal of each place
         return {"milestones": milestones(rows, iss.get("open", [])), "closed_milestones": closed_milestones(rows),
                 "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed, cfg().labels), "landed": sorted(landed)}

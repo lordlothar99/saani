@@ -98,6 +98,30 @@ def test_without_a_deploy_the_merge_s_close_is_the_end_in_main_is_not_set_on_the
     assert got["2"] == ("--remove-label", "in-dev", "--add-label", "in-main")            # refs: stays open, relabelled as before
 
 
+def test_without_a_deploy_an_issue_the_merge_closes_loses_both_stage_labels_and_the_line_names_them(merged, capsys):
+    """The Citadel's profile has no stage label: an issue carrying in-dev and in-main that the merge closes loses both, and says so."""
+    io = MergedIo()
+    io.labels[1] = [{"name": "in-dev"}, {"name": "in-main"}]
+    assert ci.cmd_merged(io, 9) == 0
+    assert edits(io)["1"] == ("--remove-label", "in-dev", "--remove-label", "in-main")
+    assert edits(io)["2"] == ("--remove-label", "in-dev", "--add-label", "in-main")
+    out = capsys.readouterr().out
+    assert "#1: in-dev, in-main removed (closed by the merge, nothing to deploy)" in out and "#3: in-dev removed (closed" in out
+    assert "#2: in-dev -> in-main" in out
+
+
+def test_after_an_outside_relabel_a_leftover_in_dev_comes_off_a_closed_issue_too(merged, capsys):
+    class Io(MergedIo):
+        def __init__(self):
+            super().__init__()
+            self.labels = {1: [{"name": "in-dev"}], 2: [{"name": "in-main"}], 3: [{"name": "in-main"}, {"name": "in-dev"}]}
+    io = Io()
+    ci.drop_in_main_from_closed(io, 9, {"body": BODY})
+    assert edits(io) == {"1": ("--remove-label", "in-dev"), "3": ("--remove-label", "in-dev", "--remove-label", "in-main")}
+    out = capsys.readouterr().out
+    assert "#1: in-dev removed" in out and "#3: in-dev, in-main removed" in out
+
+
 def test_the_dry_run_of_the_merge_prints_the_closes_the_label_changes_and_writes_nothing(merged, capsys):
     merged.deploy_command = ["deploy.sh"]
     io = MergedIo(dry=True)

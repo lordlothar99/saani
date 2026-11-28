@@ -2257,7 +2257,7 @@
      ],
      [
       "GitHub status",
-      "In progress, In review or no status"
+      "In progress, In review, no status or Done"
      ],
      [
       "Git",
@@ -2318,10 +2318,6 @@
      [
       "Worktree and branch",
       "none, a Claude session on it (no worktree) or an empty worktree (just started)"
-     ],
-     [
-      "GitHub status",
-      "Done, Not planned or Duplicate or no status"
      ],
      [
       "Labels",

@@ -83,21 +83,36 @@ def rejected(place, signal):
     return next(v for v in profile.WORDS[signal] if v not in profile.cell(place, signal))
 
 
-READERS = [(p, s) for p in profile.IDS for s in profile.TRUSTED if profile.cell(p, s) is not profile.ANY]
+READERS = [(p, s) for p in profile.IDS for s in profile.SIGNAL_IDS if profile.cell(p, s) is not profile.ANY]
+
+
+def test_every_signal_but_the_log_is_read_by_some_place():
+    assert {s for _, s in READERS} == set(profile.SIGNAL_IDS) - {"log", "milestone"}           # the milestone: only without statuses
+    assert ("todo", "milestone") in [(p, s) for p in profile.IDS for s in profile.SIGNAL_IDS
+                                     if profile.cell(p, s, statuses=False) is not profile.ANY]
 
 
 @pytest.mark.parametrize("place,signal", READERS)
 def test_each_signal_contradicting_each_place_that_reads_it_is_probable(place, signal):
-    """The place stays, probable, and the signal contradicts it; or the signal is trusted more than the ones that put the issue there and
-    the issue moves to a place that signal fits (sure when that place fits every signal: a Todo issue set to Backlog is a clean Backlog one)."""
+    """The place stays, probable, and the signal contradicts it; or the signal is a fact (the worktree, the live checks, the state, the
+    owner labels, the pull request, the deploy) or is trusted more than the ones that put the issue there, and the issue moves to a place
+    that signal fits (sure when that place fits every signal: a Todo issue set to Backlog is a clean Backlog one)."""
     signals = {**CLEAN[place], signal: rejected(place, signal)}
     got = resolve(signals)
     if got.place == place:
         assert got.confidence == "probable" and signal in got.contradict
     else:
-        assert profile.accepts(got.place, signal, signals[signal]) and signal in got.agree
-        assert profile.TRUSTED.index(signal) < max(profile.TRUSTED.index(s) for s in profile.TRUSTED if profile.cell(place, s) is not profile.ANY)
+        assert profile.accepts(got.place, signal, signals[signal]) and signal not in got.contradict
+        if signal in profile.TRUSTED:
+            read = [s for s in profile.TRUSTED if profile.cell(place, s) is not profile.ANY]
+            assert profile.TRUSTED.index(signal) < max(profile.TRUSTED.index(s) for s in read)
     assert (got.confidence == "sure") == (got.contradict == ())
+
+
+@pytest.mark.parametrize("place", ["backlog", "todo"])
+def test_the_milestone_contradicting_a_queue_without_statuses(place):
+    signals = {**CLEAN[place], "status": None, "milestone": "yes" if place == "backlog" else "no"}
+    assert resolve(signals).place == ("todo" if place == "backlog" else "backlog")
 
 
 # (place, signal, value) -> the place with the default order (status, git, labels) and with the labels first
@@ -188,6 +203,27 @@ def test_a_project_without_a_deploy_command(cfg):
     assert resolve(profile.read({"number": 3, "labels": ["in-main"], "state": "OPEN"}, closing=True)).place == "archive"
     cfg.deploy_command = ["deploy.sh"]
     assert resolve(closed)[:2] == ("pad", "sure") and profile.cell("pad", "state") == ("open", "completed")
+
+
+@pytest.mark.parametrize("status", ["started", "review", "done", "none"])
+def test_a_closed_issue_without_in_main_is_in_the_citadel_whatever_its_status(cfg, status):
+    """With a deploy, the Launch Pad holds a closed issue only while in-main says it waits for the deploy: a status left In review on a
+    closed issue does not send it there (`saani deploy` would never move it on)."""
+    cfg.deploy_command = ["deploy.sh"]
+    closed = {**CLEAN["citadel"], "status": status, "git": None}
+    assert outcome(resolve(closed)) == ("citadel", "sure", ())
+    assert resolve({**closed, "labels": "in_main"}).place == "pad"
+    for order in (("labels", "status", "git"), ("git", "labels", "status")):
+        cfg.trust = order
+        assert resolve(closed).place == "citadel"
+
+
+@pytest.mark.parametrize("trust", [("status", "git", "labels"), ("labels", "status", "git")])
+def test_an_open_in_main_issue_marked_done_with_nothing_to_deploy_is_to_close(cfg, trust):
+    cfg.trust = trust
+    issue = {"number": 4, "labels": ["in-main"], "state": "OPEN", "status": {"name": "Done", "category": "completed"}}
+    assert outcome(resolve(profile.read(issue, closing=True, statuses_on=True))) == ("archive", "sure", ())
+    assert resolve(profile.read(issue, statuses_on=True)).place == "pad"
 
 
 def test_an_idea_with_no_worktree_is_off_the_map():

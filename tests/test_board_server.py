@@ -1115,6 +1115,46 @@ def test_the_state_carries_the_kanban_beside_the_board(monkeypatch, tmp_path):
     assert [c["number"] for c in state["kanban"]["columns"][1]["cards"]] == [1]
 
 
+def test_after_a_merge_the_board_fetches_before_it_reads_git_so_an_in_main_issue_is_on_the_launch_pad(monkeypatch, tmp_path):
+    """The git signal reads the local refs: right after a merge done elsewhere they still say #5 waits on dev. The strips fetch the two
+    branches first (quietly; offline, the local refs are read), so the merged issue is on the Launch Pad, not back in Caravan Depot."""
+    monkeypatch.setenv("SAANI_HOME", str(tmp_path / "home"))
+    merged = listed(5, REVIEW, labels=["in-main"])
+    listing = {"board": [merged], "open": [merged], "closed": []}
+    calls, fetched = [], []
+
+    def fake_run(*args, **kw):
+        calls.append(args[:2])
+        if args[:2] == ("git", "fetch"):
+            assert "main" in args and "dev" in args
+            fetched.append(True)
+            return ""
+        if args[:2] == ("git", "log") and "origin/main..origin/dev" in args:
+            return "" if fetched else "Cart: round the total (refs #5)"
+        return "[]" if args[0] == "gh" else ""
+    monkeypatch.setattr(fp, "run", fake_run)
+    monkeypatch.setattr(fp, "cached", lambda key, seconds, fn: listing if key == "issues" else fn())
+    for name, value in (("tasks", []), ("agents", []), ("landing", None)):
+        monkeypatch.setattr(fp, name, lambda value=value: value)
+    monkeypatch.setattr(fp, "tests", lambda: {"runs": [], "tier1": []})
+    state = fp.state()
+    assert calls.index(("git", "fetch")) < calls.index(("git", "log"))
+    places = {c["id"]: [x["number"] for x in c["cards"]] for c in state["kanban"]["columns"]}
+    assert places["pad"] == [5] and places["depot"] == []
+    # offline: the fetch fails, the stale local refs are read, and the issue is only probable in the Depot (its label contradicts)
+    fetched.clear()
+    monkeypatch.setattr(fp, "fetch_branches", lambda: None)
+    card = next(c for col in fp.state()["kanban"]["columns"] for c in col["cards"])
+    assert (card["place"], card["confidence"], card["contradict"]) == ("depot", "probable", ["labels"])
+
+
+def test_a_failing_fetch_is_quiet(monkeypatch):
+    def boom(*a, **k):
+        raise fp.subprocess.TimeoutExpired("git", 30)
+    monkeypatch.setattr(fp, "run", boom)
+    assert fp.fetch_branches() is None
+
+
 def test_the_page_draws_the_kanban_with_a_pinned_row_sections_and_badges():
     page = fp.page()
     assert 'id="pinned"' in page and "function drawPinned()" in page and "function sectionBody(c,hits)" in page

@@ -455,9 +455,11 @@ def relabel_issues(run, number, pr):
         # where the merge takes it: the Citadel (closed, no deploy) or the Launch Pad; the labels are that place's arrival (saani/profile.py)
         target = "citadel" if n in closes and not c.deploy_command else "pad"
         add, remove = profile.arrival(target)
-        changes = [x for k in remove if c.labels[k] in have for x in ("--remove-label", c.labels[k])]
+        gone = [c.labels[k] for k in remove if c.labels[k] in have]
+        changes = [x for label in gone for x in ("--remove-label", label)]
         changes += ["--add-label", c.labels[add]] if add else []
-        print(f"#{n}: {dev} removed (closed by the merge, nothing to deploy)" if target == "citadel" else f"#{n}: {dev} -> {main}")
+        print(f"#{n}: {', '.join(gone)} removed (closed by the merge, nothing to deploy)" if target == "citadel"
+              else f"#{n}: {', '.join(gone)} -> {main}")
         try:
             run.write("gh", "issue", "edit", str(n), "--repo", c.repo, *changes)
         except SystemExit as e:

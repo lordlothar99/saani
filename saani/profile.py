@@ -25,6 +25,7 @@ from . import config
 from . import status as issue_status
 
 ANY = None
+LIVE_DAYS = 7                               # the Citadel shows the issues closed in the last days (the board fetches no older ones)
 
 # id, name, stage: the places that hold issues, in the map's flow order (the map's ZONES, the kanban's columns; the Hollow holds none)
 PLACES = (
@@ -102,10 +103,12 @@ PROFILE = {
               "pr": ("carried",)},
     "pad": {"state": {"default": ("open",), "deploy": ("open", "completed")}, "worktree": QUIET, "checks": ("no",), "status": STARTED + ("done",),
             "git": ("production",), "labels": ("in_main",), "deploy": ("to_deploy",)},
-    "archive": {"state": ("open",), "worktree": QUIET, "checks": ("no",), "status": STARTED, "git": ("production",), "labels": ("in_main",),
+    "archive": {"state": ("open",), "worktree": QUIET, "checks": ("no",), "status": STARTED + ("done",), "git": ("production",), "labels": ("in_main",),
                 "deploy": ("to_close",)},
     "outpost": {"state": ("open",), "worktree": QUIET, "checks": ("released",)},
-    "citadel": {"state": ("completed", "not_planned"), "worktree": QUIET, "status": ("done", "closed", "none"), "labels": ("none",)},
+    # the Citadel leaves the status to ANY: the closed state already says it is done, and a status left In review on a closed issue must
+    # not send it to the Launch Pad, which `saani deploy` would never empty
+    "citadel": {"state": ("completed", "not_planned"), "worktree": QUIET, "labels": ("none",)},
 }
 # what moves an issue on, and what else to know, per place ({int}, {in_main}...: the project's names)
 NEXT = {
@@ -126,7 +129,7 @@ NOTE = {
     "proving": "Tests running win over every other signal.",
     "tower": "The beacon is that pull request's CI: green, red, or yellow while it runs. Without an open pull request this place is empty.",
     "outpost": "The live checks of a released milestone win over the issue's labels and status. Before the release the issue stays in its normal place.",
-    "citadel": "Closed in the last 7 days; the done issues of closed milestones are left out.",
+    "citadel": f"Closed in the last {LIVE_DAYS} days; the done issues of closed milestones are left out.",
 }
 # the stage labels in the order an issue gets them; `arrival` reads the profile of the place an issue reaches
 STAGE_LABELS = ("in_dev", "in_main")
