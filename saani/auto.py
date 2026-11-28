@@ -3,6 +3,7 @@ how many may run side by side, and why each of the others is left. A script, no 
 reading of GitHub, git and the machine is in `pick`. Standard library only.
 """
 import ctypes
+import dataclasses
 import datetime
 import json
 import math
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from . import config, core, glance, queue, status
+from . import config, core, glance, profile, queue, status
 
 MACHINE_PARALLEL = 2      # the most a machine-sized run (`[auto] parallel = 0`, the default) keeps in flight; a fixed n goes up to config.MAX_PARALLEL
 GB_PER_ISSUE = 4          # the free memory below which a run drops to 1 issue; each running issue gives this much back
@@ -136,11 +137,13 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
     """Splits the open `issues` ([{number, title, labels, milestone, body, type}]) into those a run may take now and those it leaves.
     `statuses`: the repo's GitHub issue statuses (saani/status.py): every ready issue is taken except those in Backlog (no status, Todo and the
     others are eligible; also with `only`); None (the repo has none, or they are off): no status filter.
+    An issue whose place (saani/profile.py) is on dev or main, or that a signal says is there, is left (`already on dev`, `already on main`).
     `started`: issue numbers with a worktree folder; `branched`: with a worker branch only; `only`: take just these (set before the overlap pass); `running`: {issue number: [paths its worktree changed]}.
     Returns (eligible, skipped): eligible [{number, title, milestone, type, flags, decision}] (`decision`: the issue's latest `Decision`, #102) in the run's order, skipped [{number, reason}]."""
     labels = labels or cfg().labels
     types = cfg().types if types is None else types
     owner_labels = {labels["answer"], labels["act"], labels["idea"]}
+    here = dataclasses.replace(cfg(), labels=labels)
     open_numbers = {i["number"] for i in issues}
     eligible, skipped, named = [], [], {}
     for i in sorted(issues, key=order_key):
@@ -148,17 +151,22 @@ def choose(issues, started, running, today, labels=None, types=None, only=None, 
         g = glance.parse(i.get("body"))
         fit = (g.get("auto") or {}).get("fit")
         reason = None
-        if labels["in_dev"] in have or labels["in_main"] in have:
-            reason = "already on dev" if labels["in_dev"] in have else "already on main"
+        # the place of the issue, from the one resolver (saani/profile.py): on dev or main by its place, or by a signal that contradicts it
+        signals = profile.read(i, statuses_on=statuses is not None, statuses=statuses, c=here)
+        found = profile.resolve(signals, here)
+        step = status.step_of(i.get("status"), statuses) if statuses is not None else None
+        on = profile.landed(found, signals)
+        if on:
+            reason = f"already on {on}"
         elif n in started or n in running:
             reason = "already in a worktree"
         elif n in branched:
             reason = "has a worker branch"
         elif have & owner_labels:
             reason = "needs the owner or is an idea (label " + ", ".join(sorted(have & owner_labels)) + ")"
-        elif statuses is not None and status.step_of(i.get("status"), statuses) == "backlog":
+        elif found and found.place == "backlog" and step == "backlog":
             reason = "in Backlog"
-        elif statuses is not None and status.step_of(i.get("status"), statuses) in ("done", "closed"):
+        elif found and found.place == "backlog" and step in ("done", "closed"):
             reason = "status: " + i["status"]["name"] + " (open, but marked finished)"   # reopened with Done, or left open as Not planned
         elif fit == "no":
             reason = "Auto: no"

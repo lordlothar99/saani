@@ -1863,5 +1863,486 @@
  "tests": {
   "tier1": []
  },
- "phases": []
+ "phases": [],
+ "profile": {
+  "signals": [
+   {
+    "id": "state",
+    "title": "Issue",
+    "from": "the issue: open, or closed and why"
+   },
+   {
+    "id": "worktree",
+    "title": "Worktree and branch",
+    "from": "the worktrees and worker branches, the test queue and the Claude Code sessions on this PC"
+   },
+   {
+    "id": "checks",
+    "title": "Live checks",
+    "from": "the issue's title and milestone, and the other issues of that milestone"
+   },
+   {
+    "id": "need",
+    "title": "Waits for you",
+    "from": "the labels `help wanted` and `owner-action`"
+   },
+   {
+    "id": "status",
+    "title": "GitHub status",
+    "from": "the issue's GitHub status and its category (not read on a repo without statuses)"
+   },
+   {
+    "id": "git",
+    "title": "Git",
+    "from": "the commits `refs #n` on `dev` that `main` does not have yet"
+   },
+   {
+    "id": "labels",
+    "title": "Labels",
+    "from": "the labels `in-dev` and `in-main`"
+   },
+   {
+    "id": "pr",
+    "title": "Release pull request",
+    "from": "the open `dev` -> `main` pull request (its commits and description)"
+   },
+   {
+    "id": "deploy",
+    "title": "Deploy",
+    "from": "`[deploy] paths` and `[deploy] command`"
+   },
+   {
+    "id": "milestone",
+    "title": "Milestone",
+    "from": "the issue's milestone"
+   },
+   {
+    "id": "log",
+    "title": "Saani's log",
+    "from": "the structured log of the stage changes (#128): not read yet"
+   }
+  ],
+  "statuses": true,
+  "places": [
+   {
+    "id": "backlog",
+    "name": "Wayfarers' Tents",
+    "stage": "Backlog",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "Waits for you",
+      "neither `help wanted` nor `owner-action`"
+     ],
+     [
+      "GitHub status",
+      "no status, Backlog, Done or Not planned or Duplicate"
+     ],
+     [
+      "Git",
+      "no commit `refs #n` waiting on `dev`"
+     ],
+     [
+      "Labels",
+      "neither `in-dev` nor `in-main`"
+     ]
+    ],
+    "note": "",
+    "next": "You set its status to Todo (or, without statuses, give it a milestone): it moves to The Granary.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "todo",
+    "name": "The Granary",
+    "stage": "Todo",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "Waits for you",
+      "neither `help wanted` nor `owner-action`"
+     ],
+     [
+      "GitHub status",
+      "Todo, In progress or In review"
+     ],
+     [
+      "Git",
+      "no commit `refs #n` waiting on `dev`"
+     ],
+     [
+      "Labels",
+      "neither `in-dev` nor `in-main`"
+     ]
+    ],
+    "note": "",
+    "next": "`saani start <n>`, or an auto run, creates its worktree and branch: it moves to The Workshops.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "you",
+    "name": "Council Rock",
+    "stage": "Waiting for you",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "Waits for you",
+      "`help wanted` (your answer) or `owner-action` (your action)"
+     ],
+     [
+      "Git",
+      "no commit `refs #n` waiting on `dev`"
+     ],
+     [
+      "Labels",
+      "neither `in-dev` nor `in-main`"
+     ]
+    ],
+    "note": "",
+    "next": "You answer and remove the label: it goes back to where its work stands (The Granary or The Workshops).",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "works",
+    "name": "The Workshops",
+    "stage": "In progress",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "a worktree with commits not landed or edits not committed, an empty worktree (just started) or a Claude session on it (no worktree)"
+     ],
+     [
+      "GitHub status",
+      "In progress, In review or no status"
+     ],
+     [
+      "Labels",
+      "neither `in-dev` nor `in-main`"
+     ]
+    ],
+    "note": "",
+    "next": "Committed and tests started (`saani test`, `saani land`): Proving Ground. Landed: Caravan Depot.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "proving",
+    "name": "Proving Ground",
+    "stage": "Testing",
+    "rows": [
+     [
+      "Worktree and branch",
+      "tests running in its worktree (`saani test`), or the final check of `saani land`"
+     ]
+    ],
+    "note": "Tests running win over every other signal.",
+    "next": "Green: The Loading Yard. A failure: back to The Workshops.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "yard",
+    "name": "The Loading Yard",
+    "stage": "Ready to land",
+    "rows": [
+     [
+      "Worktree and branch",
+      "a clean worktree whose landing tests are green for this very commit"
+     ]
+    ],
+    "note": "",
+    "next": "`saani land` merges it into `dev`: Caravan Depot. A new commit resets the tests: back to The Workshops.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "depot",
+    "name": "Caravan Depot",
+    "stage": "Integrated",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "GitHub status",
+      "In progress, In review or no status"
+     ],
+     [
+      "Git",
+      "commits `refs #n` on `dev`, not yet on `main`"
+     ],
+     [
+      "Labels",
+      "`in-dev`"
+     ],
+     [
+      "Release pull request",
+      "not carried by an open release pull request"
+     ]
+    ],
+    "note": "",
+    "next": "The release pull request `dev` -> `main` names it: The Refinery.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "tower",
+    "name": "The Refinery",
+    "stage": "Release PR",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "GitHub status",
+      "In progress, In review or no status"
+     ],
+     [
+      "Git",
+      "commits `refs #n` on `dev`, not yet on `main`"
+     ],
+     [
+      "Labels",
+      "`in-dev`"
+     ],
+     [
+      "Release pull request",
+      "carried by the open release pull request (`refs #n` or `Closes #n`)"
+     ]
+    ],
+    "note": "The beacon is that pull request's CI: green, red, or yellow while it runs. Without an open pull request this place is empty.",
+    "next": "`saani merge` merges it into `main`: the issues it `Closes` are closed, the others get `in-main`.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "pad",
+    "name": "Launch Pad",
+    "stage": "To deploy",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "GitHub status",
+      "In progress, In review, no status or Done"
+     ],
+     [
+      "Git",
+      "its commits are on `main`"
+     ],
+     [
+      "Labels",
+      "`in-main`"
+     ],
+     [
+      "Deploy",
+      "something to deploy (a commit changes a file under `[deploy] paths`, or the project sets no paths)"
+     ]
+    ],
+    "note": "",
+    "next": "`saani deploy` removes `in-main`: a closed issue moves to The Citadel.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "archive",
+    "name": "The Archive",
+    "stage": "To close",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "Live checks",
+      "not the live checks of a released milestone"
+     ],
+     [
+      "GitHub status",
+      "In progress, In review or no status"
+     ],
+     [
+      "Git",
+      "its commits are on `main`"
+     ],
+     [
+      "Labels",
+      "`in-main`"
+     ],
+     [
+      "Deploy",
+      "nothing to deploy: none of its commits changes a file under `[deploy] paths`"
+     ]
+    ],
+    "note": "",
+    "next": "You close it, citing the merge commit: it moves to The Citadel.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "outpost",
+    "name": "The Far Outpost",
+    "stage": "Live checks",
+    "rows": [
+     [
+      "Issue",
+      "open"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "Live checks",
+      "an open issue titled \"Live checks ...\" whose milestone's release is merged: every other issue of the milestone is closed or labelled `in-main`, and, with a `[deploy] command`, none is still To deploy"
+     ]
+    ],
+    "note": "The live checks of a released milestone win over the issue's labels and status. Before the release the issue stays in its normal place.",
+    "next": "You walk through the checklist on the live system and close the issue: it moves to The Citadel.",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   },
+   {
+    "id": "citadel",
+    "name": "The Citadel",
+    "stage": "Done",
+    "rows": [
+     [
+      "Issue",
+      "closed as completed or closed as not planned or as a duplicate"
+     ],
+     [
+      "Worktree and branch",
+      "none, a Claude session on it (no worktree) or an empty worktree (just started)"
+     ],
+     [
+      "GitHub status",
+      "Done, Not planned or Duplicate or no status"
+     ],
+     [
+      "Labels",
+      "neither `in-dev` nor `in-main`"
+     ]
+    ],
+    "note": "Closed in the last 7 days; the done issues of closed milestones are left out.",
+    "next": "",
+    "trust": [
+     "GitHub status",
+     "Git",
+     "Labels"
+    ]
+   }
+  ],
+  "wins": [
+   "Labelled `idea` with no worktree: not on the map at all.",
+   "First the facts, in this order, each keeping the places that fit it: the worktree and branch (tests running: Proving Ground; landing tests green: The Loading Yard; commits or edits: The Workshops), the live checks of a released milestone (The Far Outpost), the issue's state (closed: The Citadel, or Launch Pad), the labels `help wanted` and `owner-action` (Council Rock).",
+   "Then the signals in the order of trust: GitHub status, then Git, then Labels (`[pipeline]` in saani.toml). A signal that fits none of the places left is set aside: it contradicts the place, which is then probable, not sure.",
+   "Then the release pull request (The Refinery or Caravan Depot), the deploy (Launch Pad or The Archive) and, without GitHub statuses, the milestone (The Granary or the Wayfarers' Tents).",
+   "Of the places left, the first of: Proving Ground, The Loading Yard, The Far Outpost, The Citadel, The Archive, Launch Pad, The Refinery, Caravan Depot, Council Rock, The Workshops, The Granary, Wayfarers' Tents."
+  ]
+ }
 }

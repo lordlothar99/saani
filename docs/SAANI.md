@@ -188,6 +188,57 @@ old key `[tests] tier1` is still read as `landing`, with a message to rename it.
   merge and are finished, so nothing is left for the owner.
 - Every decision goes to `build/saani-ci.json`.
 
+## Where an issue is: the profile of each place
+Each place of the map that holds issues expects a value of each signal Saani reads: its profile. One table, in `saani/profile.py`,
+printed by `saani ui --profile` (`--profile json`: the words the map shows, with the project's own label and branch names); "any" where
+a signal does not matter, and a conditional cell gives both cases:
+
+| Place | Issue | Worktree and branch | Live checks | Waits for you | GitHub status | Git | Labels | Release pull request | Deploy | Milestone | Saani's log |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Wayfarers' Tents (Backlog) | open | none | not the live checks of a released milestone | neither `help wanted` nor `owner-action` | no status, Backlog, Done or Not planned or Duplicate | no commit `refs #n` waiting on the integration branch | neither `in-dev` nor `in-main` | any | any | any (a repo without statuses: no milestone) | any |
+| The Granary (Todo) | open | none | not the live checks of a released milestone | neither `help wanted` nor `owner-action` | Todo, In progress or In review | no commit `refs #n` waiting on the integration branch | neither `in-dev` nor `in-main` | any | any | any (a repo without statuses: a milestone) | any |
+| Council Rock (Waiting for you) | open | none, a Claude session on it (no worktree) or an empty worktree (just started) | not the live checks of a released milestone | `help wanted` (your answer) or `owner-action` (your action) | any | no commit `refs #n` waiting on the integration branch | neither `in-dev` nor `in-main` | any | any | any | any |
+| The Workshops (In progress) | open | a worktree with commits not landed or edits not committed, an empty worktree (just started) or a Claude session on it (no worktree) | any | any | In progress, In review or no status | any | neither `in-dev` nor `in-main` | any | any | any | any |
+| Proving Ground (Testing) | any | tests running in its worktree (`saani test`), or the final check of `saani land` | any | any | any | any | any | any | any | any | any |
+| The Loading Yard (Ready to land) | any | a clean worktree whose landing tests are green for this very commit | any | any | any | any | any | any | any | any | any |
+| Caravan Depot (Integrated) | open | none, a Claude session on it (no worktree) or an empty worktree (just started) | not the live checks of a released milestone | any | In progress, In review or no status | commits `refs #n` on the integration branch, not yet on production | `in-dev` | not carried by an open release pull request | any | any | any |
+| The Refinery (Release PR) | open | none, a Claude session on it (no worktree) or an empty worktree (just started) | not the live checks of a released milestone | any | In progress, In review or no status | commits `refs #n` on the integration branch, not yet on production | `in-dev` | carried by the open release pull request (`refs #n` or `Closes #n`) | any | any | any |
+| Launch Pad (To deploy) | open (with a `[deploy] command`: open or closed as completed) | none, a Claude session on it (no worktree) or an empty worktree (just started) | not the live checks of a released milestone | any | In progress, In review, no status or Done | its commits are on production | `in-main` | any | something to deploy (a commit changes a file under `[deploy] paths`, or the project sets no paths) | any | any |
+| The Archive (To close) | open | none, a Claude session on it (no worktree) or an empty worktree (just started) | not the live checks of a released milestone | any | In progress, In review or no status | its commits are on production | `in-main` | any | nothing to deploy: none of its commits changes a file under `[deploy] paths` | any | any |
+| The Far Outpost (Live checks) | open | none, a Claude session on it (no worktree) or an empty worktree (just started) | an open issue titled "Live checks ..." whose milestone's release is merged: every other issue of the milestone is closed or labelled `in-main`, and, with a `[deploy] command`, none is still To deploy | any | any | any | any | any | any | any | any |
+| The Citadel (Done) | closed as completed or closed as not planned or as a duplicate | none, a Claude session on it (no worktree) or an empty worktree (just started) | any | any | Done, Not planned or Duplicate or no status | any | neither `in-dev` nor `in-main` | any | any | any | any |
+
+Where each signal is read from: the issue's state and close reason; the worktrees, worker branches, test queue and Claude Code sessions
+of this PC; the issue's title and milestone (and the other issues of that milestone, for the live checks); the labels; GitHub's issue
+status and its category (not read on a repo without statuses, or with `[status] enabled = "off"`); git: the commits `refs #n` on the
+integration branch that production does not have yet (the same `git log` as the hygiene strip: the board reads only "on the integration
+branch, not yet on production", never "none" or "on production"); the open integration -> production pull request; `[deploy] paths`
+and `[deploy] command`; the milestone. Saani's log is not read yet: it comes with the structured log (#128).
+
+**One resolver** (`profile.resolve`) gives an issue's place, a confidence (`sure` when every signal read agrees with the place's profile,
+`probable` otherwise) and the signals that agree and the ones that contradict. Every reader goes through it: the board's columns
+(`column_for`), the queue of a Ready card (`queue_for`), the kanban's places (`kanban_place`: the place on the card), the map
+(`normalize()` draws the place the server gives each card, and keeps no rule of its own), `saani auto pick` (an issue whose place, or a
+signal that contradicts it, says it is on dev or main is left as `already on dev` / `already on main`; an issue in the Wayfarers' Tents
+by its Backlog, Done, Not planned or Duplicate status is left; an issue with no status is still taken), and the labels `land`, `merge` and
+`ci merged` set (the arrival at Caravan Depot, Launch Pad or, for an issue the merge closed in a project without a deploy, The Citadel).
+How it decides:
+1. an `idea` with no worktree is off the map;
+2. the facts narrow the places, in this order: the worktree and branch, the live checks of a released milestone, the issue's state, the
+   labels that wait for the owner;
+3. then the signals in the **order of trust**, then the release pull request, the deploy and (without statuses) the milestone. Each keeps
+   the places that accept its value; a signal that none of the places left accepts is set aside: it contradicts the place found;
+4. of the places left, the first of: Proving Ground, The Loading Yard, The Far Outpost, The Citadel, The Archive, Launch Pad, The
+   Refinery, Caravan Depot, Council Rock, The Workshops, The Granary, Wayfarers' Tents.
+
+**The order of trust** is the owner's choice (`[pipeline]` in saani.toml, docs/CONFIG.md): the default, decided by the owner on
+2026-11-28, is the GitHub status, then git, then the labels (the owner's latest manual change will come first once Saani logs its own
+stage changes, #128). So a status that lags behind a label wins: an open issue labelled `in-dev` whose status is Todo waits in The
+Granary, probable, its label contradicting it (and `saani auto pick` still leaves it: `already on dev`). A project that wants the labels
+to decide, as before, puts `trust = ["labels"]`. An order can also be set for one place (`[pipeline.place]`): each place is tried with
+its own order, and of the places that win under their own order, the first in the list above is the issue's place. An unknown signal or
+place is refused, naming the allowed ones.
+
 ## The map and the kanban page
 `saani ui` (aliases `saani map`, `saani board`) serves `http://127.0.0.1:<port>/` on this PC only (any other Host is refused), refreshed
 every 5 s, read-only.
@@ -205,8 +256,8 @@ every 5 s, read-only.
   stays off the map, yet an open `idea` issue of the milestone holds the release back like any open issue. Its labels (`help wanted`,
   `owner-action`) do not matter. The milestone's issues closed more than 7 days ago still count: for each milestone with an open "Live
   checks" issue the board makes one more `gh issue list` call (its closed issues, at most 100). A milestone with only its Live checks
-  issue is never released. A card is in the column of its place on the map, by the same rules (`kanban_place` follows `normalize()` of
-  map.html; the "?" tooltips and the Places and their rules popup of the map say what puts an issue in each place), and the Citadel leaves out
+  issue is never released. A card is in the column of its place on the map: the place the one resolver gives it (see "Where an issue is"
+  above; the "?" tooltips and the Places and their rules popup of the map say what puts an issue in each place), and the Citadel leaves out
   the done issues of closed milestones, as on the map. An issue the merge closed (`Closes #n`) that still carries `in-main` is not deployed yet:
   it sits on the Launch Pad until `saani deploy` removes the label, then in the Citadel, however long ago it was closed. This needs a `[deploy] command`: a project without one never runs a deploy, so a closed issue is never To deploy there, whatever its labels (it is in the Citadel, and the hygiene strip flags its `in-main`), and the closed `in-main` issues are not even fetched. One closed as not
   planned or as a duplicate stays under Not planned and duplicates, and the hygiene strip flags its `in-main`. **Waiting for you** is also a
@@ -226,7 +277,7 @@ every 5 s, read-only.
   stage Backlog (filed, not released: status Backlog or none, and Done, Not planned or Duplicate on an open issue: `saani auto pick` takes
   none of them), and **The Granary**, stage Todo (released: status Todo, or In progress / In review with nobody on it; an auto run takes
   it when it is ready). A repo without statuses (or `[status] enabled = "off"`) has the same two zones, filled as `saani status sync`
-  would set them: a milestone is Todo, none is Backlog. The server decides it per Ready card (`queue`, saani/board_server.py).
+  would set them: a milestone is Todo, none is Backlog. The server decides it per card (`place`, from the one resolver; `queue` on a Ready card).
   Between the **Proving Ground** (tests running now) and the **Caravan Depot** (on the integration branch), **The Loading Yard**, stage
   Ready to land, holds the work that only waits for `saani land`: a clean worktree, ahead of the integration branch, whose current tree has
   a green landing-tests result in the test queue (the one `saani land` reuses). A new commit changes the tree and sends it back to the
@@ -240,8 +291,9 @@ every 5 s, read-only.
   auto fit, the issue's GitHub status, the prompt and the folder to paste it in). Pan and zoom with mouse, keyboard and touch; the signs (what each shape and colour
   means) open from the "?" button in the zoom panel, which also has a **Places and their rules** button: a help popup listing every place with what
   puts an issue in it (#116). Each place's popup has its own "?" next to the title, a tooltip in plain words: the issue's state, GitHub status, labels, worktree
-  and branch, tests and pull request that must all be true, and what moves it on. Both read one table in map.html (`criteriaOf`), which follows `column_for` and
-  `queue_for` in board_server.py: a change to one is a change to the other (tests/test_map_places.py fails when a place has no entry). A Status panel shows how many agents are working and the release pull request's CI
+  and branch, tests and pull request that must all be true, its order of trust, and what moves it on. Both are the profile table the
+  resolver places the issues with (`profile` in `/api/state` and in the sample, from saani/profile.py): the map keeps no wording of its
+  own (tests/test_map_places.py fails when a place has no profile or the sample's differs). A Status panel shows how many agents are working and the release pull request's CI
   light (green passed, yellow running, red failed; click it for the PR panel).
 - While Saani does not answer, the map keeps the last data on screen, shows "Stale" (since when) and asks less often (every 10, 20, 40,
   then 60 s, back to 5 s once it answers). A hidden browser tab stops asking and pauses the animations. Switching project crosses a

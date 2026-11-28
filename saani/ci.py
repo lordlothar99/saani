@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import time
 
-from . import comments, config, core, status
+from . import comments, config, core, profile, status
 
 LOG_NAME = "saani-ci.json"
 
@@ -383,15 +383,17 @@ def drop_in_main_from_closed(run, number, pr):
     c = cfg()
     if c.deploy_command:
         return
-    main = c.labels["in_main"]
+    _, remove = profile.arrival("citadel")                  # the merge's close is the end: the Citadel's profile has no stage label
     for n in closes_named(pr):
         if n == number:
             continue
         info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels") or {}
-        if main in [x["name"] for x in info.get("labels", [])]:
-            print(f"#{n}: {main} removed (closed by the merge, nothing to deploy)")
+        have = [x["name"] for x in info.get("labels", [])]
+        gone = [c.labels[k] for k in remove if c.labels[k] in have]
+        if gone:
+            print(f"#{n}: {', '.join(gone)} removed (closed by the merge, nothing to deploy)")
             try:
-                run.write("gh", "issue", "edit", str(n), "--repo", c.repo, "--remove-label", main)
+                run.write("gh", "issue", "edit", str(n), "--repo", c.repo, *[x for label in gone for x in ("--remove-label", label)])
             except SystemExit as e:
                 print(e)
 
@@ -447,14 +449,15 @@ def relabel_issues(run, number, pr):
     failed = 0
     for n in issues_named(pr):
         info = run.json("gh", "issue", "view", str(n), "--repo", c.repo, "--json", "labels,state") or {}
-        if dev not in [x["name"] for x in info.get("labels", [])]:
+        have = [x["name"] for x in info.get("labels", [])]
+        if dev not in have:
             continue
-        if n in closes and not c.deploy_command:
-            print(f"#{n}: {dev} removed (closed by the merge, nothing to deploy)")
-            changes = ["--remove-label", dev]
-        else:
-            print(f"#{n}: {dev} -> {main}")
-            changes = ["--remove-label", dev, "--add-label", main]
+        # where the merge takes it: the Citadel (closed, no deploy) or the Launch Pad; the labels are that place's arrival (saani/profile.py)
+        target = "citadel" if n in closes and not c.deploy_command else "pad"
+        add, remove = profile.arrival(target)
+        changes = [x for k in remove if c.labels[k] in have for x in ("--remove-label", c.labels[k])]
+        changes += ["--add-label", c.labels[add]] if add else []
+        print(f"#{n}: {dev} removed (closed by the merge, nothing to deploy)" if target == "citadel" else f"#{n}: {dev} -> {main}")
         try:
             run.write("gh", "issue", "edit", str(n), "--repo", c.repo, *changes)
         except SystemExit as e:

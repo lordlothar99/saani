@@ -43,6 +43,8 @@ class Config:
     status_enabled: str = "auto"                 # GitHub's issue statuses: "auto" = used when the repo has them, "off" = labels only (saani/status.py)
     status_names: dict = dataclasses.field(default_factory=lambda: {"backlog": "Backlog", "todo": "Todo", "started": "In progress",
                                                                     "review": "In review", "done": "Done"})
+    trust: tuple = ("status", "git", "labels")  # [pipeline] trust: which signal wins when they disagree on an issue's place (saani/profile.py)
+    trust_by_place: dict = dataclasses.field(default_factory=dict)   # [pipeline] place: place -> its own order of trust
     folders: dict = dataclasses.field(default_factory=dict)     # work / deploy / auto: the folders named in the map's prompts
     session_match: str = ""                      # the map lists Claude Code sessions whose project folder name contains this
     deploy_paths: tuple = ()                     # path prefixes a served project deploys; an issue on production touching none of them is "to close"
@@ -123,6 +125,7 @@ def from_toml(data, root):
             ("worktrees", "folder"): "worktree_folder",
             ("issues", "types"): "types", ("issues", "hotfix_default_type"): "hotfix_default_type", ("issues", "labels"): "labels",
             ("status", "enabled"): "status_enabled", ("status", "names"): "status_names",
+            ("pipeline", "trust"): "trust", ("pipeline", "place"): "trust_by_place",
             ("commits", "trailers"): "trailers",
             ("tests", "landing"): "landing", ("tests", "full"): "full", ("tests", "check"): "check",
             ("tests", "timing_reports"): "timing_reports",
@@ -177,6 +180,12 @@ def from_toml(data, root):
             raise SystemExit(f"{FILE}: [status] names maps steps to status names; steps: {', '.join(Config().status_names)}"
                              + (f" (unknown: {', '.join(sorted(unknown))})" if unknown else ""))
         flat["status_names"] = {**Config().status_names, **names}
+    if "trust" in flat or "trust_by_place" in flat:
+        from . import profile                                  # the places and signals are the profile's (it reads these settings)
+        if "trust" in flat:
+            flat["trust"] = profile.check_trust(flat["trust"], "[pipeline] trust")
+        if "trust_by_place" in flat:
+            flat["trust_by_place"] = profile.check_places(flat["trust_by_place"], "[pipeline] place")
     par = flat.get("parallel", 0)
     if not isinstance(par, int) or isinstance(par, bool) or not 0 <= par <= MAX_PARALLEL:
         raise SystemExit(f"{FILE}: [auto] parallel must be a whole number from 0 to {MAX_PARALLEL}")

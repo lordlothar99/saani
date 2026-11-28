@@ -1,5 +1,7 @@
 """The map says what puts an issue in each place (#116): a "?" tooltip on every place's popup and a help popup listing them all.
-The criteria are one table in map.html (`criteriaOf`); these tests keep it complete and wired."""
+The words are the server's profile table (saani/profile.py, #123): the map reads them from the state (and the sample), with no copy of
+its own; these tests keep the table complete and wired."""
+import json
 import pathlib
 import re
 import shutil
@@ -7,7 +9,11 @@ import subprocess
 
 import pytest
 
-PAGE = (pathlib.Path(__file__).resolve().parents[1] / "saani" / "map.html").read_text(encoding="utf-8")
+from saani import config, profile
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+PAGE = (ROOT / "saani" / "map.html").read_text(encoding="utf-8")
+SAMPLE = json.loads((ROOT / "saani" / "samples" / "map-sample.json").read_text(encoding="utf-8"))
 
 
 def zone_ids():
@@ -15,27 +21,40 @@ def zone_ids():
     return re.findall(r'\{id: "(\w+)"', block)
 
 
-def criteria_ids():
-    block = PAGE.split("function criteriaOf(id) {", 1)[1].split("}[id] || {};", 1)[0]
-    return re.findall(r"^    (\w+): \{", block, re.M)
+def criteria_block():
+    return PAGE.split("function criteriaOf(id) {", 1)[1].split("\n}", 1)[0]
 
 
 def test_every_place_has_criteria():
-    assert zone_ids() and sorted(criteria_ids()) == sorted(zone_ids())
+    """Every place of the map that holds issues has a profile, in the map's flow order; the Hollow (camp) holds none."""
+    assert [z for z in zone_ids() if z != "camp"] == list(profile.IDS)
+    places = profile.describe()["places"]
+    assert [p["id"] for p in places] == list(profile.IDS) and all(p["rows"] for p in places)
+
+
+def test_the_map_keeps_no_copy_of_the_rules():
+    """criteriaOf reads the state's profile; the old hand-written rows and the old "which place wins" list are gone."""
+    block = criteria_block()
+    assert "PROFILE().places.find(x => x.id === id)" in block and "rows:" not in block.replace("rows: p.rows", "")
+    assert "const first = PROFILE().wins" in PAGE
+    for gone in ("none yet: `saani start` has not been run on it", "Its tests are running: The Proving Ground", "oldCriteriaOf"):
+        assert gone not in PAGE
 
 
 def test_a_place_without_issues_says_so_instead_of_listing_rules():
-    block = PAGE.split("function criteriaOf(id) {", 1)[1].split("}[id] || {};", 1)[0]
-    for place in ("camp",):
-        entry = re.search(r"^    %s: \{(.*?)\n(?=    \w+: \{|$)" % place, block, re.M | re.S).group(1)
-        assert "note:" in entry and "rows:" not in entry
+    assert 'if (id === "camp") return {note: CAMP_NOTE};' in criteria_block() and "No issue lives here." in PAGE
 
 
 def test_the_far_outpost_has_real_rows_and_the_board_column_maps_to_it():
-    block = PAGE.split("function criteriaOf(id) {", 1)[1].split("}[id] || {};", 1)[0]
-    entry = re.search(r"^    outpost: \{(.*?)\n(?=    \w+: \{|$)", block, re.M | re.S).group(1)
-    assert "rows:" in entry and "Live checks" in entry and "Nothing puts an issue here" not in entry
-    assert 'checks: "checks"' in PAGE.split("function normalize(d) {", 1)[1].split("\n}", 1)[0]
+    outpost = next(p for p in profile.describe()["places"] if p["id"] == "outpost")
+    assert any("Live checks" in title for title, _ in outpost["rows"]) and "Live checks" in json.dumps(outpost["rows"])
+    assert profile.COLUMN["outpost"] == "checks" and 'outpost: "checks"' in PAGE.split("const STEP_OF_PLACE", 1)[1].split("};", 1)[0]
+
+
+def test_the_sample_carries_the_profile_the_server_gives_the_invented_project():
+    """The published map reads the sample: its rules are the profile of the invented project's defaults (regenerate it when the profile
+    changes: the `profile` of the sample is `profile.describe(Config(repo="acme/webshop"), statuses_on=True)`)."""
+    assert SAMPLE["profile"] == json.loads(json.dumps(profile.describe(config.Config(repo="acme/webshop"), statuses_on=True)))
 
 
 def test_the_popups_and_the_menu_are_wired():
@@ -66,3 +85,11 @@ def test_the_map_and_every_popup_list_the_same_issues():
     assert "const cards = zoneCards(z.id).sort(" in PAGE                                       # a place's popup
     assert 'cards = zoneCards("tower").sort(' in PAGE                                          # the release PR's popup
     assert not re.search(r'DATA\.cards\.filter\(c => \(?STEP_ZONE\[c\.step\]', PAGE)
+
+
+def test_every_place_s_step_is_drawn_in_its_own_zone():
+    """The step normalize() gives a place is drawn in the zone of the same place."""
+    steps = dict(re.findall(r'(\w+): "(\w+)"', PAGE.split("const STEP_OF_PLACE = {", 1)[1].split("};", 1)[0]))
+    zones = dict(re.findall(r'(\w+): "(\w+)"', PAGE.split("const STEP_ZONE = {", 1)[1].split("};", 1)[0]))
+    assert set(steps) == set(profile.IDS) and all(zones[steps[p]] == p for p in profile.IDS)
+    assert zones["started"] == "works"

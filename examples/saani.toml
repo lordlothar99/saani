@@ -24,6 +24,13 @@ enabled = "auto"                 # GitHub's issue statuses: used when the repo h
 # The status of each step (these are the defaults; a renamed status is found by its category):
 names = { backlog = "Backlog", todo = "Todo", started = "In progress", review = "In review", done = "Done" }
 
+[pipeline]
+# When an issue's signals disagree on its place, the first of these wins (the default; ["labels"] = the labels first, as before):
+trust = ["status", "git", "labels"]
+# An order of its own for one place (backlog, todo, you, works, proving, yard, depot, tower, pad, archive, outpost, citadel):
+# [pipeline.place]
+# depot = ["labels", "git", "status"]
+
 [commits]
 trailers = ["Why", "Undo"]       # each commit on a worker's branch or the integration branch carries these lines
 

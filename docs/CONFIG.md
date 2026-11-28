@@ -16,6 +16,8 @@ setting is refused, so a typo is never silent. Commands are lists; `"{python}"` 
 | | `labels` | see below | the labels Saani reads and writes |
 | `[status]` | `enabled` | `auto` | GitHub's issue statuses (docs/SAANI.md, Issue statuses): `auto` = used when the repo has them, `off` = labels only |
 | | `names` | `{backlog = "Backlog", todo = "Todo", started = "In progress", review = "In review", done = "Done"}` | the status of each step, by name; a step whose name is not found takes the status of its category (review: the last `started` one). Other keys are refused |
+| `[pipeline]` | `trust` | `["status", "git", "labels"]` | the order of trust: when an issue's signals disagree on its place, the first of these wins (docs/SAANI.md, "Where an issue is"). A list may name only some (`["labels"]`: the labels first, as before, then status, then git); each signal once; any other name is refused with the allowed ones |
+| | `place` | `{}` | an order of trust for one place, e.g. `depot = ["labels", "git", "status"]` (under `[pipeline.place]`); the places: `backlog`, `todo`, `you`, `works`, `proving`, `yard`, `depot`, `tower`, `pad`, `archive`, `outpost`, `citadel` (an unknown one is refused with the list); the others keep `trust` |
 | `[commits]` | `trailers` | `["Why", "Undo"]` | the lines each commit on a worker's branch or the integration branch must carry |
 | `[tests]` | `landing` | `[]` | before every landing: the tests a change can affect (empty: no tests at landing). The old name `tier1` is still read, with a message to rename it; both at once are refused |
 | | `full` | `[]` | everything: before a release, and the PC's CI |

@@ -407,11 +407,14 @@ def test_one_board_shows_the_listed_projects_and_the_selector_picks_one(monkeypa
 
 
 def test_a_ready_issue_with_no_agent_waits_in_the_tents_or_the_granary_not_the_workshops():
-    """the map page puts a Ready card in the Wayfarers' Tents (queue backlog) or the Granary (queue todo, also when it has none) until an
-    agent works on it, then in the Workshops."""
+    """A Ready card waits in the Wayfarers' Tents or the Granary until an agent works on it, then it is in the Workshops (still in the Ready
+    column: no worktree yet). The server's resolver says so (`place`); the map draws the place it gets, with no rule of its own (#123)."""
+    session = {"branch": "task/2-x", "folder": "C:/x", "focus": None}
+    board = {c["id"]: c for c in fp.build_board([listed(1, TODO), listed(2, TODO), listed(3, BACKLOG)], [], set(), [session], [])}
+    assert {c["number"]: c["place"] for c in board["ready"]["cards"]} == {1: "todo", 2: "works", 3: "backlog"}
     source = fp.MAP_FILE.read_text(encoding="utf-8")
-    assert 'col.id === "ready" && (c.agents || []).length ? "started"' in source and 'ready: "todo"' in source
-    assert 'col.id === "ready" && c.queue === "backlog" ? "backlog"' in source
+    assert 'step: c.place === "works" && col.id !== "building" ? "started" : STEP_OF_PLACE[c.place]' in source
+    assert "c.queue" not in source.split("function normalize(d) {", 1)[1].split("\n}", 1)[0]
 
 
 def test_the_sample_shows_every_zone_and_keeps_out_private_text():
@@ -985,12 +988,18 @@ def test_landing_green_reads_the_queue_result_of_the_worktree_tree(monkeypatch, 
 
 def test_dev_and_production_have_their_own_places_and_prompts():
     on_dev = listed(1, REVIEW, labels=["in-dev"])
-    stale = listed(2, TODO, labels=["in-dev"])                                  # the status lags behind the label: the place on dev wins
+    # the status lags behind the label: the status is trusted before the labels by default (#123, the owner's decision of 2026-11-28),
+    # so the issue waits in the Granary, probable (its label contradicts it); a project that trusts the labels first keeps it on dev
+    stale = listed(2, TODO, labels=["in-dev"])
     to_deploy, to_close = listed(3, REVIEW, labels=["in-main"]), listed(4, REVIEW, labels=["in-main"])
     board = fp.build_board([on_dev, stale, to_deploy, to_close], [], set(), [], [], None, closing={4})
     built = fp.build_kanban(board)
     cols = {c["id"]: c for c in built["columns"]}
-    assert [c["number"] for c in cols["depot"]["cards"]] == [1, 2] and [c["number"] for c in cols["pad"]["cards"]] == [3]
+    assert [c["number"] for c in cols["depot"]["cards"]] == [1] and [c["number"] for c in cols["pad"]["cards"]] == [3]
+    assert [(c["number"], c["confidence"], c["contradict"]) for c in cols["todo"]["cards"]] == [(2, "probable", ["labels"])]
+    fp.cfg().trust = ("labels", "status", "git")
+    labels_first = {c["id"]: c for c in fp.build_kanban(fp.build_board([on_dev, stale], [], set(), [], []))["columns"]}
+    assert [(c["number"], c["confidence"]) for c in labels_first["depot"]["cards"]] == [(1, "sure"), (2, "probable")]
     assert [c["number"] for c in cols["archive"]["cards"]] == [4]
     assert all(cols[p]["prompt"] for p in ("depot", "pad", "archive"))          # one prompt per place, as the Merged / To deploy / To close columns had
     assert not cols["tower"]["prompt"] and cols["tower"]["pr"] is None

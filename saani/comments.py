@@ -10,7 +10,7 @@ import json
 import re
 import subprocess
 
-from . import config, status
+from . import config, profile, status
 
 # kind: (heading, label key to add, label key to remove)
 KINDS = {
@@ -19,12 +19,15 @@ KINDS = {
     "blocked": ("### ⛔ Blocked", None, None),
     "question": ("### ❓ Question", "answer", None),
     "progress": ("### ⚙ Progress", None, None),
-    "on-dev": ("### ✅ On dev", "in_dev", None),
+    "on-dev": ("### ✅ On dev", None, None),
     "in-pr": ("### 📦 In PR", None, None),
-    "on-main": ("### 🚀 On main", "in_main", "in_dev"),
+    "on-main": ("### 🚀 On main", None, None),
     "deployed": ("### ✔ Deployed", None, None),
     "linked": ("### 🔗 Linked", None, None),
 }
+# kind: the place a comment of that kind says the issue reached; its label change is that place's arrival (saani/profile.py): On dev ->
+# Caravan Depot (in-dev added), On main -> Launch Pad (in-main added, in-dev removed)
+ARRIVES = {"on-dev": "depot", "on-main": "pad"}
 
 # kind: the GitHub issue status step it moves the issue to (saani/status.py), only forward; the others leave the status alone.
 # Deploy needs none: the merge of the release pull request closes the issue (`Closes #n`), which sets Done.
@@ -50,10 +53,15 @@ def render(kind, fields=None, text=""):
 
 
 def label_changes(kind):
-    """(label to add or None, label to remove or None) for the kind, named as the project's `[issues] labels` has them."""
-    _, add, remove = KINDS[kind]
+    """(label to add or None, [labels to remove]) for the kind, named as the project's `[issues] labels` has them: the arrival at the place
+    the kind reports (ARRIVES), else the kind's own label."""
     labels = cfg().labels
-    return (labels.get(add) if add else None), (labels.get(remove) if remove else None)
+    if kind in ARRIVES:
+        add, remove = profile.arrival(ARRIVES[kind])
+    else:
+        _, add, one = KINDS[kind]
+        remove = [one] if one else []
+    return (labels.get(add) if add else None), [labels.get(k) for k in remove]
 
 
 def parse_fields(pairs):
@@ -139,8 +147,8 @@ def apply_labels(number, kind, io=None):
     add, remove = label_changes(kind)
     if add or remove:
         cmd = ["gh", "issue", "edit", str(number), "--repo", cfg().repo]
-        if remove:
-            cmd += ["--remove-label", remove]
+        for label in remove:
+            cmd += ["--remove-label", label]
         if add:
             cmd += ["--add-label", add]
         (io or Direct()).write(*cmd)

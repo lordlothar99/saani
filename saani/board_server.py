@@ -4,10 +4,12 @@ nothing); pure functions first (tests/test_board_server.py).
   saani ui                     serve http://127.0.0.1:<port>/ (this PC only), refreshed every 5 s: / is the isometric map (/map, and the old /board, open it too), /kanban the kanban page
   saani ui --open              the same, and open the map in the browser
   saani ui --json              print the state once and exit
+  saani ui --profile [json]    print the profile of each place (saani/profile.py) and this project's order of trust, and exit
   saani map / board ...        the same as saani ui (aliases)
 
 The status page answers four questions, in plain words:
-1. What waits for me, what is being done, what is ready to ship? One card per issue (column_for): Waiting for you (the `answer` label:
+1. What waits for me, what is being done, what is ready to ship? One card per issue, in the column of the place the one resolver gives it
+   (column_for, saani/profile.py): Waiting for you (the `answer` label:
    your answer; the `act` label: your action), Ready (open, nothing blocks it, nobody on it yet), Building (a worktree with work in it), Testing (tests
    running in its worktree, or the final check of `saani land`), Merged on the integration branch (`in_dev`), To deploy (`in_main`),
    Live checks (the open "Live checks ..." issue of a milestone whose release is merged), Deployed (closed in the last LIVE_DAYS days, folded). Issues labelled idea stay off. Each card gives a prompt to paste to Claude Code
@@ -42,7 +44,7 @@ import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import config, core, glance, progress, queue
+from . import config, core, glance, profile, progress, queue
 from . import status as issue_status
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -287,10 +289,7 @@ def need_of(labels):
     return None
 
 
-def not_planned(issue):
-    """True for an issue closed as not planned or as a duplicate (its state reason, or its GitHub status category)."""
-    return (issue.get("state_reason") or "").upper() in ("NOT_PLANNED", "DUPLICATE") or \
-        ((issue.get("status") or {}).get("category") in ("not_planned", "duplicate"))
+not_planned = profile.not_planned          # closed as not planned or as a duplicate (its state reason, or its GitHub status category)
 
 
 def is_live_checks(issue):
@@ -320,32 +319,23 @@ def released_milestones(issues):
     return seen - held
 
 
-def column_for(issue, worktree=None, testing=(), closing=(), checks=()):
-    """The status page column of an issue (see the module's docstring), or None when it stays off the map. `checks`: the milestones whose
-    release is merged (`released_milestones`): their open "Live checks" issue is in the Live checks column (#120)."""
-    lab = cfg().labels
-    labels = set(issue.get("labels") or [])
-    if lab.get("idea", "idea") in labels and not worktree:
-        return None
-    if issue["number"] in testing:
-        return "testing"
-    if worktree and worktree.get("green") and worktree.get("ahead") and not worktree.get("dirty"):
-        return "tested"
-    if worktree and (worktree.get("ahead") or worktree.get("dirty")):
-        return "building"
-    if issue.get("state", "OPEN") == "OPEN" and is_live_checks(issue) and issue["milestone"] in checks:
-        return "checks"
-    if issue.get("state") == "CLOSED":
-        # the merge closed it; until the deploy removes in-main it is not live yet. A project without `[deploy] command` never runs a deploy,
-        # so nothing would remove the label: there a closed issue is never To deploy, whatever its labels (#115)
-        return "main" if cfg().deploy_command and lab.get("in_main", "in-main") in labels and not not_planned(issue) else "live"
-    if lab.get("in_main", "in-main") in labels:
-        return "close" if issue["number"] in closing else "main"
-    if lab.get("in_dev", "in-dev") in labels:
-        return "dev"
-    if need_of(labels):
-        return "you"
-    return "building" if worktree else "ready"
+def place_of(issue, worktree=None, testing=(), closing=(), checks=(), carried=(), landed=(), session=False, statuses_on=None):
+    """(signals, Result) of an issue: its place from the one resolver (saani/profile.py), with what the board has read. `checks`: the
+    milestones whose release is merged (`released_milestones`, #120); `carried`: the issues the release pull request names; `landed`: the
+    issues commits `refs #n` name between production and the integration branch (`landed_refs`); `session`: a Claude session works on it;
+    `statuses_on`: the repo has GitHub statuses (None: the issue's own status says). The Result is None for an idea with no worktree."""
+    n = issue["number"]
+    signals = profile.read(issue, worktree=worktree, testing=n in testing, session=session,
+                           checks=issue.get("state", "OPEN") == "OPEN" and is_live_checks(issue) and issue.get("milestone") in checks,
+                           closing=n in closing, carried=n in carried, git="integration" if n in landed else None, statuses_on=statuses_on)
+    return signals, profile.resolve(signals)
+
+
+def column_for(issue, worktree=None, testing=(), closing=(), checks=(), **more):
+    """The status page column of an issue (see the module's docstring), or None when it stays off the map: the column of its place
+    (profile.column_of). A closed issue still labelled in-main is To deploy only with a `[deploy] command` (#115): its profile says so."""
+    signals, result = place_of(issue, worktree, testing, closing, checks, **more)
+    return profile.column_of(result, signals)
 
 
 def prompt_for(number, column, need=None):
@@ -475,16 +465,16 @@ def queue_for(issue, statuses_on):
     """Where a Ready card waits on the map: `backlog` (the Wayfarers' Tents: filed, not released) or `todo` (the Granary: released, an auto run
     takes it when it is ready). With statuses, by the issue's GitHub status: Todo, and In progress / In review with nobody working on it, are
     `todo`; Backlog, no status, and Done, Not planned or Duplicate on an open issue are `backlog` (`saani auto pick` takes none of those).
-    Without statuses, as `saani status sync` would set them: a milestone is `todo`, none is `backlog`."""
-    if statuses_on:
-        return "todo" if issue_status.step_of(issue.get("status")) in ("todo", "started", "review") else "backlog"
-    return "todo" if issue.get("milestone") else "backlog"
+    Without statuses, as `saani status sync` would set them: a milestone is `todo`, none is `backlog`. The resolver decides, among these
+    two places (saani/profile.py)."""
+    signals = {**profile.read(issue, statuses_on=bool(statuses_on)), "idea": False}
+    return profile.resolve(signals, among=("todo", "backlog")).place
 
 
 # ---------------------------------------------------------------- the kanban page: one column per place of the map (#118)
 
 # The owner, 2026-11-27: the kanban shows the map's places, in the map's flow order and with its names (the Hollow never
-# holds issues: no column). A card is in the column of its place on the map: `kanban_place` is `normalize()` of map.html.
+# holds issues: no column). A card is in the column of its place on the map: the place the resolver gave it (saani/profile.py).
 KANBAN_COLUMNS = [
     ("backlog", "Wayfarers' Tents", "Backlog", "Filed, not released: status Backlog or none. `saani auto pick` skips it: set its Type and milestone, then move it to Todo when a run may take it."),
     ("todo", "The Granary", "Todo", "Released: status Todo, nobody on it yet. An auto run takes it when it is ready; a badge says why it would not (Auto no, blocked, needs you)."),
@@ -499,19 +489,12 @@ KANBAN_COLUMNS = [
     ("outpost", "The Far Outpost", "Live checks", "The checklist of the live system (an open issue titled \"Live checks ...\") of a milestone whose release is merged: every other issue of it is closed or on production, and none waits for the deploy. Close it when you have checked the live system."),
     ("citadel", "The Citadel", "Done", f"Closed in the last {LIVE_DAYS} days: deployed, closed after merge, or not planned. The done issues of closed milestones are left out, as on the map. Folded by default."),
 ]
-KANBAN_PLACE_OF = {"you": "you", "building": "works", "testing": "proving", "tested": "yard", "dev": "depot", "main": "pad", "close": "archive",
-                   "checks": "outpost", "live": "citadel"}                                                        # board column -> place (the map's `normalize`)
 KANBAN_PROMPT_OF = {"depot": "dev", "pad": "main", "archive": "close"}                         # place -> the column prompt it uses
 
 
-def kanban_place(card, col, carried=()):
-    """The place of a card that sits in board column `col`, as the map puts it: in the release pull request -> the Refinery; a Ready card is
-    in the Workshops when a session works on it, else in the Wayfarers' Tents (its `queue` says backlog) or the Granary."""
-    if card["number"] in carried:
-        return "tower"
-    if col == "ready":
-        return "works" if card.get("agents") else "backlog" if card.get("queue") == "backlog" else "todo"
-    return KANBAN_PLACE_OF.get(col, "todo")
+def kanban_place(card):
+    """The place of a card: the one the resolver gave it in `build_board` (`place`), the same the map draws it at."""
+    return card["place"]
 
 
 def kanban_why(card):
@@ -537,12 +520,11 @@ def build_kanban(board, landing=None, closed_milestones=()):
     those, as the map does. Each card is the board's, plus `section` (the Citadel's not planned and duplicates) and `badges` (testing,
     landing, and for Backlog and Todo the reasons a run would not take it). The Refinery column carries the release pull request (`pr`)."""
     pr = next((c.get("pr") for c in board if c["id"] == "dev"), None)
-    carried = set((pr or {}).get("inside") or [])
     left_out = set(closed_milestones or ())
     cols, pinned = {key: [] for key, _, _, _ in KANBAN_COLUMNS}, {}
     for column in board:
         for card in column["cards"]:
-            place = kanban_place(card, column["id"], carried)
+            place = kanban_place(card)
             if place == "citadel" and card.get("milestone") in left_out:
                 continue
             badges = kanban_why(card) if place in ("backlog", "todo") else []
@@ -574,9 +556,11 @@ def build_kanban(board, landing=None, closed_milestones=()):
     return {"columns": out, "pinned": sorted(pinned.values(), key=order)}
 
 
-def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=(), settled=()):
-    """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt.
-    `settled`: closed issues that are not placed, only counted for the release of their milestone (see `released_milestones`)."""
+def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=(), settled=(), landed=()):
+    """Columns of cards: each issue once, with its worktree, its agents, its test runs, what it needs from the owner and the prompt, and
+    its place from the resolver (`place`, `confidence`, `agree`, `contradict`: saani/profile.py). `settled`: closed issues that are not
+    placed, only counted for the release of their milestone (see `released_milestones`); `landed`: the issues commits `refs #n` name
+    between production and the integration branch (the git signal)."""
     by_number = {}
     for i in issues:
         by_number.setdefault(i["number"], i)
@@ -591,24 +575,27 @@ def build_board(issues, worktrees, testing, sessions, runs, pr=None, closing=(),
             crew.setdefault(n, []).append(s)
     columns = {key: [] for key, _, _ in COLUMNS}
     statuses_on = has_statuses(issues)
-    landed = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
-    open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not landed & set(i.get("labels") or [])}
+    on_dev = {cfg().labels["in_dev"], cfg().labels["in_main"]}      # a blocker that reached dev no longer blocks: its code is there
+    open_numbers = {n for n, i in by_number.items() if i.get("state", "OPEN") == "OPEN" and not on_dev & set(i.get("labels") or [])}
     released = released_milestones(list(by_number.values()) + [i for i in settled if i["number"] not in by_number])
+    carried = {g["issue"] for g in (pr or {}).get("contents", []) if g.get("issue")}
     for n, issue in by_number.items():
         w = trees.get(n)
-        col = column_for(issue, w, testing, closing, released)
+        signals, found = place_of(issue, w, testing, closing, released, carried, landed, bool(crew.get(n)), statuses_on)
+        col = profile.column_of(found, signals)
         if not col:
             continue
         need = need_of(issue.get("labels"))
         columns[col].append({**issue, **lifecycle(issue, open_numbers), "worktree": w, "agents": crew.get(n, []), "need": need,
                              **({"queue": queue_for(issue, statuses_on)} if col in ("ready", "you") else {}),
                              "prompt": prompt_for(n, col, need),
-                             "runs": [r for r in runs if w and r.get("checkout") == w["folder"]]})
+                             "runs": [r for r in runs if w and r.get("checkout") == w["folder"]],
+                             "place": found.place, "confidence": found.confidence, "agree": list(found.agree),
+                             "contradict": list(found.contradict)})
     order = lambda c: (milestone_key(c.get("milestone")), c["number"])
-    carried = {g["issue"] for g in (pr or {}).get("contents", []) if g.get("issue")}
     return [{"id": key, "title": title, "hint": hint, "cards": sorted(columns[key], key=order),
              "prompt": column_prompt(key, [c["number"] for c in columns[key]], pr),
-             "pr": {**pr, "inside": sorted(c["number"] for c in columns[key] if c["number"] in carried)} if key == "dev" and pr else None}
+             "pr": {**pr, "inside": sorted(c["number"] for c in columns[key] if c["place"] == "tower")} if key == "dev" and pr else None}
             for key, title, hint in COLUMNS]
 
 
@@ -1068,14 +1055,17 @@ def state():
     pr = safe(lambda: cached("pr", 30, lambda: pull_request(titles)), default={"open": None})
     def strips_of():
         rows = milestone_rows()                                              # one fetch for the strip and the closed ones
+        landed = landed_refs()                                               # the hygiene strip and the git signal of each place
         return {"milestones": milestones(rows, iss.get("open", [])), "closed_milestones": closed_milestones(rows),
-                "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed_refs(), cfg().labels)}
-    strips = safe(lambda: cached("strips", 120, strips_of), default={"milestones": [], "closed_milestones": [], "hygiene": []})
+                "hygiene": hygiene(iss.get("open", []), iss.get("closed", []), landed, cfg().labels), "landed": sorted(landed)}
+    strips = safe(lambda: cached("strips", 120, strips_of), default={"milestones": [], "closed_milestones": [], "hygiene": [], "landed": []})
     in_main = [i["number"] for i in iss.get("open", []) if cfg().labels["in_main"] in i["labels"]]
     closing = safe(lambda: cached("closing", 300, lambda: closing_issues(in_main)), default=set())
     closing = closing if isinstance(closing, set) else set()
-    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing, iss.get("settled", []))
+    board = build_board(iss.get("board", []), trees, testing, crew, tst["runs"], (pr or {}).get("open"), closing, iss.get("settled", []),
+                        set(strips.get("landed") or []))
     return {"time": datetime.datetime.now().strftime("%H:%M:%S"), "project": safe(project_info, default={}),
+            "profile": safe(lambda: profile.describe(cfg(), has_statuses(iss.get("board", []))), default=None),
             "projects": [{"repo": c.repo, "name": c.name, "slug": slug(c.repo), "waiting": safe(lambda c=c: waiting(c), default=0)}
                          for c in projects()],
             "milestones": strips.get("milestones", []), "closed_milestones": strips.get("closed_milestones", []),
@@ -1181,6 +1171,14 @@ def already_running(port):
 def run_command(args):
     global _home
     _home = cfg()
+    if getattr(args, "profile", None):
+        if args.profile == "json":
+            print(json.dumps(profile.describe(cfg()), indent=1, ensure_ascii=False))
+        else:
+            print(profile.markdown())
+            print("\nOrder of trust here: " + profile.trust_words(tuple(cfg().trust))
+                  + "".join(f"; {profile.NAME[p]}: {profile.trust_words(o)}" for p, o in cfg().trust_by_place.items()))
+        return 0
     if args.json:
         safe(sample_resources)
         print(json.dumps(state(), indent=1))
@@ -1213,6 +1211,8 @@ def add_parsers(sub):
     p.add_argument("--port", type=int)
     p.add_argument("--open", action="store_true", help="open the map in the browser")
     p.add_argument("--json", action="store_true", help="print the state once and exit")
+    p.add_argument("--profile", nargs="?", const="markdown", choices=["markdown", "json"],
+                   help="print the profile of each place (the table of docs/SAANI.md, or json: the rules the map shows for this project) and exit")
     p.set_defaults(run=run_command)
     p = sub.add_parser("projects", help="the projects the map offers in its selector: list, add [FOLDER], remove OWNER/NAME")
     p.add_argument("what", nargs="?", choices=["list", "add", "remove"], default="list")

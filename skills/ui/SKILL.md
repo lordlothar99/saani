@@ -14,7 +14,7 @@ argument-hint: "[--port N]"
    switches project; `saani projects add <folder>` lists another one (a checkout with a saani.toml), `saani projects remove owner/name`
    takes one out. The project `saani ui` starts in is listed by itself.
 3. Say how to stop it: ask Claude, or close the session. To answer a question about the state without a browser, `saani ui --json`
-   prints it once.
+   prints it once; "why is this issue there?": `saani ui --profile` prints the profile of each place and the project's order of trust.
 
 ## Running saani
 Run `saani` with the Bash tool: the plugin's `bin/` puts it on that shell's PATH. If it is not found, run
